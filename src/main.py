@@ -3,15 +3,22 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
 import sqlite3
+import json
 
 try:
     from src.extractor import extract_booking_data
     from src.exporter import export_to_excel
-    from src.database import init_db, create_collection, get_collections, delete_collection, insert_booking, get_bookings, delete_booking
+    from src.database import (
+        init_db, create_collection, get_collections, delete_collection, 
+        insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data
+    )
 except ModuleNotFoundError:
     from extractor import extract_booking_data
     from exporter import export_to_excel
-    from database import init_db, create_collection, get_collections, delete_collection, insert_booking, get_bookings, delete_booking
+    from database import (
+        init_db, create_collection, get_collections, delete_collection, 
+        insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data
+    )
 
 # Set appearance mode and color theme
 ctk.set_appearance_mode("System")
@@ -23,6 +30,7 @@ COLUMN_TRANSLATIONS = {
         "STT": "No.",
         "Tên file PDF": "PDF Filename",
         "Booking No": "Booking No",
+        "Port of Discharging": "Port of Discharging",
         "Place of Delivery": "Place of Delivery",
         "Block": "Block",
         "T/S Port": "T/S Port",
@@ -38,7 +46,8 @@ COLUMN_TRANSLATIONS = {
         "STT": "STT",
         "Tên file PDF": "Tên file PDF",
         "Booking No": "Số Booking",
-        "Place of Delivery": "Cảng đích",
+        "Port of Discharging": "Cảng đích",
+        "Place of Delivery": "Điểm giao",
         "Block": "Block",
         "T/S Port": "Cảng chuyển tải",
         "Equipment Type": "Loại cont",
@@ -56,7 +65,7 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Auto Read PDF Booking")
-        self.geometry("1150x680")
+        self.geometry("1180x680")
 
         # Initialize SQLite DB
         init_db()
@@ -73,6 +82,7 @@ class App(ctk.CTk):
             "STT",
             "Tên file PDF",
             "Booking No",
+            "Port of Discharging",
             "Place of Delivery",
             "Block",
             "T/S Port",
@@ -199,7 +209,32 @@ class App(ctk.CTk):
         self.clear_btn.grid(row=9, column=0, padx=20, pady=5, sticky="ew")
 
         self.export_btn = ctk.CTkButton(self.sidebar_frame, text="Xuất Excel", command=self.export_excel)
-        self.export_btn.grid(row=10, column=0, padx=20, pady=(5, 20), sticky="ew")
+        self.export_btn.grid(row=10, column=0, padx=20, pady=5, sticky="ew")
+
+        # Backup & Restore buttons
+        self.backup_control_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.backup_control_frame.grid(row=11, column=0, padx=20, pady=(5, 20), sticky="ew")
+        self.backup_control_frame.grid_columnconfigure((0, 1), weight=1)
+
+        self.backup_btn = ctk.CTkButton(
+            self.backup_control_frame, 
+            text="Sao lưu", 
+            height=28, 
+            fg_color="gray", 
+            hover_color="darkgray",
+            command=self.backup_db
+        )
+        self.backup_btn.grid(row=0, column=0, padx=(0, 2), sticky="ew")
+
+        self.restore_btn = ctk.CTkButton(
+            self.backup_control_frame, 
+            text="Khôi phục", 
+            height=28, 
+            fg_color="gray", 
+            hover_color="darkgray",
+            command=self.restore_db
+        )
+        self.restore_btn.grid(row=0, column=1, padx=(2, 0), sticky="ew")
 
         # --- Main Frame ---
         self.main_frame = ctk.CTkFrame(self)
@@ -215,11 +250,24 @@ class App(ctk.CTk):
         self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
         self.search_entry.bind("<Return>", lambda e: self.perform_search())
 
+        self.search_field_menu = ctk.CTkOptionMenu(
+            self.top_action_frame,
+            values=[],
+            width=140
+        )
+        self.search_field_menu.pack(side="left", padx=5)
+
         self.search_btn = ctk.CTkButton(self.top_action_frame, text="Tìm", width=80, command=self.perform_search)
         self.search_btn.pack(side="left", padx=5)
 
+        self.refresh_btn = ctk.CTkButton(self.top_action_frame, text="Làm mới", width=90, command=self.refresh_data)
+        self.refresh_btn.pack(side="left", padx=5)
+
         self.delete_row_btn = ctk.CTkButton(self.top_action_frame, text="Xóa dòng", width=110, fg_color="#C0392B", hover_color="#E74C3C", command=self.delete_selected_row)
         self.delete_row_btn.pack(side="right", padx=5)
+
+        self.copy_btn = ctk.CTkButton(self.top_action_frame, text="Sao chép", width=90, command=self.copy_selected_row)
+        self.copy_btn.pack(side="right", padx=5)
 
         # Treeview Scrollbars & Widget
         self.tree_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -249,6 +297,7 @@ class App(ctk.CTk):
         self.tree.bind("<Double-1>", self.show_row_details)
 
         self.update_treeview_style()
+        self.update_search_fields_ui()
 
         # Load Collection & Draw checklist
         self.load_collections_to_ui()
@@ -282,22 +331,33 @@ class App(ctk.CTk):
             self.export_btn.configure(text="Export to Excel")
             self.checkbox_frame.configure(label_text="Columns")
             self.collection_label.configure(text="Collection:")
+            self.font_size_label.configure(text="Font Size:")
             self.delete_col_btn.configure(text="Delete")
+            self.backup_btn.configure(text="Backup")
+            self.restore_btn.configure(text="Restore")
             self.search_entry.configure(placeholder_text="Search data...")
             self.search_btn.configure(text="Search")
             self.delete_row_btn.configure(text="Delete Row")
+            self.copy_btn.configure(text="Copy")
+            self.refresh_btn.configure(text="Refresh")
         else:
             self.language = "vi"
             self.select_pdf_btn.configure(text="Chọn file PDF")
             self.clear_btn.configure(text="Xóa dữ liệu PDF")
             self.export_btn.configure(text="Xuất Excel")
             self.checkbox_frame.configure(label_text="Cột hiển thị / Columns")
-            self.collection_label.configure(text="Bộ sưu tập / Collection:")
+            self.collection_label.configure(text="Bộ sưu tập:")
+            self.font_size_label.configure(text="Cỡ chữ:")
             self.delete_col_btn.configure(text="Xóa")
+            self.backup_btn.configure(text="Sao lưu")
+            self.restore_btn.configure(text="Khôi phục")
             self.search_entry.configure(placeholder_text="Tìm kiếm dữ liệu...")
             self.search_btn.configure(text="Tìm")
             self.delete_row_btn.configure(text="Xóa dòng")
+            self.copy_btn.configure(text="Sao chép")
+            self.refresh_btn.configure(text="Làm mới")
         
+        self.update_search_fields_ui()
         self.draw_column_checklist()
         self.update_treeview_columns()
 
@@ -370,17 +430,76 @@ class App(ctk.CTk):
             self.active_collection_name = ""
             self.load_collections_to_ui()
 
-    def load_bookings_from_db(self, query=None):
+    def update_search_fields_ui(self):
+        if self.language == "vi":
+            self.search_fields_mapping = {
+                "Tất cả các cột": "all",
+                "Tên file PDF": "pdf_name",
+                "Số Booking": "booking_no",
+                "Cảng đích": "port_of_discharging",
+                "Điểm giao": "place_of_delivery",
+                "Block": "block_val",
+                "Cảng chuyển tải": "ts_port",
+                "Loại cont": "equipment_type",
+                "Số lượng": "qty",
+                "Bãi cập rỗng": "empty_pickup_cy",
+                "Nơi hạ bãi": "full_return_cy",
+                "Thời gian cắt máng": "cutoff_time",
+                "Số chuyến": "vessel",
+                "Ngày tàu chạy": "etd"
+            }
+        else:
+            self.search_fields_mapping = {
+                "All Columns": "all",
+                "PDF Filename": "pdf_name",
+                "Booking No": "booking_no",
+                "Port of Discharging": "port_of_discharging",
+                "Place of Delivery": "place_of_delivery",
+                "Block": "block_val",
+                "T/S Port": "ts_port",
+                "Equipment Type": "equipment_type",
+                "Q'ty": "qty",
+                "Empty Pick Up CY": "empty_pickup_cy",
+                "Full return CY": "full_return_cy",
+                "Port Cargo Cut-off": "cutoff_time",
+                "Vessel": "vessel",
+                "ETD": "etd"
+            }
+        
+        values = list(self.search_fields_mapping.keys())
+        self.search_field_menu.configure(values=values)
+        default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
+        self.search_field_menu.set(default_val)
+
+    def load_bookings_from_db(self, query=None, field=None):
+        if query is None:
+            query = self.search_entry.get().strip()
+        if field is None:
+            selected_display = self.search_field_menu.get()
+            field = self.search_fields_mapping.get(selected_display, "all")
+            
+        if not query:
+            query = None
+            field = "all"
+
         if self.active_collection_id is not None:
-            self.display_data = get_bookings(self.active_collection_id, search_query=query)
+            self.display_data = get_bookings(self.active_collection_id, search_query=query, search_field=field)
         else:
             self.display_data = []
         self.populate_treeview()
 
-    # --- Search and Row Deletions ---
+    # --- Search and Row Actions ---
     def perform_search(self):
         query = self.search_entry.get().strip()
-        self.load_bookings_from_db(query if query else None)
+        selected_display = self.search_field_menu.get()
+        field_name = self.search_fields_mapping.get(selected_display, "all")
+        self.load_bookings_from_db(query if query else None, field_name)
+
+    def refresh_data(self):
+        self.search_entry.delete(0, "end")
+        default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
+        self.search_field_menu.set(default_val)
+        self.load_bookings_from_db(query=None, field="all")
 
     def delete_selected_row(self):
         selected_items = self.tree.selection()
@@ -399,7 +518,50 @@ class App(ctk.CTk):
             db_id = int(item)
             delete_booking(db_id)
             
-        self.load_bookings_from_db(self.search_entry.get().strip() or None)
+        self.load_bookings_from_db()
+
+    def copy_selected_row(self):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn dòng cần sao chép." if self.language == "vi" else "Please select a row to copy."
+            messagebox.showwarning(title, msg)
+            return
+            
+        db_id = int(selected_items[0])
+        row_data = None
+        for row in self.display_data:
+            if row["id"] == db_id:
+                row_data = row
+                break
+                
+        if not row_data:
+            return
+            
+        selected_cols = [col for col in self.all_columns if self.column_vars[col].get()]
+        items_list = []
+        for idx, col in enumerate(selected_cols, 1):
+            display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
+            if col == "STT":
+                # Find current row index in display data
+                try:
+                    display_idx = self.display_data.index(row_data) + 1
+                    val = str(display_idx)
+                except ValueError:
+                    val = "1"
+            else:
+                val = row_data.get(col, "null")
+            items_list.append(f"{display_name}: {val}")
+            
+        formatted_str = ", ".join(items_list)
+        
+        self.clipboard_clear()
+        self.clipboard_append(formatted_str)
+        self.update()
+        
+        title = "Thành công" if self.language == "vi" else "Success"
+        msg = "Đã sao chép dòng dữ liệu vào Clipboard!" if self.language == "vi" else "Row data copied to clipboard!"
+        messagebox.showinfo(title, msg)
 
     def show_row_details(self, event):
         selected_item = self.tree.selection()
@@ -416,15 +578,20 @@ class App(ctk.CTk):
         if not row_data:
             return
             
+        popup_title = "Chi tiết Booking" if self.language == "vi" else "Booking Details"
+        popup_header = "CHI TIẾT DỮ LIỆU BOOKING" if self.language == "vi" else "BOOKING DETAILS"
+        copy_text = "Sao chép nhanh" if self.language == "vi" else "Copy Details"
+        close_text = "Đóng" if self.language == "vi" else "Close"
+
         popup = ctk.CTkToplevel(self)
-        popup.title("Chi tiết Booking / Booking Details")
+        popup.title(popup_title)
         popup.geometry("600x550")
         popup.attributes("-topmost", True)
         
         scroll_frame = ctk.CTkScrollableFrame(popup)
         scroll_frame.pack(fill="both", expand=True, padx=15, pady=15)
         
-        title_label = ctk.CTkLabel(scroll_frame, text="CHI TIẾT DỮ LIỆU BOOKING", font=ctk.CTkFont(size=16, weight="bold"))
+        title_label = ctk.CTkLabel(scroll_frame, text=popup_header, font=ctk.CTkFont(size=16, weight="bold"))
         title_label.pack(pady=(10, 15))
         
         for col in self.all_columns:
@@ -439,13 +606,85 @@ class App(ctk.CTk):
             lbl = ctk.CTkLabel(row_frame, text=f"{display_name}:", font=ctk.CTkFont(size=12, weight="bold"), width=180, anchor="w")
             lbl.pack(side="left")
             
-            val_box = ctk.CTkEntry(row_frame, height=28, font=ctk.CTkFont(size=12))
+            val_box = ctk.CTkEntry(row_frame, height=28, font=ctk.CTkFont(size=12), width=320)
             val_box.insert(0, str(val))
             val_box.configure(state="readonly")
-            val_box.pack(side="left", fill="x", expand=True)
+            val_box.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        # Actions frame in popup
+        btn_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=10)
+        
+        def copy_popup_details():
+            selected_cols = [col for col in self.all_columns if self.column_vars[col].get()]
+            items_list = []
+            for col in selected_cols:
+                display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
+                if col == "STT":
+                    try:
+                        display_idx = self.display_data.index(row_data) + 1
+                        val = str(display_idx)
+                    except ValueError:
+                        val = "1"
+                else:
+                    val = row_data.get(col, "null")
+                items_list.append(f"{display_name}: {val}")
             
-        close_btn = ctk.CTkButton(popup, text="Đóng / Close", command=popup.destroy)
-        close_btn.pack(pady=10)
+            formatted_str = ", ".join(items_list)
+            self.clipboard_clear()
+            self.clipboard_append(formatted_str)
+            self.update()
+            
+            title = "Thành công" if self.language == "vi" else "Success"
+            msg = "Đã sao chép dòng dữ liệu vào Clipboard!" if self.language == "vi" else "Row data copied to clipboard!"
+            messagebox.showinfo(title, msg, parent=popup)
+
+        popup_copy_btn = ctk.CTkButton(btn_frame, text=copy_text, command=copy_popup_details)
+        popup_copy_btn.pack(side="left", expand=True, padx=15)
+        
+        close_btn = ctk.CTkButton(btn_frame, text=close_text, command=popup.destroy)
+        close_btn.pack(side="left", expand=True, padx=15)
+
+    # --- Backup & Restore ---
+    def backup_db(self):
+        title_save = "Lưu file sao lưu" if self.language == "vi" else "Save Backup File"
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json")],
+            title=title_save
+        )
+        if save_path:
+            try:
+                data = export_backup_data()
+                with open(save_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                
+                title = "Thành công" if self.language == "vi" else "Success"
+                msg = f"Đã sao lưu dữ liệu ra file {save_path}" if self.language == "vi" else f"Data backed up successfully to {save_path}"
+                messagebox.showinfo(title, msg)
+            except Exception as e:
+                err_title = "Lỗi" if self.language == "vi" else "Error"
+                messagebox.showerror(err_title, f"An error occurred: {e}")
+
+    def restore_db(self):
+        title_open = "Chọn file sao lưu để khôi phục" if self.language == "vi" else "Select Backup File to Restore"
+        open_path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json")],
+            title=title_open
+        )
+        if open_path:
+            try:
+                with open(open_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    
+                import_backup_data(data)
+                self.load_collections_to_ui()
+                
+                title = "Thành công" if self.language == "vi" else "Success"
+                msg = "Đã khôi phục dữ liệu thành công!" if self.language == "vi" else "Data restored successfully!"
+                messagebox.showinfo(title, msg)
+            except Exception as e:
+                err_title = "Lỗi" if self.language == "vi" else "Error"
+                messagebox.showerror(err_title, f"An error occurred: {e}")
 
     # --- Treeview and Operations ---
     def draw_column_checklist(self):
@@ -566,6 +805,7 @@ class App(ctk.CTk):
                 display_row = {
                     "Tên file PDF": data.get("Tên file PDF", "null"),
                     "Booking No": data.get("Booking No", "null"),
+                    "Port of Discharging": data.get("Port of Discharging", "null"),
                     "Place of Delivery": data.get("Place of Delivery", "null"),
                     "Block": data.get("Block", "null"),
                     "T/S Port": data.get("T/S Port", "null"),
@@ -582,7 +822,7 @@ class App(ctk.CTk):
             except Exception as e:
                 print(f"Failed to process {pdf_path}: {e}")
                 
-        self.load_bookings_from_db(self.search_entry.get().strip() or None)
+        self.load_bookings_from_db()
 
     def clear_data(self):
         if self.active_collection_id is None:
@@ -599,7 +839,7 @@ class App(ctk.CTk):
             except Exception as e:
                 print(f"Error clearing collection bookings: {e}")
             self.pdf_files = []
-            self.load_bookings_from_db(self.search_entry.get().strip() or None)
+            self.load_bookings_from_db()
 
     def populate_treeview(self):
         # Clear current items

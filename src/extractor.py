@@ -10,6 +10,7 @@ def extract_booking_data(pdf_path: str) -> dict:
         "STT": "",
         "Tên file PDF": os.path.basename(pdf_path),
         "Booking No": "",
+        "Port of Discharging": "",
         "Place of Delivery": "",
         "Block": "",
         "T/S Port": "",
@@ -43,8 +44,13 @@ def extract_booking_data(pdf_path: str) -> dict:
             if booking_match:
                 result["Booking No"] = booking_match.group(1).strip()
             
-            # Extract Place of Delivery
-            deliv_match = re.search(r"Place of Delivery\s*:\s*(.*?)(?=\s+Terminal|$)", text, re.IGNORECASE)
+            # Extract Port of Discharging
+            pod_match = re.search(r"Port of Discharg(?:e|ing)?\s*:\s*(.*?)(?=\s+(?:Place\s+of\s+Delivery|Final\s+Destination|Terminal)|$)", text, re.IGNORECASE)
+            if pod_match:
+                result["Port of Discharging"] = pod_match.group(1).strip()
+
+            # Extract Place of Delivery / Final Destination
+            deliv_match = re.search(r"(?:Place of Delivery|Final Destination)\s*:\s*(.*?)(?=\s+Terminal|$)", text, re.IGNORECASE)
             if deliv_match:
                 result["Place of Delivery"] = deliv_match.group(1).strip()
             
