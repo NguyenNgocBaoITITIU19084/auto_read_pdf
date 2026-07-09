@@ -59,6 +59,7 @@ class App(ctk.CTk):
         self.extracted_data = []
         self.display_data = [] # List of dicts for Treeview and Export
         self.language = "vi"   # Default language is Vietnamese
+        self.font_size = 12    # Default font size for right data screen
 
         self.all_columns = [
             "STT",
@@ -83,7 +84,7 @@ class App(ctk.CTk):
         # --- Sidebar ---
         self.sidebar_frame = ctk.CTkFrame(self, width=280, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(3, weight=1)
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
 
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Auto Read PDF", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
@@ -99,9 +100,45 @@ class App(ctk.CTk):
         self.lang_switch.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="ew")
         self.lang_switch.set("Tiếng Việt")
 
+        # Font Size Adjuster
+        self.font_size_label = ctk.CTkLabel(self.sidebar_frame, text="Cỡ chữ / Font Size:", font=ctk.CTkFont(size=12, weight="bold"))
+        self.font_size_label.grid(row=3, column=0, padx=20, pady=(5, 2))
+        
+        self.font_control_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.font_control_frame.grid(row=4, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.font_control_frame.grid_columnconfigure((0, 2), weight=1)
+        self.font_control_frame.grid_columnconfigure(1, weight=2)
+        
+        self.font_dec_btn = ctk.CTkButton(
+            self.font_control_frame, 
+            text="-", 
+            width=36, 
+            height=28, 
+            font=ctk.CTkFont(size=16, weight="bold"),
+            command=lambda: self.change_font_size(-1)
+        )
+        self.font_dec_btn.grid(row=0, column=0, padx=2)
+        
+        self.font_val_label = ctk.CTkLabel(
+            self.font_control_frame, 
+            text=str(self.font_size), 
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        self.font_val_label.grid(row=0, column=1, padx=5)
+        
+        self.font_inc_btn = ctk.CTkButton(
+            self.font_control_frame, 
+            text="+", 
+            width=36, 
+            height=28, 
+            font=ctk.CTkFont(size=16, weight="bold"),
+            command=lambda: self.change_font_size(1)
+        )
+        self.font_inc_btn.grid(row=0, column=2, padx=2)
+
         # Column list frame
         self.checkbox_frame = ctk.CTkScrollableFrame(self.sidebar_frame, label_text="Cột hiển thị / Columns")
-        self.checkbox_frame.grid(row=3, column=0, padx=10, pady=10, sticky="nsew")
+        self.checkbox_frame.grid(row=5, column=0, padx=10, pady=10, sticky="nsew")
         self.checkbox_frame.grid_columnconfigure(0, weight=0)
         self.checkbox_frame.grid_columnconfigure(1, weight=1)
         self.checkbox_frame.grid_columnconfigure(2, weight=0)
@@ -112,10 +149,10 @@ class App(ctk.CTk):
             self.column_vars[col] = ctk.BooleanVar(value=True)
 
         self.select_pdf_btn = ctk.CTkButton(self.sidebar_frame, text="Chọn file PDF", command=self.select_pdfs)
-        self.select_pdf_btn.grid(row=4, column=0, padx=20, pady=5, sticky="ew")
+        self.select_pdf_btn.grid(row=6, column=0, padx=20, pady=5, sticky="ew")
 
         self.export_btn = ctk.CTkButton(self.sidebar_frame, text="Xuất Excel", command=self.export_excel)
-        self.export_btn.grid(row=5, column=0, padx=20, pady=(5, 20), sticky="ew")
+        self.export_btn.grid(row=7, column=0, padx=20, pady=(5, 20), sticky="ew")
 
         # --- Main Frame ---
         self.main_frame = ctk.CTkFrame(self)
@@ -124,9 +161,9 @@ class App(ctk.CTk):
         self.main_frame.grid_columnconfigure(0, weight=1)
 
         # Treeview
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("Treeview", rowheight=25)
+        self.style = ttk.Style()
+        self.style.theme_use("default")
+        self.update_treeview_style()
         
         self.tree_scroll_y = ttk.Scrollbar(self.main_frame)
         self.tree_scroll_y.pack(side="right", fill="y")
@@ -148,6 +185,16 @@ class App(ctk.CTk):
         # Initial draws
         self.draw_column_checklist()
         self.update_treeview_columns()
+
+    def change_font_size(self, delta):
+        self.font_size = max(8, min(30, self.font_size + delta))
+        self.font_val_label.configure(text=str(self.font_size))
+        self.update_treeview_style()
+
+    def update_treeview_style(self):
+        row_height = int(self.font_size * 2) + 6
+        self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height)
+        self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"))
 
     def change_language(self, val):
         if val == "English":
