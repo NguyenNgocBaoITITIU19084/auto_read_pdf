@@ -10,15 +10,19 @@ try:
     from src.exporter import export_to_excel
     from src.database import (
         init_db, create_collection, get_collections, delete_collection, 
-        insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data
+        insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
+        insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules
     )
+    from src.eport_client import search_vessels
 except ModuleNotFoundError:
     from extractor import extract_booking_data
     from exporter import export_to_excel
     from database import (
         init_db, create_collection, get_collections, delete_collection, 
-        insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data
+        insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
+        insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules
     )
+    from eport_client import search_vessels
 
 # Set appearance mode and color theme
 ctk.set_appearance_mode("System")
@@ -60,6 +64,45 @@ COLUMN_TRANSLATIONS = {
     }
 }
 
+VESSEL_COLUMN_TRANSLATIONS = {
+    "en": {
+        "STT": "No.",
+        "site_id": "Site ID",
+        "agent": "Agent",
+        "vessel_name": "Vessel Name",
+        "in_out_voyage": "Voyage",
+        "actual_berth_time": "ETA/ETB",
+        "actual_departure_time": "ETD",
+        "closing_time": "Cut-off Time",
+        "closing_time_icd": "Cut-off ICD",
+        "in_gate": "Gate",
+        "open_ts": "Open Time",
+        "reefer_open_ts": "Reefer Open",
+        "oog_open_ts": "OOG Open",
+        "haz_open_ts": "Haz Open",
+        "remarks": "Remarks",
+        "queried_at": "Queried At"
+    },
+    "vi": {
+        "STT": "STT",
+        "site_id": "Mã cảng",
+        "agent": "Đại lý",
+        "vessel_name": "Tên tàu",
+        "in_out_voyage": "Số chuyến",
+        "actual_berth_time": "Cập bến dự kiến",
+        "actual_departure_time": "Rời bến dự kiến",
+        "closing_time": "Thời gian đóng",
+        "closing_time_icd": "Đóng tại ICD",
+        "in_gate": "Cổng hạ",
+        "open_ts": "Mở cổng hạ",
+        "reefer_open_ts": "Mở cổng cont lạnh",
+        "oog_open_ts": "Mở cổng cont OOG",
+        "haz_open_ts": "Mở cổng cont nguy hiểm",
+        "remarks": "Ghi chú",
+        "queried_at": "Tra cứu lúc"
+    }
+}
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -93,6 +136,26 @@ class App(ctk.CTk):
             "Port Cargo Cut-off",
             "Vessel",
             "ETD"
+        ]
+
+        self.vessel_display_data = []
+        self.vessel_columns = [
+            "STT",
+            "site_id",
+            "agent",
+            "vessel_name",
+            "in_out_voyage",
+            "actual_berth_time",
+            "actual_departure_time",
+            "closing_time",
+            "closing_time_icd",
+            "in_gate",
+            "open_ts",
+            "reefer_open_ts",
+            "oog_open_ts",
+            "haz_open_ts",
+            "remarks",
+            "queried_at"
         ]
 
         # Config grid
@@ -202,6 +265,10 @@ class App(ctk.CTk):
         for col in self.all_columns:
             self.column_vars[col] = ctk.BooleanVar(value=True)
 
+        self.vessel_column_vars = {}
+        for col in self.vessel_columns:
+            self.vessel_column_vars[col] = ctk.BooleanVar(value=True)
+
         self.select_pdf_btn = ctk.CTkButton(self.sidebar_frame, text="Chọn file PDF", command=self.select_pdfs)
         self.select_pdf_btn.grid(row=8, column=0, padx=20, pady=5, sticky="ew")
 
@@ -239,11 +306,22 @@ class App(ctk.CTk):
         # --- Main Frame ---
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        self.main_frame.grid_rowconfigure(1, weight=1)
+        self.main_frame.grid_rowconfigure(0, weight=1)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
-        # Search Bar and Top Action Layout
-        self.top_action_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        # Tabview for layout separation
+        self.tab_view = ctk.CTkTabview(self.main_frame, command=self.on_tab_changed)
+        self.tab_view.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.tab_booking = self.tab_view.add("Booking (Danh sách Booking)")
+        self.tab_vessel = self.tab_view.add("ePort SNP (Lịch tàu)")
+
+        # Grid configuration for Booking Tab
+        self.tab_booking.grid_rowconfigure(1, weight=1)
+        self.tab_booking.grid_columnconfigure(0, weight=1)
+
+        # Search Bar and Top Action Layout inside Booking Tab
+        self.top_action_frame = ctk.CTkFrame(self.tab_booking, fg_color="transparent")
         self.top_action_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
         
         self.search_entry = ctk.CTkEntry(self.top_action_frame, placeholder_text="Tìm kiếm dữ liệu...")
@@ -269,8 +347,8 @@ class App(ctk.CTk):
         self.copy_btn = ctk.CTkButton(self.top_action_frame, text="Sao chép", width=90, command=self.copy_selected_row)
         self.copy_btn.pack(side="right", padx=5)
 
-        # Treeview Scrollbars & Widget
-        self.tree_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        # Treeview Scrollbars & Widget inside Booking Tab
+        self.tree_container = ctk.CTkFrame(self.tab_booking, fg_color="transparent")
         self.tree_container.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         
         self.tree_scroll_y = ttk.Scrollbar(self.tree_container)
@@ -296,8 +374,124 @@ class App(ctk.CTk):
         # Double click to view details
         self.tree.bind("<Double-1>", self.show_row_details)
 
+        # --- ePort SNP Tab ---
+        self.tab_vessel.grid_rowconfigure(2, weight=1)
+        self.tab_vessel.grid_columnconfigure(0, weight=1)
+
+        # Control Panel for Vessel API Lookup inside Vessel Tab (Row 0)
+        self.vessel_action_frame = ctk.CTkFrame(self.tab_vessel, fg_color="transparent")
+        self.vessel_action_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
+
+        # Port Menu Label
+        self.vessel_port_label = ctk.CTkLabel(self.vessel_action_frame, text="Cảng / Port:", font=ctk.CTkFont(size=12, weight="bold"))
+        self.vessel_port_label.pack(side="left", padx=5)
+
+        self.vessel_port_menu = ctk.CTkOptionMenu(
+            self.vessel_action_frame,
+            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
+            width=180
+        )
+        self.vessel_port_menu.pack(side="left", padx=5)
+        self.vessel_port_menu.set("Cát Lái (CTL)")
+
+        # Vessel Name Entry
+        self.vessel_name_entry = ctk.CTkEntry(self.vessel_action_frame, placeholder_text="Tên tàu / Vessel...", width=160)
+        self.vessel_name_entry.pack(side="left", padx=5)
+        self.vessel_name_entry.bind("<Return>", lambda e: self.search_eport_vessel())
+
+        # Voyage Entry
+        self.vessel_voyage_entry = ctk.CTkEntry(self.vessel_action_frame, placeholder_text="Chuyến / Voyage...", width=130)
+        self.vessel_voyage_entry.pack(side="left", padx=5)
+        self.vessel_voyage_entry.bind("<Return>", lambda e: self.search_eport_vessel())
+
+        # Action Buttons
+        self.vessel_search_btn = ctk.CTkButton(self.vessel_action_frame, text="Tra cứu", width=80, command=self.search_eport_vessel)
+        self.vessel_search_btn.pack(side="left", padx=5)
+
+        # Search Bar & Local Actions Panel inside Vessel Tab (Row 1)
+        self.vessel_search_action_frame = ctk.CTkFrame(self.tab_vessel, fg_color="transparent")
+        self.vessel_search_action_frame.grid(row=1, column=0, padx=10, pady=(5, 5), sticky="ew")
+
+        # Local search entry
+        self.vessel_search_entry = ctk.CTkEntry(self.vessel_search_action_frame, placeholder_text="Tìm kiếm lịch tàu...", width=200)
+        self.vessel_search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.vessel_search_entry.bind("<Return>", lambda e: self.perform_vessel_search())
+
+        # Local search column selector
+        self.vessel_search_field_menu = ctk.CTkOptionMenu(
+            self.vessel_search_action_frame,
+            values=[],
+            width=140
+        )
+        self.vessel_search_field_menu.pack(side="left", padx=5)
+
+        # Search button
+        self.vessel_local_search_btn = ctk.CTkButton(self.vessel_search_action_frame, text="Tìm", width=80, command=self.perform_vessel_search)
+        self.vessel_local_search_btn.pack(side="left", padx=5)
+
+        # Clear/Reset search button
+        self.vessel_local_clear_btn = ctk.CTkButton(self.vessel_search_action_frame, text="Làm mới", width=90, command=self.refresh_vessel_schedule_data)
+        self.vessel_local_clear_btn.pack(side="left", padx=5)
+
+        self.vessel_sync_btn = ctk.CTkButton(
+            self.vessel_search_action_frame, 
+            text="Cập nhật Booking", 
+            width=130, 
+            command=self.sync_eport_to_bookings,
+            fg_color="#2E86C1",
+            hover_color="#3498DB"
+        )
+        self.vessel_sync_btn.pack(side="left", padx=5)
+
+        self.vessel_copy_btn = ctk.CTkButton(
+            self.vessel_search_action_frame,
+            text="Sao chép nhanh",
+            width=110,
+            command=self.copy_selected_vessel_schedule
+        )
+        self.vessel_copy_btn.pack(side="left", padx=5)
+
+        self.vessel_delete_btn = ctk.CTkButton(
+            self.vessel_search_action_frame, 
+            text="Xóa lịch tàu", 
+            width=110, 
+            fg_color="#C0392B", 
+            hover_color="#E74C3C", 
+            command=self.delete_selected_vessel_schedule
+        )
+        self.vessel_delete_btn.pack(side="right", padx=5)
+
+        # Treeview Scrollbars & Widget inside Vessel Tab (Row 2)
+        self.vessel_tree_container = ctk.CTkFrame(self.tab_vessel, fg_color="transparent")
+        self.vessel_tree_container.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
+
+        self.vessel_tree_scroll_y = ttk.Scrollbar(self.vessel_tree_container)
+        self.vessel_tree_scroll_y.pack(side="right", fill="y")
+
+        self.vessel_tree_scroll_x = ttk.Scrollbar(self.vessel_tree_container, orient="horizontal")
+        self.vessel_tree_scroll_x.pack(side="bottom", fill="x")
+
+        self.vessel_tree = ttk.Treeview(
+            self.vessel_tree_container,
+            yscrollcommand=self.vessel_tree_scroll_y.set,
+            xscrollcommand=self.vessel_tree_scroll_x.set,
+            show="headings"
+        )
+        self.vessel_tree.pack(fill="both", expand=True)
+
+        self.vessel_tree_scroll_y.config(command=self.vessel_tree.yview)
+        self.vessel_tree_scroll_x.config(command=self.vessel_tree.xview)
+
+        # Bind double-click event to show details
+        self.vessel_tree.bind("<Double-1>", self.show_vessel_row_details)
+
+        # Setup ePort Vessel Treeview Columns
+        self.vessel_tree["columns"] = self.vessel_columns
+        self.update_vessel_treeview_columns()
+
         self.update_treeview_style()
         self.update_search_fields_ui()
+        self.update_vessel_search_fields_ui()
 
         # Load Collection & Draw checklist
         self.load_collections_to_ui()
@@ -312,14 +506,23 @@ class App(ctk.CTk):
     def update_treeview_style(self):
         row_height = int(self.font_size * 2) + 6
         mode = ctk.get_appearance_mode().lower()
+        
+        trees = []
+        if hasattr(self, "tree"):
+            trees.append(self.tree)
+        if hasattr(self, "vessel_tree"):
+            trees.append(self.vessel_tree)
+            
         if mode == "dark":
-            self.tree.tag_configure("oddrow", background="#2D3238", foreground="white")
-            self.tree.tag_configure("evenrow", background="#1F2326", foreground="white")
+            for t in trees:
+                t.tag_configure("oddrow", background="#2D3238", foreground="white")
+                t.tag_configure("evenrow", background="#1F2326", foreground="white")
             self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height, background="#1F2326", fieldbackground="#1F2326", foreground="white", gridcolor="#3F444A")
             self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#2D3238", foreground="white")
         else:
-            self.tree.tag_configure("oddrow", background="#F2F7FA", foreground="black")
-            self.tree.tag_configure("evenrow", background="#FFFFFF", foreground="black")
+            for t in trees:
+                t.tag_configure("oddrow", background="#F2F7FA", foreground="black")
+                t.tag_configure("evenrow", background="#FFFFFF", foreground="black")
             self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height, background="#FFFFFF", fieldbackground="#FFFFFF", foreground="black", gridcolor="#D3D3D3")
             self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#EAEAEA", foreground="black")
 
@@ -340,6 +543,19 @@ class App(ctk.CTk):
             self.delete_row_btn.configure(text="Delete Row")
             self.copy_btn.configure(text="Copy")
             self.refresh_btn.configure(text="Refresh")
+            
+            # ePort translations
+            self.vessel_port_label.configure(text="Port:")
+            self.vessel_name_entry.configure(placeholder_text="Vessel name...")
+            self.vessel_voyage_entry.configure(placeholder_text="Voyage...")
+            self.vessel_search_btn.configure(text="Search")
+            
+            self.vessel_search_entry.configure(placeholder_text="Search vessel schedule...")
+            self.vessel_local_search_btn.configure(text="Search")
+            self.vessel_local_clear_btn.configure(text="Refresh")
+            self.vessel_sync_btn.configure(text="Sync Bookings")
+            self.vessel_copy_btn.configure(text="Copy")
+            self.vessel_delete_btn.configure(text="Delete Schedule")
         else:
             self.language = "vi"
             self.select_pdf_btn.configure(text="Chọn file PDF")
@@ -356,10 +572,31 @@ class App(ctk.CTk):
             self.delete_row_btn.configure(text="Xóa dòng")
             self.copy_btn.configure(text="Sao chép")
             self.refresh_btn.configure(text="Làm mới")
+            
+            # ePort translations
+            self.vessel_port_label.configure(text="Cảng / Port:")
+            self.vessel_name_entry.configure(placeholder_text="Tên tàu / Vessel...")
+            self.vessel_voyage_entry.configure(placeholder_text="Chuyến / Voyage...")
+            self.vessel_search_btn.configure(text="Tra cứu")
+            
+            self.vessel_search_entry.configure(placeholder_text="Tìm kiếm lịch tàu...")
+            self.vessel_local_search_btn.configure(text="Tìm")
+            self.vessel_local_clear_btn.configure(text="Làm mới")
+            self.vessel_sync_btn.configure(text="Cập nhật Booking")
+            self.vessel_copy_btn.configure(text="Sao chép nhanh")
+            self.vessel_delete_btn.configure(text="Xóa lịch tàu")
         
         self.update_search_fields_ui()
-        self.draw_column_checklist()
+        self.update_vessel_search_fields_ui()
+        
+        current_tab = self.tab_view.get()
+        if "Booking" in current_tab:
+            self.draw_column_checklist()
+        else:
+            self.draw_vessel_column_checklist()
+            
         self.update_treeview_columns()
+        self.update_vessel_treeview_columns()
 
     # --- Collection Management ---
     def load_collections_to_ui(self, select_newest=False):
@@ -388,12 +625,14 @@ class App(ctk.CTk):
             self.active_collection_name = ""
             self.collection_menu.set("")
             self.load_bookings_from_db()
+            self.load_vessel_schedules_from_db()
 
     def set_active_collection(self, col_id, col_name):
         self.active_collection_id = col_id
         self.active_collection_name = col_name
         self.collection_menu.set(col_name)
         self.load_bookings_from_db()
+        self.load_vessel_schedules_from_db()
 
     def on_collection_changed(self, col_name):
         for col in self.collections:
@@ -401,6 +640,7 @@ class App(ctk.CTk):
                 self.active_collection_id = col["id"]
                 self.active_collection_name = col["name"]
                 self.load_bookings_from_db()
+                self.load_vessel_schedules_from_db()
                 break
 
     def prompt_create_collection(self):
@@ -470,6 +710,45 @@ class App(ctk.CTk):
         self.search_field_menu.configure(values=values)
         default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
         self.search_field_menu.set(default_val)
+
+    def update_vessel_search_fields_ui(self):
+        if self.language == "vi":
+            self.vessel_search_fields_mapping = {
+                "Tất cả các cột": "all",
+                "Mã cảng": "site_id",
+                "Đại lý": "agent",
+                "Tên tàu": "vessel_name",
+                "Số chuyến": "in_out_voyage",
+                "Cập bến dự kiến": "actual_berth_time",
+                "Rời bến dự kiến": "actual_departure_time",
+                "Thời gian đóng": "closing_time",
+                "Thời gian đóng ICD": "closing_time_icd",
+                "Cổng hạ": "in_gate",
+                "Mở cổng hạ": "open_ts",
+                "Ghi chú": "remarks",
+                "Tra cứu lúc": "queried_at"
+            }
+        else:
+            self.vessel_search_fields_mapping = {
+                "All Columns": "all",
+                "Site ID": "site_id",
+                "Agent": "agent",
+                "Vessel Name": "vessel_name",
+                "Voyage": "in_out_voyage",
+                "ETA/ETB": "actual_berth_time",
+                "ETD": "actual_departure_time",
+                "Cut-off Time": "closing_time",
+                "Cut-off ICD": "closing_time_icd",
+                "Gate": "in_gate",
+                "Open Time": "open_ts",
+                "Remarks": "remarks",
+                "Queried At": "queried_at"
+            }
+        
+        values = list(self.vessel_search_fields_mapping.keys())
+        self.vessel_search_field_menu.configure(values=values)
+        default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
+        self.vessel_search_field_menu.set(default_val)
 
     def load_bookings_from_db(self, query=None, field=None):
         if query is None:
@@ -908,6 +1187,531 @@ class App(ctk.CTk):
             except Exception as e:
                 err_title = "Lỗi" if self.language == "vi" else "Error"
                 messagebox.showerror(err_title, f"An error occurred: {e}")
+
+    # --- ePort SNP Vessel Schedule Operations ---
+
+    def update_vessel_treeview_columns(self):
+        selected_cols = [col for col in self.vessel_columns if self.vessel_column_vars[col].get()]
+        self.vessel_tree["columns"] = selected_cols
+        for col in selected_cols:
+            display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            self.vessel_tree.heading(col, text=display_name)
+            # Adjust widths for certain fields
+            if col == "STT":
+                self.vessel_tree.column(col, width=50, minwidth=40, anchor="center")
+            elif col in ["site_id", "agent"]:
+                self.vessel_tree.column(col, width=80, minwidth=60, anchor="center")
+            elif col in ["vessel_name", "in_out_voyage"]:
+                self.vessel_tree.column(col, width=160, minwidth=120, anchor="w")
+            elif col in ["actual_berth_time", "actual_departure_time", "closing_time", "closing_time_icd", "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "queried_at"]:
+                self.vessel_tree.column(col, width=150, minwidth=110, anchor="center")
+            else:
+                self.vessel_tree.column(col, width=120, minwidth=80, anchor="w")
+        self.populate_vessel_treeview()
+
+    def search_eport_vessel(self):
+        if self.active_collection_id is None:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn hoặc tạo một Bộ sưu tập trước khi tra cứu lịch tàu." if self.language == "vi" else "Please select or create a Collection before searching vessel schedules."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+
+        # Read parameters
+        port_val = self.vessel_port_menu.get()
+        # Extract CTL or GNL from Cát Lái (CTL) / Cát Lái Giang Nam (GNL)
+        site_id = "CTL"
+        if "GNL" in port_val:
+            site_id = "GNL"
+            
+        vessel_name = self.vessel_name_entry.get().strip()
+        voyage = self.vessel_voyage_entry.get().strip()
+        
+        if not vessel_name:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng nhập tên tàu để tra cứu." if self.language == "vi" else "Please enter vessel name to search."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+
+        # Show loading indicator by changing button text or status
+        orig_text = self.vessel_search_btn.cget("text")
+        loading_text = "Đang tra cứu..." if self.language == "vi" else "Searching..."
+        self.vessel_search_btn.configure(text=loading_text, state="disabled")
+        self.update()
+
+        try:
+            results = search_vessels(site_id, vessel_name, voyage)
+            if not results:
+                title = "Thông báo" if self.language == "vi" else "Information"
+                msg = "Không tìm thấy thông tin lịch tàu khớp với từ khóa tìm kiếm." if self.language == "vi" else "No matching vessel schedules found."
+                messagebox.showinfo(title, msg, parent=self)
+            else:
+                # Save to database
+                insert_vessel_schedules(self.active_collection_id, results)
+                
+                title = "Thành công" if self.language == "vi" else "Success"
+                msg = f"Đã tra cứu thành công và lưu {len(results)} dòng lịch trình tàu!" if self.language == "vi" else f"Successfully fetched and saved {len(results)} vessel schedules!"
+                messagebox.showinfo(title, msg, parent=self)
+                
+            self.refresh_vessel_schedule_data()
+        except Exception as e:
+            title = "Lỗi" if self.language == "vi" else "Error"
+            msg = f"Lỗi tra cứu ePort: {e}" if self.language == "vi" else f"ePort lookup error: {e}"
+            messagebox.showerror(title, msg, parent=self)
+        finally:
+            self.vessel_search_btn.configure(text=orig_text, state="normal")
+
+    def refresh_vessel_schedule_data(self):
+        self.vessel_search_entry.delete(0, "end")
+        default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
+        self.vessel_search_field_menu.set(default_val)
+        self.load_vessel_schedules_from_db(query=None, field="all")
+
+    def load_vessel_schedules_from_db(self, query=None, field=None):
+        if query is None:
+            query = self.vessel_search_entry.get().strip()
+        if field is None:
+            selected_display = self.vessel_search_field_menu.get()
+            field = self.vessel_search_fields_mapping.get(selected_display, "all")
+            
+        if self.active_collection_id is None:
+            self.vessel_display_data = []
+            self.populate_vessel_treeview()
+            return
+            
+        self.vessel_display_data = get_vessel_schedules(self.active_collection_id, search_query=query, search_field=field)
+        self.populate_vessel_treeview()
+
+    def perform_vessel_search(self):
+        query = self.vessel_search_entry.get().strip()
+        selected_display = self.vessel_search_field_menu.get()
+        field_name = self.vessel_search_fields_mapping.get(selected_display, "all")
+        self.load_vessel_schedules_from_db(query if query else None, field_name)
+
+    def populate_vessel_treeview(self):
+        # Clear items
+        for item in self.vessel_tree.get_children():
+            self.vessel_tree.delete(item)
+            
+        selected_cols = [col for col in self.vessel_columns if self.vessel_column_vars[col].get()]
+        
+        for idx, row_data in enumerate(self.vessel_display_data):
+            values = []
+            for col_idx, col in enumerate(selected_cols):
+                val = row_data.get(col, "")
+                if val is None or val == "None":
+                    val = ""
+                    
+                if col_idx == 0:
+                    if col == "STT":
+                        values.append(str(idx + 1))
+                    else:
+                        values.append(str(val))
+                else:
+                    if col == "STT":
+                        values.append(f"│  {idx + 1}")
+                    else:
+                        values.append(f"│  {val}")
+            
+            tag = "evenrow" if idx % 2 == 0 else "oddrow"
+            self.vessel_tree.insert("", "end", iid=str(row_data["id"]), values=values, tags=(tag,))
+
+    def delete_selected_vessel_schedule(self):
+        selected_items = self.vessel_tree.selection()
+        if not selected_items:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn dòng lịch trình cần xóa." if self.language == "vi" else "Please select a vessel schedule row to delete."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        confirm_title = "Xác nhận xóa" if self.language == "vi" else "Confirm Delete"
+        confirm_msg = "Bạn có chắc chắn muốn xóa dòng lịch tàu đang chọn khỏi cơ sở dữ liệu không?" if self.language == "vi" else "Are you sure you want to delete the selected vessel schedule row?"
+        if not messagebox.askyesno(confirm_title, confirm_msg, parent=self):
+            return
+            
+        for item in selected_items:
+            db_id = int(item)
+            delete_vessel_schedule(db_id)
+            
+        self.refresh_vessel_schedule_data()
+
+    def copy_selected_vessel_schedule(self):
+        selected = self.vessel_tree.selection()
+        if not selected:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn lịch tàu cần sao chép." if self.language == "vi" else "Please select a vessel schedule to copy."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        row_id = int(selected[0])
+        row_data = None
+        for r in self.vessel_display_data:
+            if r["id"] == row_id:
+                row_data = r
+                break
+                
+        if not row_data:
+            return
+            
+        items_list = []
+        for col in self.vessel_columns:
+            if col == "STT":
+                continue
+            display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            val = row_data.get(col, "")
+            if val is None or val == "None":
+                val = ""
+            items_list.append(f"{display_name}: {val}")
+            
+        formatted_str = ", ".join(items_list)
+        self.clipboard_clear()
+        self.clipboard_append(formatted_str)
+        self.update()
+        
+        title = "Thành công" if self.language == "vi" else "Success"
+        msg = "Đã sao chép lịch tàu vào Clipboard!" if self.language == "vi" else "Vessel schedule data copied to clipboard!"
+        messagebox.showinfo(title, msg, parent=self)
+
+    def export_vessel_excel(self):
+        if not self.vessel_display_data:
+            msg = "Không có dữ liệu lịch trình tàu để xuất." if self.language == "vi" else "No vessel schedule data to export."
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        title_save = "Lưu lịch tàu Excel" if self.language == "vi" else "Save Vessel Schedule Excel"
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            title=title_save,
+            parent=self
+        )
+        
+        if save_path:
+            try:
+                exported_data = []
+                for row_idx, row_data in enumerate(self.vessel_display_data, 1):
+                    exported_row = {}
+                    for col in self.vessel_columns:
+                        display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
+                        if col == "STT":
+                            exported_row[display_name] = str(row_idx)
+                        else:
+                            exported_row[display_name] = row_data.get(col, "")
+                    exported_data.append(exported_row)
+                
+                excel_cols = [VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col) for col in self.vessel_columns]
+                
+                # Use the existing export utility
+                success = export_to_excel(exported_data, save_path, excel_cols)
+                if success:
+                    success_msg = f"Xuất lịch tàu thành công ra {save_path}" if self.language == "vi" else f"Vessel schedules exported successfully to {save_path}"
+                    success_title = "Thành công" if self.language == "vi" else "Success"
+                    messagebox.showinfo(success_title, success_msg, parent=self)
+                else:
+                    err_msg = "Không thể xuất lịch tàu." if self.language == "vi" else "Failed to export vessel schedules."
+                    err_title = "Lỗi" if self.language == "vi" else "Error"
+                    messagebox.showerror(err_title, err_msg, parent=self)
+            except Exception as e:
+                err_title = "Lỗi" if self.language == "vi" else "Error"
+                messagebox.showerror(err_title, f"An error occurred: {e}", parent=self)
+
+    def sync_eport_to_bookings(self):
+        """
+        Scan all bookings in the active collection, match the vessel name,
+        and update Port Cargo Cut-off and ETD based on ePort SNP data.
+        """
+        if self.active_collection_id is None:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn Bộ sưu tập Booking để đồng bộ." if self.language == "vi" else "Please select a booking Collection to sync."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+
+        bookings = get_bookings(self.active_collection_id)
+        if not bookings:
+            title = "Thông báo" if self.language == "vi" else "Information"
+            msg = "Bộ sưu tập hiện tại không có dữ liệu Booking để cập nhật." if self.language == "vi" else "Current collection has no booking data to sync."
+            messagebox.showinfo(title, msg, parent=self)
+            return
+
+        schedules = get_vessel_schedules(self.active_collection_id)
+        if not schedules:
+            title = "Thông báo" if self.language == "vi" else "Information"
+            msg = "Vui lòng tra cứu lịch tàu từ ePort trước khi đồng bộ." if self.language == "vi" else "Please search and save some vessel schedules from ePort first."
+            messagebox.showinfo(title, msg, parent=self)
+            return
+
+        # Perform sync matching
+        updated_count = 0
+        
+        # We will open a connection to bookings DB directly to run updates
+        with sqlite3.connect("booking_data.db") as conn:
+            cursor = conn.cursor()
+            
+            for b in bookings:
+                booking_vessel = b.get("Vessel", "")
+                if not booking_vessel or booking_vessel == "null":
+                    continue
+                    
+                # Clean up booking vessel for match (uppercase, clean spaces)
+                clean_b_vessel = booking_vessel.strip().upper()
+                
+                # Look for a matching vessel schedule in DB
+                matched_schedule = None
+                for s in schedules:
+                    s_vessel = s.get("vessel_name", "").strip().upper()
+                    s_voyage = s.get("in_out_voyage", "").strip().upper()
+                    
+                    # Match strategies:
+                    # 1. Booking vessel contains vessel name and voyage
+                    # 2. Vessel name matches and booking vessel contains voyage (if voyage exists in booking_vessel)
+                    # 3. Simple substring match of vessel name
+                    if not s_vessel:
+                        continue
+                        
+                    is_match = False
+                    # If voyage is in schedule, does booking vessel contain it?
+                    if s_voyage:
+                        # Split by slash or dash to see if it's there
+                        voy_parts = [p.strip() for p in s_voyage.split("-") if p.strip()]
+                        if s_vessel in clean_b_vessel and any(vp in clean_b_vessel for vp in voy_parts):
+                            is_match = True
+                    
+                    if not is_match and s_vessel in clean_b_vessel:
+                        is_match = True
+                        
+                    if is_match:
+                        matched_schedule = s
+                        break
+                
+                if matched_schedule:
+                    new_cutoff = matched_schedule.get("closing_time", "")
+                    # Extract ETD or ETA
+                    new_etd = matched_schedule.get("actual_departure_time", "")
+                    if not new_etd or "EST" in new_etd:
+                        # Fallback to berth time if needed
+                        berth = matched_schedule.get("actual_berth_time", "")
+                        if berth:
+                            new_etd = berth
+                            
+                    # Remove "EST (dự kiến):" prefixes if present for clean display
+                    if "EST (dự kiến):" in new_cutoff:
+                        new_cutoff = new_cutoff.replace("EST (dự kiến):", "").strip()
+                    if "EST (dự kiến):" in new_etd:
+                        new_etd = new_etd.replace("EST (dự kiến):", "").strip()
+                        
+                    # Update database row
+                    cursor.execute("""
+                        UPDATE bookings 
+                        SET cutoff_time = ?, etd = ?
+                        WHERE id = ?;
+                    """, (new_cutoff, new_etd, b["id"]))
+                    updated_count += 1
+            
+            conn.commit()
+
+        if updated_count > 0:
+            # Reload treeview
+            self.load_bookings_from_db()
+            
+            title = "Thành công" if self.language == "vi" else "Success"
+            msg = f"Đồng bộ thành công! Đã cập nhật {updated_count} bookings khớp với lịch trình ePort." if self.language == "vi" else f"Sync completed! Updated {updated_count} bookings matching ePort schedules."
+            messagebox.showinfo(title, msg, parent=self)
+        else:
+            title = "Thông báo" if self.language == "vi" else "Information"
+            msg = "Không tìm thấy booking nào khớp với danh sách lịch tàu ePort đã tra cứu." if self.language == "vi" else "No bookings matched the fetched ePort vessel schedules."
+            messagebox.showinfo(title, msg, parent=self)
+
+    def on_tab_changed(self):
+        current_tab = self.tab_view.get()
+        if "Booking" in current_tab:
+            self.draw_column_checklist()
+            self.clear_btn.configure(
+                text="Xóa dữ liệu PDF" if self.language == "vi" else "Clear PDF Data",
+                command=self.clear_data
+            )
+            self.export_btn.configure(command=self.export_excel)
+        else:
+            self.draw_vessel_column_checklist()
+            self.clear_btn.configure(
+                text="Xóa lịch trình tàu" if self.language == "vi" else "Clear Vessel Data",
+                command=self.clear_vessel_data
+            )
+            self.export_btn.configure(command=self.export_vessel_excel)
+
+    def draw_vessel_column_checklist(self):
+        for widget in self.checkbox_frame.winfo_children():
+            widget.destroy()
+
+        for idx, col in enumerate(self.vessel_columns):
+            display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            var = self.vessel_column_vars.setdefault(col, ctk.BooleanVar(value=True))
+            cb = ctk.CTkCheckBox(
+                self.checkbox_frame, 
+                text="", 
+                variable=var, 
+                command=self.update_vessel_treeview_columns,
+                width=20,
+                checkbox_width=20,
+                checkbox_height=20
+            )
+            cb.grid(row=idx, column=0, padx=(5, 5), pady=3, sticky="w")
+            
+            entry_var = tk.StringVar(value=display_name)
+            entry = ctk.CTkEntry(
+                self.checkbox_frame,
+                textvariable=entry_var,
+                width=140,
+                height=24,
+                font=ctk.CTkFont(size=11)
+            )
+            entry.grid(row=idx, column=1, padx=2, pady=3, sticky="ew")
+            
+            if self.language == "vi":
+                entry.configure(state="normal")
+                entry.bind("<KeyRelease>", lambda e, c=col, ev=entry_var: self.update_vessel_vietnamese_translation(c, ev.get()))
+                entry.bind("<FocusOut>", lambda e, c=col, ev=entry_var: self.update_vessel_vietnamese_translation(c, ev.get()))
+            else:
+                entry.configure(state="disabled")
+            
+            up_btn = ctk.CTkButton(
+                self.checkbox_frame, 
+                text="▲", 
+                width=24, 
+                height=20,
+                fg_color="gray",
+                hover_color="darkgray",
+                command=lambda c=col: self.move_vessel_column_up(c)
+            )
+            up_btn.grid(row=idx, column=2, padx=2, pady=3)
+            
+            down_btn = ctk.CTkButton(
+                self.checkbox_frame, 
+                text="▼", 
+                width=24, 
+                height=20,
+                fg_color="gray",
+                hover_color="darkgray",
+                command=lambda c=col: self.move_vessel_column_down(c)
+            )
+            down_btn.grid(row=idx, column=3, padx=2, pady=3)
+
+    def update_vessel_vietnamese_translation(self, col, new_val):
+        if self.language == "vi":
+            VESSEL_COLUMN_TRANSLATIONS["vi"][col] = new_val
+            self.update_vessel_treeview_columns()
+
+    def move_vessel_column_up(self, col):
+        idx = self.vessel_columns.index(col)
+        if idx > 0:
+            self.vessel_columns[idx], self.vessel_columns[idx-1] = self.vessel_columns[idx-1], self.vessel_columns[idx]
+            self.draw_vessel_column_checklist()
+            self.update_vessel_treeview_columns()
+
+    def move_vessel_column_down(self, col):
+        idx = self.vessel_columns.index(col)
+        if idx < len(self.vessel_columns) - 1:
+            self.vessel_columns[idx], self.vessel_columns[idx+1] = self.vessel_columns[idx+1], self.vessel_columns[idx]
+            self.draw_vessel_column_checklist()
+            self.update_vessel_treeview_columns()
+
+    def show_vessel_row_details(self, event):
+        selected_item = self.vessel_tree.selection()
+        if not selected_item:
+            return
+            
+        db_id = int(selected_item[0])
+        row_data = None
+        for row in self.vessel_display_data:
+            if row["id"] == db_id:
+                row_data = row
+                break
+                
+        if not row_data:
+            return
+            
+        popup_title = "Chi tiết Lịch Tàu" if self.language == "vi" else "Vessel Schedule Details"
+        popup_header = "CHI TIẾT LỊCH TRÌNH TÀU" if self.language == "vi" else "VESSEL SCHEDULE DETAILS"
+        copy_text = "Sao chép nhanh" if self.language == "vi" else "Copy Details"
+        close_text = "Đóng" if self.language == "vi" else "Close"
+
+        popup = ctk.CTkToplevel(self)
+        popup.title(popup_title)
+        popup.geometry("600x600")
+        popup.attributes("-topmost", True)
+        
+        scroll_frame = ctk.CTkScrollableFrame(popup)
+        scroll_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        title_label = ctk.CTkLabel(scroll_frame, text=popup_header, font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.pack(pady=(10, 15))
+        
+        for col in self.vessel_columns:
+            if col == "STT":
+                continue
+            display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            val = row_data.get(col, "")
+            if val is None or val == "None":
+                val = ""
+            
+            row_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            row_frame.pack(fill="x", pady=6)
+            
+            lbl = ctk.CTkLabel(row_frame, text=f"{display_name}:", font=ctk.CTkFont(size=12, weight="bold"), width=180, anchor="w")
+            lbl.pack(side="left")
+            
+            val_box = ctk.CTkEntry(row_frame, height=28, font=ctk.CTkFont(size=12), width=320)
+            val_box.insert(0, str(val))
+            val_box.configure(state="readonly")
+            val_box.pack(side="left", fill="x", expand=True, padx=(10, 0))
+            
+        btn_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=10)
+        
+        def copy_vessel_popup_details():
+            selected_cols = [col for col in self.vessel_columns if self.vessel_column_vars[col].get()]
+            items_list = []
+            for col in selected_cols:
+                display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
+                if col == "STT":
+                    try:
+                        display_idx = self.vessel_display_data.index(row_data) + 1
+                        val = str(display_idx)
+                    except ValueError:
+                        val = "1"
+                else:
+                    val = row_data.get(col, "")
+                    if val is None or val == "None":
+                        val = ""
+                items_list.append(f"{display_name}: {val}")
+            
+            formatted_str = ", ".join(items_list)
+            self.clipboard_clear()
+            self.clipboard_append(formatted_str)
+            self.update()
+            
+            title = "Thành công" if self.language == "vi" else "Success"
+            msg = "Đã sao chép lịch tàu vào Clipboard!" if self.language == "vi" else "Vessel schedule data copied to clipboard!"
+            messagebox.showinfo(title, msg, parent=popup)
+
+        popup_copy_btn = ctk.CTkButton(btn_frame, text=copy_text, command=copy_vessel_popup_details)
+        popup_copy_btn.pack(side="left", expand=True, padx=15)
+        
+        close_btn = ctk.CTkButton(btn_frame, text=close_text, command=popup.destroy)
+        close_btn.pack(side="left", expand=True, padx=15)
+
+    def clear_vessel_data(self):
+        if self.active_collection_id is None:
+            return
+            
+        title = "Xác nhận xóa sạch" if self.language == "vi" else "Confirm Clear"
+        msg = "Bạn có chắc chắn muốn xóa toàn bộ lịch trình tàu trong Collection này không?" if self.language == "vi" else "Are you sure you want to delete all vessel schedules in this collection?"
+        
+        if messagebox.askyesno(title, msg, parent=self):
+            try:
+                clear_vessel_schedules(self.active_collection_id)
+            except Exception as e:
+                print(f"Error clearing collection vessel schedules: {e}")
+            self.refresh_vessel_schedule_data()
 
 if __name__ == "__main__":
     app = App()
