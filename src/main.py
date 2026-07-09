@@ -2,13 +2,16 @@ import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
+import sqlite3
 
 try:
     from src.extractor import extract_booking_data
     from src.exporter import export_to_excel
+    from src.database import init_db, create_collection, get_collections, delete_collection, insert_booking, get_bookings, delete_booking
 except ModuleNotFoundError:
     from extractor import extract_booking_data
     from exporter import export_to_excel
+    from database import init_db, create_collection, get_collections, delete_collection, insert_booking, get_bookings, delete_booking
 
 # Set appearance mode and color theme
 ctk.set_appearance_mode("System")
@@ -53,13 +56,18 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Auto Read PDF Booking")
-        self.geometry("1100x650")
+        self.geometry("1150x680")
+
+        # Initialize SQLite DB
+        init_db()
+        self.collections = []
+        self.active_collection_id = None
+        self.active_collection_name = ""
 
         self.pdf_files = []
-        self.extracted_data = []
-        self.display_data = [] # List of dicts for Treeview and Export
+        self.display_data = [] # List of dicts loaded from DB
         self.language = "vi"   # Default language is Vietnamese
-        self.font_size = 12    # Default font size for right data screen
+        self.font_size = 12    # Default font size for Treeview
 
         self.all_columns = [
             "STT",
@@ -84,7 +92,7 @@ class App(ctk.CTk):
         # --- Sidebar ---
         self.sidebar_frame = ctk.CTkFrame(self, width=280, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(5, weight=1)
+        self.sidebar_frame.grid_rowconfigure(7, weight=1)
 
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Auto Read PDF", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
@@ -136,9 +144,45 @@ class App(ctk.CTk):
         )
         self.font_inc_btn.grid(row=0, column=2, padx=2)
 
+        # Collection Manager
+        self.collection_label = ctk.CTkLabel(self.sidebar_frame, text="Bộ sưu tập / Collection:", font=ctk.CTkFont(size=12, weight="bold"))
+        self.collection_label.grid(row=5, column=0, padx=20, pady=(5, 2))
+
+        self.col_control_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        self.col_control_frame.grid(row=6, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.col_control_frame.grid_columnconfigure(0, weight=1)
+
+        self.collection_menu = ctk.CTkOptionMenu(
+            self.col_control_frame,
+            values=[],
+            command=self.on_collection_changed
+        )
+        self.collection_menu.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+
+        self.add_col_btn = ctk.CTkButton(
+            self.col_control_frame,
+            text="+",
+            width=32,
+            height=28,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            command=self.prompt_create_collection
+        )
+        self.add_col_btn.grid(row=0, column=1, padx=2)
+
+        self.delete_col_btn = ctk.CTkButton(
+            self.col_control_frame,
+            text="Xóa",
+            width=50,
+            height=28,
+            fg_color="#C0392B",
+            hover_color="#E74C3C",
+            command=self.confirm_delete_collection
+        )
+        self.delete_col_btn.grid(row=0, column=2, padx=2)
+
         # Column list frame
         self.checkbox_frame = ctk.CTkScrollableFrame(self.sidebar_frame, label_text="Cột hiển thị / Columns")
-        self.checkbox_frame.grid(row=5, column=0, padx=10, pady=10, sticky="nsew")
+        self.checkbox_frame.grid(row=7, column=0, padx=10, pady=10, sticky="nsew")
         self.checkbox_frame.grid_columnconfigure(0, weight=0)
         self.checkbox_frame.grid_columnconfigure(1, weight=1)
         self.checkbox_frame.grid_columnconfigure(2, weight=0)
@@ -149,30 +193,49 @@ class App(ctk.CTk):
             self.column_vars[col] = ctk.BooleanVar(value=True)
 
         self.select_pdf_btn = ctk.CTkButton(self.sidebar_frame, text="Chọn file PDF", command=self.select_pdfs)
-        self.select_pdf_btn.grid(row=6, column=0, padx=20, pady=5, sticky="ew")
+        self.select_pdf_btn.grid(row=8, column=0, padx=20, pady=5, sticky="ew")
+
+        self.clear_btn = ctk.CTkButton(self.sidebar_frame, text="Xóa dữ liệu PDF", command=self.clear_data, fg_color="#C0392B", hover_color="#E74C3C")
+        self.clear_btn.grid(row=9, column=0, padx=20, pady=5, sticky="ew")
 
         self.export_btn = ctk.CTkButton(self.sidebar_frame, text="Xuất Excel", command=self.export_excel)
-        self.export_btn.grid(row=7, column=0, padx=20, pady=(5, 20), sticky="ew")
+        self.export_btn.grid(row=10, column=0, padx=20, pady=(5, 20), sticky="ew")
 
         # --- Main Frame ---
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        self.main_frame.grid_rowconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(1, weight=1)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
-        # Treeview
-        self.style = ttk.Style()
-        self.style.theme_use("default")
-        self.update_treeview_style()
+        # Search Bar and Top Action Layout
+        self.top_action_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.top_action_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
         
-        self.tree_scroll_y = ttk.Scrollbar(self.main_frame)
+        self.search_entry = ctk.CTkEntry(self.top_action_frame, placeholder_text="Tìm kiếm dữ liệu...")
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.search_entry.bind("<Return>", lambda e: self.perform_search())
+
+        self.search_btn = ctk.CTkButton(self.top_action_frame, text="Tìm", width=80, command=self.perform_search)
+        self.search_btn.pack(side="left", padx=5)
+
+        self.delete_row_btn = ctk.CTkButton(self.top_action_frame, text="Xóa dòng", width=110, fg_color="#C0392B", hover_color="#E74C3C", command=self.delete_selected_row)
+        self.delete_row_btn.pack(side="right", padx=5)
+
+        # Treeview Scrollbars & Widget
+        self.tree_container = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.tree_container.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        
+        self.tree_scroll_y = ttk.Scrollbar(self.tree_container)
         self.tree_scroll_y.pack(side="right", fill="y")
         
-        self.tree_scroll_x = ttk.Scrollbar(self.main_frame, orient="horizontal")
+        self.tree_scroll_x = ttk.Scrollbar(self.tree_container, orient="horizontal")
         self.tree_scroll_x.pack(side="bottom", fill="x")
 
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+
         self.tree = ttk.Treeview(
-            self.main_frame, 
+            self.tree_container, 
             yscrollcommand=self.tree_scroll_y.set, 
             xscrollcommand=self.tree_scroll_x.set,
             show="headings"
@@ -182,7 +245,13 @@ class App(ctk.CTk):
         self.tree_scroll_y.config(command=self.tree.yview)
         self.tree_scroll_x.config(command=self.tree.xview)
 
-        # Initial draws
+        # Double click to view details
+        self.tree.bind("<Double-1>", self.show_row_details)
+
+        self.update_treeview_style()
+
+        # Load Collection & Draw checklist
+        self.load_collections_to_ui()
         self.draw_column_checklist()
         self.update_treeview_columns()
 
@@ -193,34 +262,198 @@ class App(ctk.CTk):
 
     def update_treeview_style(self):
         row_height = int(self.font_size * 2) + 6
-        self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height)
-        self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"))
+        mode = ctk.get_appearance_mode().lower()
+        if mode == "dark":
+            self.tree.tag_configure("oddrow", background="#2D3238", foreground="white")
+            self.tree.tag_configure("evenrow", background="#1F2326", foreground="white")
+            self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height, background="#1F2326", fieldbackground="#1F2326", foreground="white", gridcolor="#3F444A")
+            self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#2D3238", foreground="white")
+        else:
+            self.tree.tag_configure("oddrow", background="#F2F7FA", foreground="black")
+            self.tree.tag_configure("evenrow", background="#FFFFFF", foreground="black")
+            self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height, background="#FFFFFF", fieldbackground="#FFFFFF", foreground="black", gridcolor="#D3D3D3")
+            self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#EAEAEA", foreground="black")
 
     def change_language(self, val):
         if val == "English":
             self.language = "en"
             self.select_pdf_btn.configure(text="Select PDFs")
+            self.clear_btn.configure(text="Clear PDF Data")
             self.export_btn.configure(text="Export to Excel")
             self.checkbox_frame.configure(label_text="Columns")
+            self.collection_label.configure(text="Collection:")
+            self.delete_col_btn.configure(text="Delete")
+            self.search_entry.configure(placeholder_text="Search data...")
+            self.search_btn.configure(text="Search")
+            self.delete_row_btn.configure(text="Delete Row")
         else:
             self.language = "vi"
             self.select_pdf_btn.configure(text="Chọn file PDF")
+            self.clear_btn.configure(text="Xóa dữ liệu PDF")
             self.export_btn.configure(text="Xuất Excel")
             self.checkbox_frame.configure(label_text="Cột hiển thị / Columns")
+            self.collection_label.configure(text="Bộ sưu tập / Collection:")
+            self.delete_col_btn.configure(text="Xóa")
+            self.search_entry.configure(placeholder_text="Tìm kiếm dữ liệu...")
+            self.search_btn.configure(text="Tìm")
+            self.delete_row_btn.configure(text="Xóa dòng")
         
         self.draw_column_checklist()
         self.update_treeview_columns()
 
+    # --- Collection Management ---
+    def load_collections_to_ui(self, select_newest=False):
+        self.collections = get_collections()
+        col_names = [col["name"] for col in self.collections]
+        
+        if not col_names:
+            try:
+                col_id = create_collection("Default")
+                self.collections = get_collections()
+                col_names = [col["name"] for col in self.collections]
+            except Exception:
+                pass
+                
+        self.collection_menu.configure(values=col_names)
+        
+        if select_newest and self.collections:
+            newest = max(self.collections, key=lambda c: c["id"])
+            self.set_active_collection(newest["id"], newest["name"])
+        elif self.active_collection_name in col_names:
+            self.collection_menu.set(self.active_collection_name)
+        elif self.collections:
+            self.set_active_collection(self.collections[0]["id"], self.collections[0]["name"])
+        else:
+            self.active_collection_id = None
+            self.active_collection_name = ""
+            self.collection_menu.set("")
+            self.load_bookings_from_db()
+
+    def set_active_collection(self, col_id, col_name):
+        self.active_collection_id = col_id
+        self.active_collection_name = col_name
+        self.collection_menu.set(col_name)
+        self.load_bookings_from_db()
+
+    def on_collection_changed(self, col_name):
+        for col in self.collections:
+            if col["name"] == col_name:
+                self.active_collection_id = col["id"]
+                self.active_collection_name = col["name"]
+                self.load_bookings_from_db()
+                break
+
+    def prompt_create_collection(self):
+        title = "Tạo Collection Mới" if self.language == "vi" else "New Collection"
+        prompt_text = "Nhập tên cho Collection mới:" if self.language == "vi" else "Enter name for the new collection:"
+        dialog = ctk.CTkInputDialog(text=prompt_text, title=title)
+        col_name = dialog.get_input()
+        if col_name and col_name.strip():
+            try:
+                create_collection(col_name.strip())
+                self.load_collections_to_ui(select_newest=True)
+            except Exception:
+                err_title = "Lỗi" if self.language == "vi" else "Error"
+                err_msg = "Tên Collection đã tồn tại hoặc không hợp lệ." if self.language == "vi" else "Collection name already exists or is invalid."
+                messagebox.showerror(err_title, err_msg)
+
+    def confirm_delete_collection(self):
+        if self.active_collection_id is None:
+            return
+            
+        title = "Xác nhận xóa" if self.language == "vi" else "Confirm Delete"
+        msg = f"Bạn có chắc muốn xóa Collection '{self.active_collection_name}' cùng tất cả dữ liệu bên trong không?" if self.language == "vi" else f"Are you sure you want to delete collection '{self.active_collection_name}' and all its data?"
+        
+        if messagebox.askyesno(title, msg):
+            delete_collection(self.active_collection_id)
+            self.active_collection_id = None
+            self.active_collection_name = ""
+            self.load_collections_to_ui()
+
+    def load_bookings_from_db(self, query=None):
+        if self.active_collection_id is not None:
+            self.display_data = get_bookings(self.active_collection_id, search_query=query)
+        else:
+            self.display_data = []
+        self.populate_treeview()
+
+    # --- Search and Row Deletions ---
+    def perform_search(self):
+        query = self.search_entry.get().strip()
+        self.load_bookings_from_db(query if query else None)
+
+    def delete_selected_row(self):
+        selected_items = self.tree.selection()
+        if not selected_items:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn dòng cần xóa." if self.language == "vi" else "Please select a row to delete."
+            messagebox.showwarning(title, msg)
+            return
+            
+        confirm_title = "Xác nhận xóa" if self.language == "vi" else "Confirm Delete"
+        confirm_msg = "Bạn có chắc chắn muốn xóa dòng đang chọn khỏi cơ sở dữ liệu không?" if self.language == "vi" else "Are you sure you want to delete the selected row from database?"
+        if not messagebox.askyesno(confirm_title, confirm_msg):
+            return
+            
+        for item in selected_items:
+            db_id = int(item)
+            delete_booking(db_id)
+            
+        self.load_bookings_from_db(self.search_entry.get().strip() or None)
+
+    def show_row_details(self, event):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            return
+            
+        db_id = int(selected_item[0])
+        row_data = None
+        for row in self.display_data:
+            if row["id"] == db_id:
+                row_data = row
+                break
+                
+        if not row_data:
+            return
+            
+        popup = ctk.CTkToplevel(self)
+        popup.title("Chi tiết Booking / Booking Details")
+        popup.geometry("600x550")
+        popup.attributes("-topmost", True)
+        
+        scroll_frame = ctk.CTkScrollableFrame(popup)
+        scroll_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        title_label = ctk.CTkLabel(scroll_frame, text="CHI TIẾT DỮ LIỆU BOOKING", font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.pack(pady=(10, 15))
+        
+        for col in self.all_columns:
+            if col == "STT":
+                continue
+            display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
+            val = row_data.get(col, "null")
+            
+            row_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            row_frame.pack(fill="x", pady=6)
+            
+            lbl = ctk.CTkLabel(row_frame, text=f"{display_name}:", font=ctk.CTkFont(size=12, weight="bold"), width=180, anchor="w")
+            lbl.pack(side="left")
+            
+            val_box = ctk.CTkEntry(row_frame, height=28, font=ctk.CTkFont(size=12))
+            val_box.insert(0, str(val))
+            val_box.configure(state="readonly")
+            val_box.pack(side="left", fill="x", expand=True)
+            
+        close_btn = ctk.CTkButton(popup, text="Đóng / Close", command=popup.destroy)
+        close_btn.pack(pady=10)
+
+    # --- Treeview and Operations ---
     def draw_column_checklist(self):
-        # Clear checklist frame
         for widget in self.checkbox_frame.winfo_children():
             widget.destroy()
 
         for idx, col in enumerate(self.all_columns):
-            # Header translated name
             display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
-            
-            # Checkbox
             var = self.column_vars.setdefault(col, ctk.BooleanVar(value=True))
             cb = ctk.CTkCheckBox(
                 self.checkbox_frame, 
@@ -233,7 +466,6 @@ class App(ctk.CTk):
             )
             cb.grid(row=idx, column=0, padx=(5, 5), pady=3, sticky="w")
             
-            # Editable Entry
             entry_var = tk.StringVar(value=display_name)
             entry = ctk.CTkEntry(
                 self.checkbox_frame,
@@ -246,13 +478,11 @@ class App(ctk.CTk):
             
             if self.language == "vi":
                 entry.configure(state="normal")
-                # Bind key release and focus out to update translation
                 entry.bind("<KeyRelease>", lambda e, c=col, ev=entry_var: self.update_vietnamese_translation(c, ev.get()))
                 entry.bind("<FocusOut>", lambda e, c=col, ev=entry_var: self.update_vietnamese_translation(c, ev.get()))
             else:
                 entry.configure(state="disabled")
             
-            # Up Button
             up_btn = ctk.CTkButton(
                 self.checkbox_frame, 
                 text="▲", 
@@ -264,7 +494,6 @@ class App(ctk.CTk):
             )
             up_btn.grid(row=idx, column=2, padx=2, pady=3)
             
-            # Down Button
             down_btn = ctk.CTkButton(
                 self.checkbox_frame, 
                 text="▼", 
@@ -297,13 +526,11 @@ class App(ctk.CTk):
 
     def update_treeview_columns(self):
         selected_cols = [col for col in self.all_columns if self.column_vars[col].get()]
-        
         self.tree["columns"] = selected_cols
         for col in selected_cols:
             display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
             self.tree.heading(col, text=display_name)
             self.tree.column(col, width=125, minwidth=100)
-            
         self.populate_treeview()
 
     def select_pdfs(self):
@@ -313,14 +540,18 @@ class App(ctk.CTk):
             filetypes=[("PDF files", "*.pdf")]
         )
         if file_paths:
-            self.pdf_files = list(file_paths)
-            self.process_pdfs()
+            new_paths = [p for p in file_paths if p not in self.pdf_files]
+            if new_paths:
+                self.pdf_files.extend(new_paths)
+                self.process_pdfs(new_paths)
 
-    def process_pdfs(self):
-        self.extracted_data = []
-        self.display_data = []
-        
-        for idx, pdf_path in enumerate(self.pdf_files, 1):
+    def process_pdfs(self, new_paths):
+        if self.active_collection_id is None:
+            self.load_collections_to_ui()
+            if self.active_collection_id is None:
+                return
+                
+        for pdf_path in new_paths:
             try:
                 data = extract_booking_data(pdf_path)
                 
@@ -333,7 +564,6 @@ class App(ctk.CTk):
                     etd = data.get("ETD_Trunk", "null")
                     
                 display_row = {
-                    "STT": str(idx),
                     "Tên file PDF": data.get("Tên file PDF", "null"),
                     "Booking No": data.get("Booking No", "null"),
                     "Place of Delivery": data.get("Place of Delivery", "null"),
@@ -348,12 +578,28 @@ class App(ctk.CTk):
                     "ETD": etd
                 }
                 
-                self.extracted_data.append(data)
-                self.display_data.append(display_row)
+                insert_booking(self.active_collection_id, display_row)
             except Exception as e:
                 print(f"Failed to process {pdf_path}: {e}")
                 
-        self.populate_treeview()
+        self.load_bookings_from_db(self.search_entry.get().strip() or None)
+
+    def clear_data(self):
+        if self.active_collection_id is None:
+            return
+            
+        title = "Xác nhận xóa sạch" if self.language == "vi" else "Confirm Clear"
+        msg = "Bạn có chắc chắn muốn xóa toàn bộ dữ liệu PDF trong Collection này không?" if self.language == "vi" else "Are you sure you want to delete all PDF data in this collection?"
+        
+        if messagebox.askyesno(title, msg):
+            try:
+                with sqlite3.connect("booking_data.db") as conn:
+                    conn.execute("DELETE FROM bookings WHERE collection_id = ?;", (self.active_collection_id,))
+                    conn.commit()
+            except Exception as e:
+                print(f"Error clearing collection bookings: {e}")
+            self.pdf_files = []
+            self.load_bookings_from_db(self.search_entry.get().strip() or None)
 
     def populate_treeview(self):
         # Clear current items
@@ -362,9 +608,23 @@ class App(ctk.CTk):
             
         selected_cols = [col for col in self.all_columns if self.column_vars[col].get()]
         
-        for row_data in self.display_data:
-            values = [row_data.get(col, "null") for col in selected_cols]
-            self.tree.insert("", "end", values=values)
+        for idx, row_data in enumerate(self.display_data):
+            values = []
+            for col_idx, col in enumerate(selected_cols):
+                val = row_data.get(col, "null")
+                if col_idx == 0:
+                    if col == "STT":
+                        values.append(str(idx + 1))
+                    else:
+                        values.append(str(val))
+                else:
+                    if col == "STT":
+                        values.append(f"│  {idx + 1}")
+                    else:
+                        values.append(f"│  {val}")
+            
+            tag = "evenrow" if idx % 2 == 0 else "oddrow"
+            self.tree.insert("", "end", iid=str(row_data["id"]), values=values, tags=(tag,))
 
     def export_excel(self):
         if not self.display_data:
@@ -383,13 +643,15 @@ class App(ctk.CTk):
         if save_path:
             selected_cols = [col for col in self.all_columns if self.column_vars[col].get()]
             try:
-                # Build exported rows with correct order and headers based on active language
                 exported_data = []
-                for row_data in self.display_data:
+                for row_idx, row_data in enumerate(self.display_data, 1):
                     exported_row = {}
                     for col in selected_cols:
                         display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
-                        exported_row[display_name] = row_data.get(col, "null")
+                        if col == "STT":
+                            exported_row[display_name] = str(row_idx)
+                        else:
+                            exported_row[display_name] = row_data.get(col, "null")
                     exported_data.append(exported_row)
                 
                 excel_cols = [COLUMN_TRANSLATIONS[self.language].get(col, col) for col in selected_cols]
