@@ -1,0 +1,27 @@
+5c8d80b fix: use subprocess.run for pyinstaller packaging scripts
+076acc8 build: add pyinstaller packaging scripts
+
+--- STAT ---
+
+ build_mac.py | 2 ++
+ build_win.py | 2 ++
+ 2 files changed, 4 insertions(+)
+
+--- DIFF ---
+
+diff --git a/build_mac.py b/build_mac.py
+new file mode 100644
+index 0000000..e6eaa6a
+--- /dev/null
++++ b/build_mac.py
+@@ -0,0 +1,2 @@
++import subprocess
++subprocess.run(['pyinstaller', '--noconfirm', '--onedir', '--windowed', '--name', 'AutoReadPDF', 'src/main.py'], check=True)
+diff --git a/build_win.py b/build_win.py
+new file mode 100644
+index 0000000..e6eaa6a
+--- /dev/null
++++ b/build_win.py
+@@ -0,0 +1,2 @@
++import subprocess
++subprocess.run(['pyinstaller', '--noconfirm', '--onedir', '--windowed', '--name', 'AutoReadPDF', 'src/main.py'], check=True)

@@ -1,0 +1,125 @@
+56801ca fix: pdf extraction fallback logic and None handling
+76b843d feat: implement PDF extraction logic
+
+--- STAT ---
+
+ src/extractor.py        | 54 +++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_extractor.py | 48 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 102 insertions(+)
+
+--- DIFF ---
+
+diff --git a/src/extractor.py b/src/extractor.py
+new file mode 100644
+index 0000000..12fa04b
+--- /dev/null
++++ b/src/extractor.py
+@@ -0,0 +1,54 @@
++import os
++import pdfplumber
++import re
++
++def extract_booking_data(pdf_path: str) -> dict:
++    if not os.path.exists(pdf_path):
++        raise FileNotFoundError(f"File not found: {pdf_path}")
++    
++    result = {
++        "STT": "",
++        "Tên file PDF": os.path.basename(pdf_path),
++        "Booking No": "",
++        "Place of Delivery": "",
++        "T/S Port": "",
++        "Equipment Pick up City": "",
++        "Empty Pick Up CY": "",
++        "Full retrurn CY": "",
++        "Port Cargo Cut-off": "",
++        "Pre Carrier": "",
++        "ETD_Pre": "",
++        "Trunk Vessel": "",
++        "ETD_Trunk": ""
++    }
++    
++    try:
++        with pdfplumber.open(pdf_path) as pdf:
++            text = ""
++            for page in pdf.pages:
++                extracted_text = page.extract_text()
++                if extracted_text:
++                    text += extracted_text + "\n"
++                
++            # Regex patterns (will be refined with real PDFs)
++            booking_match = re.search(r"Booking No[.:\s]+([A-Z0-9]+)", text, re.IGNORECASE)
++            if booking_match:
++                result["Booking No"] = booking_match.group(1).strip()
++            
++            pre_carrier_match = re.search(r"Pre Carrier[.:\s]+(.*?)(?=\n|$)", text, re.IGNORECASE)
++            etd_pre_match = re.search(r"ETD.*?Pre Carrier[.:\s]+(.*?)(?=\n|$)", text, re.IGNORECASE)
++            trunk_match = re.search(r"Trunk Vessel[.:\s]+(.*?)(?=\n|$)", text, re.IGNORECASE)
++            etd_trunk_match = re.search(r"ETD.*?Trunk Vessel[.:\s]+(.*?)(?=\n|$)", text, re.IGNORECASE)
++            
++            if pre_carrier_match:
++                result["Pre Carrier"] = pre_carrier_match.group(1).strip()
++                if etd_pre_match:
++                    result["ETD_Pre"] = etd_pre_match.group(1).strip()
++            elif trunk_match:
++                result["Trunk Vessel"] = trunk_match.group(1).strip()
++                if etd_trunk_match:
++                    result["ETD_Trunk"] = etd_trunk_match.group(1).strip()
++    except Exception as e:
++        print(f"Error parsing {pdf_path}: {e}")
++        
++    return result
+diff --git a/tests/test_extractor.py b/tests/test_extractor.py
+new file mode 100644
+index 0000000..6a1ddb2
+--- /dev/null
++++ b/tests/test_extractor.py
+@@ -0,0 +1,48 @@
++import pytest
++from unittest.mock import patch, MagicMock
++from src.extractor import extract_booking_data
++
++def test_extract_booking_data_missing_file():
++    with pytest.raises(FileNotFoundError):
++        extract_booking_data("non_existent.pdf")
++
++@patch("src.extractor.os.path.exists")
++@patch("src.extractor.pdfplumber.open")
++def test_extract_booking_data_fallback_logic(mock_pdf_open, mock_exists):
++    mock_exists.return_value = True
++    
++    # Mock PDF with both Pre Carrier and Trunk Vessel
++    mock_pdf = MagicMock()
++    mock_page = MagicMock()
++    mock_page.extract_text.return_value = "Pre Carrier: Ship A\nETD Pre Carrier: 2026-07-10\nTrunk Vessel: Ship B\nETD Trunk Vessel: 2026-07-15"
++    mock_pdf.pages = [mock_page]
++    mock_pdf_open.return_value.__enter__.return_value = mock_pdf
++    
++    result = extract_booking_data("test.pdf")
++    assert result["Pre Carrier"] == "Ship A"
++    assert result["ETD_Pre"] == "2026-07-10"
++    assert result["Trunk Vessel"] == ""
++    assert result["ETD_Trunk"] == ""
++    
++    # Mock PDF with only Trunk Vessel
++    mock_page.extract_text.return_value = "Trunk Vessel: Ship C\nETD Trunk Vessel: 2026-07-20"
++    result_trunk = extract_booking_data("test.pdf")
++    assert result_trunk["Pre Carrier"] == ""
++    assert result_trunk["ETD_Pre"] == ""
++    assert result_trunk["Trunk Vessel"] == "Ship C"
++    assert result_trunk["ETD_Trunk"] == "2026-07-20"
++
++@patch("src.extractor.os.path.exists")
++@patch("src.extractor.pdfplumber.open")
++def test_extract_booking_data_none_text(mock_pdf_open, mock_exists):
++    mock_exists.return_value = True
++    mock_pdf = MagicMock()
++    mock_page = MagicMock()
++    # Test that None doesn't crash the code
++    mock_page.extract_text.return_value = None
++    mock_pdf.pages = [mock_page]
++    mock_pdf_open.return_value.__enter__.return_value = mock_pdf
++    
++    result = extract_booking_data("test.pdf")
++    assert result["Pre Carrier"] == ""
++    assert result["Trunk Vessel"] == ""
