@@ -10,7 +10,10 @@ from src.database import (
     delete_vessel_schedule,
     clear_vessel_schedules,
     export_backup_data,
-    import_backup_data
+    import_backup_data,
+    get_watchlist,
+    add_to_watchlist,
+    remove_from_watchlist
 )
 
 @pytest.fixture(autouse=True)
@@ -180,3 +183,32 @@ def test_search_vessels_client_failures(mock_post):
     mock_post.return_value = mock_response
     with pytest.raises(ValueError, match="Invalid request parameters"):
         search_vessels("GNL", "EVER MEMO")
+
+def test_vessel_watchlist_operations():
+    from src.database import create_collection
+    col_id = create_collection("Watchlist Collection")
+    
+    # Empty at first
+    assert len(get_watchlist(col_id)) == 0
+    
+    # Add items
+    add_to_watchlist(col_id, "CTL", "SPIL NIKEN", "24003N")
+    add_to_watchlist(col_id, "GNL", "EVER MEMO", "1461-012E")
+    
+    # Check retrieval
+    watchlist = get_watchlist(col_id)
+    assert len(watchlist) == 2
+    
+    # Check fields
+    niken = [w for w in watchlist if w["vessel_name"] == "SPIL NIKEN"][0]
+    assert niken["site_id"] == "CTL"
+    assert niken["voyage"] == "24003N"
+    
+    # Test UNIQUE constraint IGNORE
+    add_to_watchlist(col_id, "CTL", "SPIL NIKEN", "24003N")
+    assert len(get_watchlist(col_id)) == 2
+    
+    # Test delete
+    remove_from_watchlist(niken["id"])
+    assert len(get_watchlist(col_id)) == 1
+    assert get_watchlist(col_id)[0]["vessel_name"] == "EVER MEMO"

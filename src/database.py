@@ -75,6 +75,19 @@ def init_db():
             );
         """)
         
+        # Create vessel_watchlists table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS vessel_watchlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
+                site_id TEXT NOT NULL,
+                vessel_name TEXT NOT NULL,
+                voyage TEXT NOT NULL,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE,
+                UNIQUE(collection_id, site_id, vessel_name, voyage) ON CONFLICT IGNORE
+            );
+        """)
+        
         # Database migration: add port_of_discharging column if it doesn't exist
         try:
             conn.execute("ALTER TABLE bookings ADD COLUMN port_of_discharging TEXT;")
@@ -378,4 +391,25 @@ def delete_vessel_schedule(schedule_id: int):
 def clear_vessel_schedules(col_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM vessel_schedules WHERE collection_id = ?;", (col_id,))
+        conn.commit()
+
+def get_watchlist(col_id: int) -> list[dict]:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM vessel_watchlists WHERE collection_id = ? ORDER BY id ASC;", (col_id,))
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+def add_to_watchlist(col_id: int, site_id: str, vessel_name: str, voyage: str):
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO vessel_watchlists (collection_id, site_id, vessel_name, voyage)
+            VALUES (?, ?, ?, ?);
+        """, (col_id, site_id.strip(), vessel_name.strip(), voyage.strip()))
+        conn.commit()
+
+def remove_from_watchlist(watchlist_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM vessel_watchlists WHERE id = ?;", (watchlist_id,))
         conn.commit()

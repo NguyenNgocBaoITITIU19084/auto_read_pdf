@@ -4,6 +4,7 @@ from tkinter import ttk, filedialog, messagebox
 import customtkinter as ctk
 import sqlite3
 import json
+from datetime import datetime
 
 try:
     from src.extractor import extract_booking_data
@@ -11,7 +12,8 @@ try:
     from src.database import (
         init_db, create_collection, get_collections, delete_collection, 
         insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
-        insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules
+        insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules,
+        get_watchlist, add_to_watchlist, remove_from_watchlist
     )
     from src.eport_client import search_vessels
 except ModuleNotFoundError:
@@ -20,7 +22,8 @@ except ModuleNotFoundError:
     from database import (
         init_db, create_collection, get_collections, delete_collection, 
         insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
-        insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules
+        insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules,
+        get_watchlist, add_to_watchlist, remove_from_watchlist
     )
     from eport_client import search_vessels
 
@@ -103,6 +106,176 @@ VESSEL_COLUMN_TRANSLATIONS = {
     }
 }
 
+class VesselWatchlistDialog(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.title("Danh sách tàu cần theo dõi (Vessel Watchlist)" if parent.language == "vi" else "Vessel Watchlist")
+        self.geometry("700x500")
+        self.attributes("-topmost", True)
+        self.focus()
+        
+        # Grid layout: 
+        # Row 0: Form to add new watchlist item
+        # Row 1: Table (Treeview) of current watchlist items
+        # Row 2: Bottom actions (Delete selected, Close)
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        
+        # --- Add Form ---
+        self.form_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.form_frame.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="ew")
+        
+        self.port_label = ctk.CTkLabel(self.form_frame, text="Cảng:" if parent.language == "vi" else "Port:", font=ctk.CTkFont(size=12, weight="bold"))
+        self.port_label.pack(side="left", padx=5)
+        
+        self.port_menu = ctk.CTkOptionMenu(
+            self.form_frame,
+            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
+            width=150
+        )
+        self.port_menu.pack(side="left", padx=5)
+        self.port_menu.set("Cát Lái (CTL)")
+        
+        self.vessel_entry = ctk.CTkEntry(self.form_frame, placeholder_text="Tên tàu / Vessel...", width=150)
+        self.vessel_entry.pack(side="left", padx=5)
+        
+        self.voyage_entry = ctk.CTkEntry(self.form_frame, placeholder_text="Chuyến / Voyage...", width=100)
+        self.voyage_entry.pack(side="left", padx=5)
+        
+        self.add_btn = ctk.CTkButton(
+            self.form_frame,
+            text="Thêm" if parent.language == "vi" else "Add",
+            width=80,
+            command=self.add_item
+        )
+        self.add_btn.pack(side="left", padx=5)
+        
+        # --- Watchlist Table ---
+        self.table_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.table_frame.grid(row=1, column=0, padx=15, pady=5, sticky="nsew")
+        
+        self.scroll_y = ttk.Scrollbar(self.table_frame)
+        self.scroll_y.pack(side="right", fill="y")
+        
+        self.scroll_x = ttk.Scrollbar(self.table_frame, orient="horizontal")
+        self.scroll_x.pack(side="bottom", fill="x")
+        
+        self.tree = ttk.Treeview(
+            self.table_frame,
+            yscrollcommand=self.scroll_y.set,
+            xscrollcommand=self.scroll_x.set,
+            show="headings",
+            columns=("ID", "Port", "Vessel", "Voyage")
+        )
+        self.tree.pack(fill="both", expand=True)
+        
+        self.scroll_y.config(command=self.tree.yview)
+        self.scroll_x.config(command=self.tree.xview)
+        
+        # Setup table headers
+        self.tree.heading("ID", text="ID")
+        self.tree.heading("Port", text="Cảng / Port")
+        self.tree.heading("Vessel", text="Tên tàu / Vessel")
+        self.tree.heading("Voyage", text="Chuyến / Voyage")
+        
+        self.tree.column("ID", width=50, minwidth=50, stretch=False, anchor="center")
+        self.tree.column("Port", width=150, minwidth=100, anchor="w")
+        self.tree.column("Vessel", width=250, minwidth=150, anchor="w")
+        self.tree.column("Voyage", width=150, minwidth=100, anchor="center")
+        
+        # --- Bottom actions ---
+        self.actions_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.actions_frame.grid(row=2, column=0, padx=15, pady=(5, 15), sticky="ew")
+        
+        self.delete_btn = ctk.CTkButton(
+            self.actions_frame,
+            text="Xóa mục chọn" if parent.language == "vi" else "Delete Selected",
+            fg_color="#C0392B",
+            hover_color="#E74C3C",
+            command=self.delete_item,
+            width=130
+        )
+        self.delete_btn.pack(side="left", padx=5)
+        
+        self.close_btn = ctk.CTkButton(
+            self.actions_frame,
+            text="Đóng" if parent.language == "vi" else "Close",
+            command=self.destroy,
+            width=100
+        )
+        self.close_btn.pack(side="right", padx=5)
+        
+        self.load_watchlist_data()
+        
+    def load_watchlist_data(self):
+        # Clear tree
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        if self.parent.active_collection_id is None:
+            return
+            
+        watchlist = get_watchlist(self.parent.active_collection_id)
+        for item in watchlist:
+            port_display = "Cát Lái (CTL)" if item["site_id"] == "CTL" else "Cát Lái Giang Nam (GNL)"
+            self.tree.insert("", "end", values=(
+                item["id"],
+                port_display,
+                item["vessel_name"],
+                item["voyage"]
+            ))
+            
+    def add_item(self):
+        if self.parent.active_collection_id is None:
+            title = "Cảnh báo" if self.parent.language == "vi" else "Warning"
+            msg = "Vui lòng chọn hoặc tạo một Bộ sưu tập trước khi thêm danh sách theo dõi." if self.parent.language == "vi" else "Please select or create a Collection first."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        port_val = self.port_menu.get()
+        site_id = "CTL"
+        if "GNL" in port_val:
+            site_id = "GNL"
+            
+        vessel = self.vessel_entry.get().strip()
+        voyage = self.voyage_entry.get().strip()
+        
+        if not vessel or not voyage:
+            title = "Thiếu thông tin" if self.parent.language == "vi" else "Missing info"
+            msg = "Vui lòng điền đầy đủ Tên tàu và Số chuyến!" if self.parent.language == "vi" else "Please fill both Vessel Name and Voyage!"
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        add_to_watchlist(self.parent.active_collection_id, site_id, vessel, voyage)
+        
+        self.vessel_entry.delete(0, "end")
+        self.voyage_entry.delete(0, "end")
+        
+        self.load_watchlist_data()
+
+        # Trigger immediate check if auto is running
+        if self.parent.auto_request_running:
+            if self.parent.vessel_auto_timer_id is not None:
+                self.parent.after_cancel(self.parent.vessel_auto_timer_id)
+                self.parent.vessel_auto_timer_id = None
+            self.parent.trigger_auto_request()
+        
+    def delete_item(self):
+        selected = self.tree.selection()
+        if not selected:
+            title = "Cảnh báo" if self.parent.language == "vi" else "Warning"
+            msg = "Vui lòng chọn một dòng để xóa!" if self.parent.language == "vi" else "Please select a row to delete!"
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        for item in selected:
+            val = self.tree.item(item, "values")
+            watchlist_id = int(val[0])
+            remove_from_watchlist(watchlist_id)
+            
+        self.load_watchlist_data()
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -157,6 +330,9 @@ class App(ctk.CTk):
             "remarks",
             "queried_at"
         ]
+
+        self.vessel_auto_timer_id = None
+        self.auto_request_running = False
 
         # Config grid
         self.grid_columnconfigure(1, weight=1)
@@ -375,7 +551,7 @@ class App(ctk.CTk):
         self.tree.bind("<Double-1>", self.show_row_details)
 
         # --- ePort SNP Tab ---
-        self.tab_vessel.grid_rowconfigure(2, weight=1)
+        self.tab_vessel.grid_rowconfigure(3, weight=1)
         self.tab_vessel.grid_columnconfigure(0, weight=1)
 
         # Control Panel for Vessel API Lookup inside Vessel Tab (Row 0)
@@ -408,9 +584,56 @@ class App(ctk.CTk):
         self.vessel_search_btn = ctk.CTkButton(self.vessel_action_frame, text="Tra cứu", width=80, command=self.search_eport_vessel)
         self.vessel_search_btn.pack(side="left", padx=5)
 
-        # Search Bar & Local Actions Panel inside Vessel Tab (Row 1)
+        # Auto Lookup Panel (Row 1)
+        self.vessel_auto_frame = ctk.CTkFrame(self.tab_vessel, fg_color="transparent")
+        self.vessel_auto_frame.grid(row=1, column=0, padx=10, pady=(5, 5), sticky="ew")
+
+        # Auto Request Title/Label
+        self.vessel_auto_lbl = ctk.CTkLabel(
+            self.vessel_auto_frame, 
+            text="Tự động tra cứu / Auto Request:" if self.language == "vi" else "Auto Request:", 
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.vessel_auto_lbl.pack(side="left", padx=5)
+
+        # Interval label & entry
+        self.vessel_interval_lbl = ctk.CTkLabel(self.vessel_auto_frame, text="Chu kỳ (phút):" if self.language == "vi" else "Interval (mins):")
+        self.vessel_interval_lbl.pack(side="left", padx=2)
+
+        self.vessel_interval_entry = ctk.CTkEntry(self.vessel_auto_frame, width=60)
+        self.vessel_interval_entry.pack(side="left", padx=5)
+        self.vessel_interval_entry.insert(0, "5") # default 5 minutes
+
+        # Watchlist Dialog button
+        self.vessel_watchlist_btn = ctk.CTkButton(
+            self.vessel_auto_frame,
+            text="Danh sách theo dõi..." if self.language == "vi" else "Watchlist...",
+            width=150,
+            command=self.open_watchlist_dialog,
+            fg_color="#1ABC9C",
+            hover_color="#16A085"
+        )
+        self.vessel_watchlist_btn.pack(side="left", padx=5)
+
+        # Toggle Switch
+        self.vessel_auto_switch = ctk.CTkSwitch(
+            self.vessel_auto_frame,
+            text="Bật tự động" if self.language == "vi" else "Enable Auto",
+            command=self.toggle_auto_request
+        )
+        self.vessel_auto_switch.pack(side="left", padx=10)
+
+        # Auto Status Label
+        self.vessel_auto_status_lbl = ctk.CTkLabel(
+            self.vessel_auto_frame, 
+            text="Trạng thái: Đang tắt" if self.language == "vi" else "Status: Inactive", 
+            text_color="gray"
+        )
+        self.vessel_auto_status_lbl.pack(side="left", padx=10)
+
+        # Search Bar & Local Actions Panel inside Vessel Tab (Row 2)
         self.vessel_search_action_frame = ctk.CTkFrame(self.tab_vessel, fg_color="transparent")
-        self.vessel_search_action_frame.grid(row=1, column=0, padx=10, pady=(5, 5), sticky="ew")
+        self.vessel_search_action_frame.grid(row=2, column=0, padx=10, pady=(5, 5), sticky="ew")
 
         # Local search entry
         self.vessel_search_entry = ctk.CTkEntry(self.vessel_search_action_frame, placeholder_text="Tìm kiếm lịch tàu...", width=200)
@@ -461,9 +684,9 @@ class App(ctk.CTk):
         )
         self.vessel_delete_btn.pack(side="right", padx=5)
 
-        # Treeview Scrollbars & Widget inside Vessel Tab (Row 2)
+        # Treeview Scrollbars & Widget inside Vessel Tab (Row 3)
         self.vessel_tree_container = ctk.CTkFrame(self.tab_vessel, fg_color="transparent")
-        self.vessel_tree_container.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.vessel_tree_container.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="nsew")
 
         self.vessel_tree_scroll_y = ttk.Scrollbar(self.vessel_tree_container)
         self.vessel_tree_scroll_y.pack(side="right", fill="y")
@@ -624,6 +847,9 @@ class App(ctk.CTk):
             self.active_collection_id = None
             self.active_collection_name = ""
             self.collection_menu.set("")
+            if self.auto_request_running:
+                self.stop_auto_request_timer()
+                self.vessel_auto_switch.deselect()
             self.load_bookings_from_db()
             self.load_vessel_schedules_from_db()
 
@@ -631,6 +857,9 @@ class App(ctk.CTk):
         self.active_collection_id = col_id
         self.active_collection_name = col_name
         self.collection_menu.set(col_name)
+        if self.auto_request_running:
+            self.stop_auto_request_timer()
+            self.start_auto_request_timer()
         self.load_bookings_from_db()
         self.load_vessel_schedules_from_db()
 
@@ -639,6 +868,9 @@ class App(ctk.CTk):
             if col["name"] == col_name:
                 self.active_collection_id = col["id"]
                 self.active_collection_name = col["name"]
+                if self.auto_request_running:
+                    self.stop_auto_request_timer()
+                    self.start_auto_request_timer()
                 self.load_bookings_from_db()
                 self.load_vessel_schedules_from_db()
                 break
@@ -1208,6 +1440,144 @@ class App(ctk.CTk):
             else:
                 self.vessel_tree.column(col, width=120, minwidth=80, anchor="w")
         self.populate_vessel_treeview()
+
+    def destroy(self):
+        self.auto_request_running = False
+        if self.vessel_auto_timer_id is not None:
+            self.after_cancel(self.vessel_auto_timer_id)
+            self.vessel_auto_timer_id = None
+        super().destroy()
+
+    def open_watchlist_dialog(self):
+        # Prevent multiple dialogs
+        if hasattr(self, "watchlist_dialog") and self.watchlist_dialog.winfo_exists():
+            self.watchlist_dialog.focus()
+        else:
+            self.watchlist_dialog = VesselWatchlistDialog(self)
+
+    def toggle_auto_request(self):
+        if self.vessel_auto_switch.get():
+            self.start_auto_request_timer()
+        else:
+            self.stop_auto_request_timer()
+
+    def start_auto_request_timer(self):
+        if self.active_collection_id is None:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn hoặc tạo một Bộ sưu tập trước khi bật tự động." if self.language == "vi" else "Please select or create a Collection first."
+            messagebox.showwarning(title, msg, parent=self)
+            self.vessel_auto_switch.deselect()
+            return
+
+        # Read interval
+        try:
+            val = float(self.vessel_interval_entry.get().strip())
+            if val < 1.0:
+                raise ValueError("Interval must be at least 1 minute.")
+        except Exception:
+            title = "Lỗi nhập liệu" if self.language == "vi" else "Input Error"
+            msg = "Khoảng thời gian phải là số lớn hơn hoặc bằng 1 phút!" if self.language == "vi" else "Interval must be a number greater than or equal to 1 minute!"
+            messagebox.showwarning(title, msg, parent=self)
+            self.vessel_auto_switch.deselect()
+            return
+
+        self.auto_request_running = True
+        self.vessel_interval_entry.configure(state="disabled")
+        
+        status_text = "Đang chạy..." if self.language == "vi" else "Running..."
+        self.vessel_auto_status_lbl.configure(text=f"Trạng thái: {status_text}", text_color="green")
+        
+        # Trigger immediately on start
+        self.trigger_auto_request()
+
+    def stop_auto_request_timer(self):
+        self.auto_request_running = False
+        if self.vessel_auto_timer_id is not None:
+            self.after_cancel(self.vessel_auto_timer_id)
+            self.vessel_auto_timer_id = None
+        self.vessel_interval_entry.configure(state="normal")
+        status_text = "Đang tắt" if self.language == "vi" else "Inactive"
+        self.vessel_auto_status_lbl.configure(text=f"Trạng thái: {status_text}", text_color="gray")
+
+    def trigger_auto_request(self):
+        if not self.auto_request_running or self.active_collection_id is None:
+            return
+            
+        watchlist = get_watchlist(self.active_collection_id)
+        if not watchlist:
+            # Nothing to fetch, reschedule
+            self.reschedule_auto_request()
+            return
+            
+        import threading
+        t = threading.Thread(target=self.run_auto_request_thread, args=(self.active_collection_id, watchlist), daemon=True)
+        t.start()
+
+    def run_auto_request_thread(self, col_id, watchlist):
+        success_count = 0
+        error_messages = []
+        
+        def update_fetching_status():
+            fetching_text = "Đang lấy dữ liệu..." if self.language == "vi" else "Fetching..."
+            self.vessel_auto_status_lbl.configure(text=f"Trạng thái: {fetching_text}", text_color="orange")
+        self.after(0, update_fetching_status)
+        
+        for item in watchlist:
+            if not self.auto_request_running:
+                break
+            site_id = item["site_id"]
+            vessel_name = item["vessel_name"]
+            voyage = item["voyage"]
+            
+            try:
+                # Call search_vessels API using ONLY vessel name as requested to get all voyages, then filter locally
+                results = search_vessels(site_id, vessel_name)
+                if results:
+                    filtered = []
+                    for r in results:
+                        voyage_val = r.get("IN_OUT_VOYAGE", "")
+                        if voyage.lower().strip() in voyage_val.lower().strip():
+                            filtered.append(r)
+                            
+                    if filtered:
+                        insert_vessel_schedules(col_id, filtered)
+                        success_count += len(filtered)
+            except Exception as e:
+                error_messages.append(f"{vessel_name}: {e}")
+                
+        err_msg = "; ".join(error_messages) if error_messages else None
+        self.after(0, self.handle_auto_request_result, success_count, err_msg)
+
+    def handle_auto_request_result(self, success_count, error_msg):
+        if not self.auto_request_running:
+            return
+            
+        # Refresh treeview/database data on screen (unconditionally so it's always up to date)
+        self.load_vessel_schedules_from_db()
+            
+        # Update status
+        now_str = datetime.now().strftime("%H:%M:%S")
+        if error_msg:
+            status_text = f"Lỗi lúc {now_str} (Lấy {success_count} dòng)" if self.language == "vi" else f"Error at {now_str} (Got {success_count} rows)"
+            self.vessel_auto_status_lbl.configure(text=status_text, text_color="red")
+        else:
+            status_text = f"Cập nhật lúc {now_str} (+{success_count} dòng)" if self.language == "vi" else f"Updated at {now_str} (+{success_count} rows)"
+            self.vessel_auto_status_lbl.configure(text=status_text, text_color="green")
+            
+        self.reschedule_auto_request()
+
+    def reschedule_auto_request(self):
+        if not self.auto_request_running:
+            return
+        try:
+            mins = float(self.vessel_interval_entry.get().strip())
+            if mins < 1.0:
+                mins = 1.0
+        except Exception:
+            mins = 5.0
+            
+        ms = int(mins * 60 * 1000)
+        self.vessel_auto_timer_id = self.after(ms, self.trigger_auto_request)
 
     def search_eport_vessel(self):
         if self.active_collection_id is None:
