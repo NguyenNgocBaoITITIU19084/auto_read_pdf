@@ -2,7 +2,7 @@ import pytest
 import sqlite3
 import os
 from unittest.mock import patch, MagicMock
-from src.eport_client import search_vessels
+from src.eport_client import search_vessels, search_containers
 from src.database import (
     init_db,
     insert_vessel_schedules,
@@ -13,7 +13,14 @@ from src.database import (
     import_backup_data,
     get_watchlist,
     add_to_watchlist,
-    remove_from_watchlist
+    remove_from_watchlist,
+    insert_containers,
+    get_containers,
+    delete_container,
+    clear_containers,
+    get_container_watchlist,
+    add_to_container_watchlist,
+    remove_from_container_watchlist
 )
 
 @pytest.fixture(autouse=True)
@@ -251,3 +258,157 @@ def test_collection_settings_operations():
     restored = get_collections()
     assert len(restored) == 1
     assert restored[0]["settings"] == settings_data
+
+def test_container_database_operations():
+    from src.database import create_collection
+    col_id = create_collection("Container Test Collection")
+    
+    # Arrange container data
+    containers = [
+        {
+            "SITE": "CTL",
+            "CONTAINERNO": "EMCU9914560",
+            "EVENT_TIME": "2026-07-17 04:11:02",
+            "EVENT_TYPE": "UNLOAD",
+            "FEL": "F",
+            "ISO": "4500",
+            "GROSS": 26.6,
+            "VGM": "Y",
+            "CATEGORY": "I",
+            "CUST": "Y",
+            "LOCATION": "006.01.02",
+            "TRUCK_VESSEL": "SPIL NIRMALA - 108W",
+            "TRANS_IN": "2026-07-17 02:00:00",
+            "TRANS_OUT": "2026-07-17 06:00:00",
+            "GATE_WT": 0.0,
+            "LINE_OPER": "EMC",
+            "IM_EXP": "Import",
+            "BILL_BOOK": "EGLV001600173631",
+            "CUST_APPROVAL_DATE": "2026-07-17 08:00:00",
+            "NOTE": "Cont chưa đóng phí",
+            "ITEM_SEAL_NO": "EMCTTU7694",
+            "CUSTOM_CLEARANCE_STATUS": "N",
+            "INFRAS_FEE_STATUS": "3"
+        },
+        {
+            "SITE": "CTL",
+            "CONTAINERNO": "EGSU6257353",
+            "EVENT_TIME": "2026-07-17 04:11:02",
+            "EVENT_TYPE": "OUTGATE",
+            "FEL": "F",
+            "ISO": "4500",
+            "GROSS": 28.89,
+            "VGM": "Y",
+            "CATEGORY": "Q",
+            "CUST": "Y",
+            "LOCATION": " ",
+            "TRUCK_VESSEL": "50E53291-50RM15440",
+            "TRANS_IN": "2026-07-17 01:00:00",
+            "TRANS_OUT": "2026-07-17 03:00:00",
+            "GATE_WT": 28.89,
+            "LINE_OPER": "EMC",
+            "IM_EXP": "Transit container",
+            "BILL_BOOK": "560600053306",
+            "CUST_APPROVAL_DATE": "2026-07-17 07:00:00",
+            "NOTE": "Ok",
+            "ITEM_SEAL_NO": "0403212,VN418424",
+            "CUSTOM_CLEARANCE_STATUS": "N",
+            "INFRAS_FEE_STATUS": "3"
+        }
+    ]
+    
+    # Act: insert containers
+    inserted_ids = insert_containers(col_id, containers)
+    assert len(inserted_ids) == 2
+    
+    # Fetch containers
+    fetched = get_containers(col_id)
+    assert len(fetched) == 2
+    assert fetched[0]["containerno"] in ["EMCU9914560", "EGSU6257353"]
+    assert fetched[0]["site_id"] == "CTL"
+    
+    # Test watchlist operations
+    add_to_container_watchlist(col_id, "CTL", "EMCU9914560")
+    add_to_container_watchlist(col_id, "GNL", "EGSU6257353")
+    
+    watchlist = get_container_watchlist(col_id)
+    assert len(watchlist) == 2
+    assert watchlist[0]["container_no"] == "EMCU9914560"
+    assert watchlist[0]["site_id"] == "CTL"
+    
+    # Test duplicate ignore
+    add_to_container_watchlist(col_id, "CTL", "EMCU9914560")
+    assert len(get_container_watchlist(col_id)) == 2
+    
+    # Delete from watchlist
+    remove_from_container_watchlist(watchlist[0]["id"])
+    assert len(get_container_watchlist(col_id)) == 1
+    
+    # Delete container
+    delete_container(fetched[0]["id"])
+    assert len(get_containers(col_id)) == 1
+    
+    # Clear containers
+    clear_containers(col_id)
+    assert len(get_containers(col_id)) == 0
+
+def test_container_backup_restore():
+    from src.database import create_collection, get_collections
+    col_id = create_collection("Container Backup Test")
+    
+    # Insert container and watchlist
+    containers = [
+        {"SITE": "CTL", "CONTAINERNO": "EMCU9914560", "EVENT_TIME": "2026-07-17 04:11:02", "EVENT_TYPE": "UNLOAD"}
+    ]
+    insert_containers(col_id, containers)
+    add_to_container_watchlist(col_id, "CTL", "EMCU9914560")
+    
+    backup = export_backup_data()
+    
+    # Delete to restore
+    with sqlite3.connect("booking_data.db") as conn:
+        conn.execute("DELETE FROM collections;")
+        conn.commit()
+        
+    assert len(get_collections()) == 0
+    
+    # Restore
+    import_backup_data(backup)
+    
+    # Verify
+    restored_cols = get_collections()
+    assert len(restored_cols) == 1
+    new_col_id = restored_cols[0]["id"]
+    
+    fetched = get_containers(new_col_id)
+    assert len(fetched) == 1
+    assert fetched[0]["containerno"] == "EMCU9914560"
+    
+    watchlist = get_container_watchlist(new_col_id)
+    assert len(watchlist) == 1
+    assert watchlist[0]["container_no"] == "EMCU9914560"
+
+@patch("src.eport_client.requests.post")
+def test_search_containers_client(mock_post):
+    # Mocking API response
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "ContentType": "success",
+        "Message": "Tìm thấy 1 container.",
+        "Data": [
+            {
+                "SITE": "CTL",
+                "CONTAINERNO": "EMCU9914560",
+                "EVENT_TIME": "/Date(1782769311000)/",
+                "EVENT_TYPE": "UNLOAD"
+            }
+        ]
+    }
+    mock_post.return_value = mock_resp
+    
+    results = search_containers("CTL", "EMCU9914560")
+    assert len(results) == 1
+    assert results[0]["CONTAINERNO"] == "EMCU9914560"
+    # Verify date is formatted properly
+    assert results[0]["EVENT_TIME"] == "2026-06-30 04:41:51"

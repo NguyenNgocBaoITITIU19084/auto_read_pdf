@@ -99,6 +99,52 @@ def init_db():
                 UNIQUE(collection_id, site_id, vessel_name, voyage) ON CONFLICT IGNORE
             );
         """)
+
+        # Create containers table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS containers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
+                site_id TEXT,
+                containerno TEXT NOT NULL,
+                event_time TEXT,
+                event_type TEXT,
+                fel TEXT,
+                iso TEXT,
+                gross REAL,
+                vgm TEXT,
+                category TEXT,
+                cust TEXT,
+                location TEXT,
+                truck_vessel TEXT,
+                trans_in TEXT,
+                trans_out TEXT,
+                gate_wt REAL,
+                line_oper TEXT,
+                im_exp TEXT,
+                bill_book TEXT,
+                cust_approval_date TEXT,
+                note TEXT,
+                item_seal_no TEXT,
+                custom_clearance_status TEXT,
+                infras_fee_status TEXT,
+                queried_at TEXT,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE,
+                UNIQUE(collection_id, containerno, event_time, event_type) ON CONFLICT REPLACE
+            );
+        """)
+
+        # Create container_watchlists table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS container_watchlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
+                site_id TEXT NOT NULL,
+                container_no TEXT NOT NULL,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE,
+                UNIQUE(collection_id, site_id, container_no) ON CONFLICT IGNORE
+            );
+        """)
         
         # Database migration: add port_of_discharging column if it doesn't exist
         try:
@@ -249,12 +295,28 @@ def export_backup_data() -> dict:
             if "collection_id" in v:
                 del v["collection_id"]
                 
+        containers = get_containers(col["id"])
+        for c in containers:
+            if "id" in c:
+                del c["id"]
+            if "collection_id" in c:
+                del c["collection_id"]
+                
+        c_watchlists = get_container_watchlist(col["id"])
+        for cw in c_watchlists:
+            if "id" in cw:
+                del cw["id"]
+            if "collection_id" in cw:
+                del cw["collection_id"]
+                
         backup_data.append({
             "name": col["name"],
             "created_at": col["created_at"],
             "settings": col.get("settings"),
             "bookings": bookings,
-            "vessel_schedules": vessels
+            "vessel_schedules": vessels,
+            "containers": containers,
+            "container_watchlists": c_watchlists
         })
         
     return {"collections": backup_data}
@@ -269,6 +331,8 @@ def import_backup_data(backup_data: dict):
         settings = col_data.get("settings")
         bookings = col_data.get("bookings", [])
         vessels = col_data.get("vessel_schedules", [])
+        containers = col_data.get("containers", [])
+        c_watchlists = col_data.get("container_watchlists", [])
         
         # Insert collection, if name exists, append suffix
         with get_connection() as conn:
@@ -288,7 +352,6 @@ def import_backup_data(backup_data: dict):
                     (new_name, created_at, settings)
                 )
                 col_id = cursor.lastrowid
-
                 
             conn.commit()
             
@@ -315,6 +378,13 @@ def import_backup_data(backup_data: dict):
                     "REMARKS": vs.get("remarks", "")
                 })
             insert_vessel_schedules(col_id, mapped_schedules)
+            
+        if containers:
+            insert_containers(col_id, containers)
+            
+        if c_watchlists:
+            for cw in c_watchlists:
+                add_to_container_watchlist(col_id, cw.get("site_id", ""), cw.get("container_no", ""))
             
     # Fallback for old backup format
     vessel_schedules_old = backup_data.get("vessel_schedules", [])
@@ -437,4 +507,111 @@ def add_to_watchlist(col_id: int, site_id: str, vessel_name: str, voyage: str):
 def remove_from_watchlist(watchlist_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM vessel_watchlists WHERE id = ?;", (watchlist_id,))
+        conn.commit()
+
+def insert_containers(col_id: int, containers: list[dict]) -> list[int]:
+    queried_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    inserted_ids = []
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        for c in containers:
+            cursor.execute("""
+                INSERT OR REPLACE INTO containers (
+                    collection_id, site_id, containerno, event_time, event_type, fel, iso,
+                    gross, vgm, category, cust, location, truck_vessel, trans_in, trans_out,
+                    gate_wt, line_oper, im_exp, bill_book, cust_approval_date, note, item_seal_no,
+                    custom_clearance_status, infras_fee_status, queried_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (
+                col_id,
+                c.get("SITE", c.get("site_id", "")),
+                c.get("CONTAINERNO", c.get("containerno", "")),
+                c.get("EVENT_TIME", c.get("event_time", "")),
+                c.get("EVENT_TYPE", c.get("event_type", "")),
+                c.get("FEL", c.get("fel", "")),
+                c.get("ISO", c.get("iso", "")),
+                c.get("GROSS", c.get("gross", 0.0)),
+                c.get("VGM", c.get("vgm", "")),
+                c.get("CATEGORY", c.get("category", "")),
+                c.get("CUST", c.get("cust", "")),
+                c.get("LOCATION", c.get("location", "")),
+                c.get("TRUCK_VESSEL", c.get("truck_vessel", "")),
+                c.get("TRANS_IN", c.get("trans_in", "")),
+                c.get("TRANS_OUT", c.get("trans_out", "")),
+                c.get("GATE_WT", c.get("gate_wt", 0.0)),
+                c.get("LINE_OPER", c.get("line_oper", "")),
+                c.get("IM_EXP", c.get("im_exp", "")),
+                c.get("BILL_BOOK", c.get("bill_book", "")),
+                c.get("CUST_APPROVAL_DATE", c.get("cust_approval_date", "")),
+                c.get("NOTE", c.get("note", "")),
+                c.get("ITEM_SEAL_NO", c.get("item_seal_no", "")),
+                c.get("CUSTOM_CLEARANCE_STATUS", c.get("custom_clearance_status", "")),
+                c.get("INFRAS_FEE_STATUS", c.get("infras_fee_status", "")),
+                queried_at
+            ))
+            if cursor.lastrowid:
+                inserted_ids.append(cursor.lastrowid)
+        conn.commit()
+    return inserted_ids
+
+def get_containers(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        if search_query:
+            q = f"%{search_query}%"
+            if search_field and search_field != "all":
+                allowed_columns = {
+                    "site_id", "containerno", "event_time", "event_type", "fel", "iso", "gross",
+                    "vgm", "category", "cust", "location", "truck_vessel", "trans_in", "trans_out",
+                    "gate_wt", "line_oper", "im_exp", "bill_book", "cust_approval_date", "note",
+                    "item_seal_no", "custom_clearance_status", "infras_fee_status", "queried_at"
+                }
+                if search_field in allowed_columns:
+                    query_str = f"SELECT * FROM containers WHERE collection_id = ? AND {search_field} LIKE ? ORDER BY queried_at DESC, id ASC;"
+                    cursor.execute(query_str, (col_id, q))
+                else:
+                    search_field = "all"
+            
+            if not search_field or search_field == "all":
+                cursor.execute("""
+                    SELECT * FROM containers 
+                    WHERE collection_id = ? AND (
+                        site_id LIKE ? OR containerno LIKE ? OR event_type LIKE ? OR
+                        location LIKE ? OR truck_vessel LIKE ? OR line_oper LIKE ? OR
+                        im_exp LIKE ? OR bill_book LIKE ? OR note LIKE ? OR item_seal_no LIKE ?
+                    ) ORDER BY queried_at DESC, id ASC;
+                """, (col_id, q, q, q, q, q, q, q, q, q, q))
+        else:
+            cursor.execute("SELECT * FROM containers WHERE collection_id = ? ORDER BY queried_at DESC, id ASC;", (col_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+def delete_container(cont_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM containers WHERE id = ?;", (cont_id,))
+        conn.commit()
+
+def clear_containers(col_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM containers WHERE collection_id = ?;", (col_id,))
+        conn.commit()
+
+def get_container_watchlist(col_id: int) -> list[dict]:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM container_watchlists WHERE collection_id = ? ORDER BY id ASC;", (col_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+def add_to_container_watchlist(col_id: int, site_id: str, container_no: str):
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO container_watchlists (collection_id, site_id, container_no)
+            VALUES (?, ?, ?);
+        """, (col_id, site_id.strip(), container_no.strip().upper()))
+        conn.commit()
+
+def remove_from_container_watchlist(watchlist_id: int):
+    with get_connection() as conn:
+        conn.execute("DELETE FROM container_watchlists WHERE id = ?;", (watchlist_id,))
         conn.commit()

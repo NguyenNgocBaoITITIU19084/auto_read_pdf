@@ -13,9 +13,11 @@ try:
         init_db, create_collection, get_collections, delete_collection, update_collection_settings,
         insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
         insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules,
-        get_watchlist, add_to_watchlist, remove_from_watchlist
+        get_watchlist, add_to_watchlist, remove_from_watchlist,
+        insert_containers, get_containers, delete_container, clear_containers,
+        get_container_watchlist, add_to_container_watchlist, remove_from_container_watchlist
     )
-    from src.eport_client import search_vessels
+    from src.eport_client import search_vessels, search_containers
 except ModuleNotFoundError:
     from extractor import extract_booking_data
     from exporter import export_to_excel
@@ -23,9 +25,11 @@ except ModuleNotFoundError:
         init_db, create_collection, get_collections, delete_collection, update_collection_settings,
         insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
         insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules,
-        get_watchlist, add_to_watchlist, remove_from_watchlist
+        get_watchlist, add_to_watchlist, remove_from_watchlist,
+        insert_containers, get_containers, delete_container, clear_containers,
+        get_container_watchlist, add_to_container_watchlist, remove_from_container_watchlist
     )
-    from eport_client import search_vessels
+    from eport_client import search_vessels, search_containers
 
 # Set appearance mode and color theme
 ctk.set_appearance_mode("System")
@@ -102,6 +106,63 @@ VESSEL_COLUMN_TRANSLATIONS = {
         "oog_open_ts": "Mở cổng cont OOG",
         "haz_open_ts": "Mở cổng cont nguy hiểm",
         "remarks": "Ghi chú",
+        "queried_at": "Tra cứu lúc"
+    }
+}
+
+CONTAINER_COLUMN_TRANSLATIONS = {
+    "en": {
+        "STT": "No.",
+        "site_id": "Site ID",
+        "containerno": "Container No",
+        "event_time": "Event Time",
+        "event_type": "Event Type",
+        "fel": "F/E",
+        "iso": "ISO",
+        "gross": "Gross (T)",
+        "vgm": "VGM",
+        "category": "Category",
+        "cust": "Customs",
+        "location": "Location",
+        "truck_vessel": "Truck/Vessel",
+        "trans_in": "Trans In",
+        "trans_out": "Trans Out",
+        "gate_wt": "Gate Wt (T)",
+        "line_oper": "Operator",
+        "im_exp": "Im/Exp",
+        "bill_book": "Bill/Booking",
+        "cust_approval_date": "HQGS Appr Date",
+        "note": "Note",
+        "item_seal_no": "Seal No",
+        "custom_clearance_status": "HQGS Status",
+        "infras_fee_status": "Infras Status",
+        "queried_at": "Queried At"
+    },
+    "vi": {
+        "STT": "STT",
+        "site_id": "Mã cảng",
+        "containerno": "Số Container",
+        "event_time": "Thời gian sự kiện",
+        "event_type": "Loại sự kiện",
+        "fel": "Hàng/Rỗng",
+        "iso": "ISO",
+        "gross": "Trọng lượng",
+        "vgm": "VGM",
+        "category": "Phân loại",
+        "cust": "Hải quan",
+        "location": "Vị trí bãi",
+        "truck_vessel": "Phương tiện/Tàu",
+        "trans_in": "Thời gian vào cảng",
+        "trans_out": "Thời gian ra cảng",
+        "gate_wt": "Cân cổng",
+        "line_oper": "Hãng tàu",
+        "im_exp": "Hướng nhập xuất",
+        "bill_book": "Vận đơn/Booking",
+        "cust_approval_date": "Ngày thông quan",
+        "note": "Ghi chú",
+        "item_seal_no": "Số Seal hãng tàu",
+        "custom_clearance_status": "Đủ ĐK qua khu vực HQGS",
+        "infras_fee_status": "Phí hạ tầng",
         "queried_at": "Tra cứu lúc"
     }
 }
@@ -276,6 +337,163 @@ class VesselWatchlistDialog(ctk.CTkToplevel):
             
         self.load_watchlist_data()
 
+class ContainerWatchlistDialog(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.title("Danh sách container cần theo dõi (Container Watchlist)" if parent.language == "vi" else "Container Watchlist")
+        self.geometry("700x500")
+        self.attributes("-topmost", True)
+        self.focus()
+        
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        
+        # --- Add Form ---
+        self.form_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.form_frame.grid(row=0, column=0, padx=15, pady=(15, 5), sticky="ew")
+        
+        self.port_label = ctk.CTkLabel(self.form_frame, text="Cảng:" if parent.language == "vi" else "Port:", font=ctk.CTkFont(size=12, weight="bold"))
+        self.port_label.pack(side="left", padx=5)
+        
+        self.port_menu = ctk.CTkOptionMenu(
+            self.form_frame,
+            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
+            width=150
+        )
+        self.port_menu.pack(side="left", padx=5)
+        self.port_menu.set("Cát Lái (CTL)")
+        
+        self.container_entry = ctk.CTkEntry(self.form_frame, placeholder_text="Số Container / Container No...", width=200)
+        self.container_entry.pack(side="left", padx=5)
+        self.container_entry.bind("<Return>", lambda e: self.add_item())
+        
+        self.add_btn = ctk.CTkButton(
+            self.form_frame,
+            text="Thêm" if parent.language == "vi" else "Add",
+            width=80,
+            command=self.add_item
+        )
+        self.add_btn.pack(side="left", padx=5)
+        
+        # --- Watchlist Table ---
+        self.table_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.table_frame.grid(row=1, column=0, padx=15, pady=5, sticky="nsew")
+        
+        self.scroll_y = ttk.Scrollbar(self.table_frame)
+        self.scroll_y.pack(side="right", fill="y")
+        
+        self.scroll_x = ttk.Scrollbar(self.table_frame, orient="horizontal")
+        self.scroll_x.pack(side="bottom", fill="x")
+        
+        self.tree = ttk.Treeview(
+            self.table_frame,
+            yscrollcommand=self.scroll_y.set,
+            xscrollcommand=self.scroll_x.set,
+            show="headings",
+            columns=("ID", "Port", "ContainerNo")
+        )
+        self.tree.pack(fill="both", expand=True)
+        
+        self.scroll_y.config(command=self.tree.yview)
+        self.scroll_x.config(command=self.tree.xview)
+        
+        # Setup table headers
+        self.tree.heading("ID", text="ID", anchor="center")
+        self.tree.heading("Port", text="Cảng / Port", anchor="w")
+        self.tree.heading("ContainerNo", text="Số Container / Container No", anchor="w")
+        
+        self.tree.column("ID", width=50, minwidth=50, stretch=False, anchor="center")
+        self.tree.column("Port", width=200, minwidth=150, anchor="w")
+        self.tree.column("ContainerNo", width=350, minwidth=250, anchor="w")
+        
+        # --- Bottom actions ---
+        self.actions_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.actions_frame.grid(row=2, column=0, padx=15, pady=(5, 15), sticky="ew")
+        
+        self.delete_btn = ctk.CTkButton(
+            self.actions_frame,
+            text="Xóa mục chọn" if parent.language == "vi" else "Delete Selected",
+            fg_color="#C0392B",
+            hover_color="#E74C3C",
+            command=self.delete_item,
+            width=130
+        )
+        self.delete_btn.pack(side="left", padx=5)
+        
+        self.close_btn = ctk.CTkButton(
+            self.actions_frame,
+            text="Đóng" if parent.language == "vi" else "Close",
+            command=self.destroy,
+            width=100
+        )
+        self.close_btn.pack(side="right", padx=5)
+        
+        self.load_watchlist_data()
+        
+    def load_watchlist_data(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        if self.parent.active_collection_id is None:
+            return
+            
+        watchlist = get_container_watchlist(self.parent.active_collection_id)
+        for item in watchlist:
+            port_display = "Cát Lái (CTL)" if item["site_id"] == "CTL" else "Cát Lái Giang Nam (GNL)"
+            self.tree.insert("", "end", values=(
+                item["id"],
+                port_display,
+                item["container_no"]
+            ))
+            
+    def add_item(self):
+        if self.parent.active_collection_id is None:
+            title = "Cảnh báo" if self.parent.language == "vi" else "Warning"
+            msg = "Vui lòng chọn hoặc tạo một Bộ sưu tập trước khi thêm danh sách theo dõi." if self.parent.language == "vi" else "Please select or create a Collection first."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        port_val = self.port_menu.get()
+        site_id = "CTL" if "GNL" not in port_val else "GNL"
+        container_no = self.container_entry.get().strip().upper()
+        
+        if not container_no:
+            title = "Thiếu thông tin" if self.parent.language == "vi" else "Missing info"
+            msg = "Vui lòng điền số Container!" if self.parent.language == "vi" else "Please enter Container number!"
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        add_to_container_watchlist(self.parent.active_collection_id, site_id, container_no)
+        self.container_entry.delete(0, "end")
+        self.load_watchlist_data()
+        
+        if self.parent.container_auto_request_running:
+            if self.parent.container_auto_timer_id is not None:
+                self.parent.after_cancel(self.parent.container_auto_timer_id)
+                self.parent.container_auto_timer_id = None
+            self.parent.trigger_container_auto_request()
+            
+    def delete_item(self):
+        selected = self.tree.selection()
+        if not selected:
+            title = "Cảnh báo" if self.parent.language == "vi" else "Warning"
+            msg = "Vui lòng chọn một dòng để xóa!" if self.parent.language == "vi" else "Please select a row to delete!"
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        for item in selected:
+            val = self.tree.item(item, "values")
+            watchlist_id = int(val[0])
+            remove_from_container_watchlist(watchlist_id)
+            
+        self.load_watchlist_data()
+        if self.parent.container_auto_request_running:
+            if self.parent.container_auto_timer_id is not None:
+                self.parent.after_cancel(self.parent.container_auto_timer_id)
+                self.parent.container_auto_timer_id = None
+            self.parent.trigger_container_auto_request()
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -340,6 +558,41 @@ class App(ctk.CTk):
         self.booking_column_widths = {}
         self.vessel_column_widths = {}
         self.last_auto_updated_ids = set()
+
+        self.container_display_data = []
+        self.container_columns = [
+            "STT",
+            "site_id",
+            "containerno",
+            "event_time",
+            "event_type",
+            "fel",
+            "iso",
+            "gross",
+            "vgm",
+            "category",
+            "cust",
+            "location",
+            "truck_vessel",
+            "trans_in",
+            "trans_out",
+            "gate_wt",
+            "line_oper",
+            "im_exp",
+            "bill_book",
+            "cust_approval_date",
+            "note",
+            "item_seal_no",
+            "custom_clearance_status",
+            "infras_fee_status",
+            "queried_at"
+        ]
+        self.default_container_columns = list(self.container_columns)
+        self.container_column_vars = {}
+        self.container_column_widths = {}
+        self.container_auto_timer_id = None
+        self.container_auto_request_running = False
+        self.last_container_auto_updated_ids = set()
 
         # Config grid
         self.grid_columnconfigure(1, weight=1)
@@ -452,6 +705,10 @@ class App(ctk.CTk):
         for col in self.vessel_columns:
             self.vessel_column_vars[col] = ctk.BooleanVar(value=True)
 
+        self.container_column_vars = {}
+        for col in self.container_columns:
+            self.container_column_vars[col] = ctk.BooleanVar(value=True)
+
         self.select_pdf_btn = ctk.CTkButton(self.sidebar_frame, text="Chọn file PDF", command=self.select_pdfs)
         self.select_pdf_btn.grid(row=8, column=0, padx=20, pady=5, sticky="ew")
 
@@ -498,6 +755,7 @@ class App(ctk.CTk):
 
         self.tab_booking = self.tab_view.add("Booking (Danh sách Booking)")
         self.tab_vessel = self.tab_view.add("ePort SNP (Lịch tàu)")
+        self.tab_container = self.tab_view.add("ePort SNP (Container)")
 
         # Grid configuration for Booking Tab
         self.tab_booking.grid_rowconfigure(1, weight=1)
@@ -725,9 +983,164 @@ class App(ctk.CTk):
         self.vessel_tree["columns"] = self.vessel_columns
         self.update_vessel_treeview_columns()
 
+        # --- ePort SNP Container Tab ---
+        self.tab_container.grid_rowconfigure(3, weight=1)
+        self.tab_container.grid_columnconfigure(0, weight=1)
+
+        # Control Panel for Container API Lookup inside Container Tab (Row 0)
+        self.container_action_frame = ctk.CTkFrame(self.tab_container, fg_color="transparent")
+        self.container_action_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
+
+        # Port Menu Label
+        self.container_port_label = ctk.CTkLabel(self.container_action_frame, text="Cảng / Port:", font=ctk.CTkFont(size=12, weight="bold"))
+        self.container_port_label.pack(side="left", padx=5)
+
+        self.container_port_menu = ctk.CTkOptionMenu(
+            self.container_action_frame,
+            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
+            width=180
+        )
+        self.container_port_menu.pack(side="left", padx=5)
+        self.container_port_menu.set("Cát Lái (CTL)")
+
+        # Container Numbers Entry
+        self.container_no_entry = ctk.CTkEntry(
+            self.container_action_frame, 
+            placeholder_text="Số Container (phân tách bằng dấu phẩy) / Container Nos...", 
+            width=320
+        )
+        self.container_no_entry.pack(side="left", fill="x", expand=True, padx=5)
+        self.container_no_entry.bind("<Return>", lambda e: self.search_eport_container())
+
+        # Action Buttons
+        self.container_search_btn = ctk.CTkButton(self.container_action_frame, text="Tra cứu", width=80, command=self.search_eport_container)
+        self.container_search_btn.pack(side="left", padx=5)
+
+        # Auto Lookup Panel (Row 1)
+        self.container_auto_frame = ctk.CTkFrame(self.tab_container, fg_color="transparent")
+        self.container_auto_frame.grid(row=1, column=0, padx=10, pady=(5, 5), sticky="ew")
+
+        # Auto Request Title/Label
+        self.container_auto_lbl = ctk.CTkLabel(
+            self.container_auto_frame, 
+            text="Tự động tra cứu / Auto Request:" if self.language == "vi" else "Auto Request:", 
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.container_auto_lbl.pack(side="left", padx=5)
+
+        # Interval label & entry
+        self.container_interval_lbl = ctk.CTkLabel(self.container_auto_frame, text="Chu kỳ (phút):" if self.language == "vi" else "Interval (mins):")
+        self.container_interval_lbl.pack(side="left", padx=2)
+
+        self.container_interval_entry = ctk.CTkEntry(self.container_auto_frame, width=60)
+        self.container_interval_entry.pack(side="left", padx=5)
+        self.container_interval_entry.insert(0, "5") # default 5 minutes
+
+        # Watchlist Dialog button
+        self.container_watchlist_btn = ctk.CTkButton(
+            self.container_auto_frame,
+            text="Danh sách theo dõi..." if self.language == "vi" else "Watchlist...",
+            width=150,
+            command=self.open_container_watchlist_dialog,
+            fg_color="#1ABC9C",
+            hover_color="#16A085"
+        )
+        self.container_watchlist_btn.pack(side="left", padx=5)
+
+        # Toggle Switch
+        self.container_auto_switch = ctk.CTkSwitch(
+            self.container_auto_frame,
+            text="Bật tự động" if self.language == "vi" else "Enable Auto",
+            command=self.toggle_container_auto_request
+        )
+        self.container_auto_switch.pack(side="left", padx=10)
+
+        # Auto Status Label
+        self.container_auto_status_lbl = ctk.CTkLabel(
+            self.container_auto_frame, 
+            text="Trạng thái: Đang tắt" if self.language == "vi" else "Status: Inactive", 
+            text_color="gray"
+        )
+        self.container_auto_status_lbl.pack(side="left", padx=10)
+
+        # Search Bar & Local Actions Panel inside Container Tab (Row 2)
+        self.container_search_action_frame = ctk.CTkFrame(self.tab_container, fg_color="transparent")
+        self.container_search_action_frame.grid(row=2, column=0, padx=10, pady=(5, 5), sticky="ew")
+
+        # Local search entry
+        self.container_search_entry = ctk.CTkEntry(self.container_search_action_frame, placeholder_text="Tìm kiếm container...", width=200)
+        self.container_search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.container_search_entry.bind("<Return>", lambda e: self.perform_container_search())
+
+        # Local search column selector
+        self.container_search_field_menu = ctk.CTkOptionMenu(
+            self.container_search_action_frame,
+            values=[],
+            width=140
+        )
+        self.container_search_field_menu.pack(side="left", padx=5)
+
+        # Search button
+        self.container_local_search_btn = ctk.CTkButton(self.container_search_action_frame, text="Tìm", width=80, command=self.perform_container_search)
+        self.container_local_search_btn.pack(side="left", padx=5)
+
+        # Clear/Reset search button
+        self.container_local_clear_btn = ctk.CTkButton(self.container_search_action_frame, text="Làm mới", width=90, command=self.refresh_container_data)
+        self.container_local_clear_btn.pack(side="left", padx=5)
+
+        self.container_copy_btn = ctk.CTkButton(
+            self.container_search_action_frame,
+            text="Sao chép nhanh",
+            width=110,
+            command=self.copy_selected_container_schedule
+        )
+        self.container_copy_btn.pack(side="left", padx=5)
+
+        self.container_delete_btn = ctk.CTkButton(
+            self.container_search_action_frame, 
+            text="Xóa dòng", 
+            width=110, 
+            fg_color="#C0392B", 
+            hover_color="#E74C3C", 
+            command=self.delete_selected_container
+        )
+        self.container_delete_btn.pack(side="right", padx=5)
+
+        # Treeview Scrollbars & Widget inside Container Tab (Row 3)
+        self.container_tree_container = ctk.CTkFrame(self.tab_container, fg_color="transparent")
+        self.container_tree_container.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="nsew")
+
+        self.container_tree_scroll_y = ttk.Scrollbar(self.container_tree_container)
+        self.container_tree_scroll_y.pack(side="right", fill="y")
+
+        self.container_tree_scroll_x = ttk.Scrollbar(self.container_tree_container, orient="horizontal")
+        self.container_tree_scroll_x.pack(side="bottom", fill="x")
+
+        self.container_tree = ttk.Treeview(
+            self.container_tree_container,
+            yscrollcommand=self.container_tree_scroll_y.set,
+            xscrollcommand=self.container_tree_scroll_x.set,
+            show="headings"
+        )
+        self.container_tree.pack(fill="both", expand=True)
+
+        self.container_tree_scroll_y.config(command=self.container_tree.yview)
+        self.container_tree_scroll_x.config(command=self.container_tree.xview)
+
+        # Bind double-click event to show details
+        self.container_tree.bind("<Double-1>", self.show_container_row_details)
+
+        # Capture column widths after user drag-resizes
+        self.container_tree.bind("<ButtonRelease-1>", self._on_container_tree_click_release)
+
+        # Setup ePort Container Treeview Columns
+        self.container_tree["columns"] = self.container_columns
+        self.update_container_treeview_columns()
+
         self.update_treeview_style()
         self.update_search_fields_ui()
         self.update_vessel_search_fields_ui()
+        self.update_container_search_fields_ui()
 
         # Load Collection & Draw checklist
         self.load_collections_to_ui()
@@ -825,6 +1238,17 @@ class App(ctk.CTk):
             self.vessel_sync_btn.configure(text="Sync Bookings")
             self.vessel_copy_btn.configure(text="Copy")
             self.vessel_delete_btn.configure(text="Delete Schedule")
+
+            # Container translations
+            self.container_port_label.configure(text="Port:")
+            self.container_no_entry.configure(placeholder_text="Container Nos (comma separated)...")
+            self.container_search_btn.configure(text="Search")
+            
+            self.container_search_entry.configure(placeholder_text="Search containers...")
+            self.container_local_search_btn.configure(text="Search")
+            self.container_local_clear_btn.configure(text="Refresh")
+            self.container_copy_btn.configure(text="Copy")
+            self.container_delete_btn.configure(text="Delete Row")
         else:
             self.language = "vi"
             self.select_pdf_btn.configure(text="Chọn file PDF")
@@ -854,18 +1278,33 @@ class App(ctk.CTk):
             self.vessel_sync_btn.configure(text="Cập nhật Booking")
             self.vessel_copy_btn.configure(text="Sao chép nhanh")
             self.vessel_delete_btn.configure(text="Xóa lịch tàu")
+
+            # Container translations
+            self.container_port_label.configure(text="Cảng / Port:")
+            self.container_no_entry.configure(placeholder_text="Số Container (phân tách bằng dấu phẩy) / Container Nos...")
+            self.container_search_btn.configure(text="Tra cứu")
+            
+            self.container_search_entry.configure(placeholder_text="Tìm kiếm container...")
+            self.container_local_search_btn.configure(text="Tìm")
+            self.container_local_clear_btn.configure(text="Làm mới")
+            self.container_copy_btn.configure(text="Sao chép nhanh")
+            self.container_delete_btn.configure(text="Xóa dòng")
         
         self.update_search_fields_ui()
         self.update_vessel_search_fields_ui()
+        self.update_container_search_fields_ui()
         
         current_tab = self.tab_view.get()
         if "Booking" in current_tab:
             self.draw_column_checklist()
+        elif "Container" in current_tab:
+            self.draw_container_column_checklist()
         else:
             self.draw_vessel_column_checklist()
             
         self.update_treeview_columns()
         self.update_vessel_treeview_columns()
+        self.update_container_treeview_columns()
 
     # --- Collection Management ---
     def load_collections_to_ui(self, select_newest=False):
@@ -913,11 +1352,17 @@ class App(ctk.CTk):
             self.load_bookings_from_db()
             self.load_vessel_schedules_from_db()
 
-    def get_column_alignment(self, col, is_vessel=False):
+    def get_column_alignment(self, col, is_vessel=False, is_container=False):
         if col == "STT":
             return "center"
         if is_vessel:
             if col in ["site_id", "agent", "in_gate", "actual_berth_time", "actual_departure_time", "closing_time", "closing_time_icd", "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "queried_at"]:
+                return "center"
+            return "w"
+        elif is_container:
+            if col in ["site_id", "containerno", "event_time", "event_type", "fel", "iso", "gross", "vgm", "category", "cust", "location", "trans_in", "trans_out", "gate_wt", "line_oper", "im_exp", "bill_book", "cust_approval_date", "custom_clearance_status", "infras_fee_status", "queried_at"]:
+                if col in ["containerno", "location", "bill_book", "note", "item_seal_no", "truck_vessel"]:
+                    return "w"
                 return "center"
             return "w"
         else:
@@ -980,14 +1425,37 @@ class App(ctk.CTk):
                     self.vessel_column_widths = saved_vessel_widths
                 else:
                     self.vessel_column_widths = {}
+
+                # Load container columns
+                saved_container_cols = settings.get("container_columns", [])
+                if saved_container_cols:
+                    valid_saved = [c for c in saved_container_cols if c in self.default_container_columns]
+                    missing = [c for c in self.default_container_columns if c not in valid_saved]
+                    self.container_columns = valid_saved + missing
+                    
+                saved_container_vis = settings.get("container_visibility", {})
+                for col in self.container_columns:
+                    val = saved_container_vis.get(col, True)
+                    if col in self.container_column_vars:
+                        self.container_column_vars[col].set(val)
+                    else:
+                        self.container_column_vars[col] = ctk.BooleanVar(value=val)
+
+                saved_container_widths = settings.get("container_widths", {})
+                if saved_container_widths:
+                    self.container_column_widths = saved_container_widths
+                else:
+                    self.container_column_widths = {}
             except Exception as e:
                 print(f"Error loading collection settings: {e}")
         else:
             # Reset to defaults
             self.all_columns = list(self.default_all_columns)
             self.vessel_columns = list(self.default_vessel_columns)
+            self.container_columns = list(self.default_container_columns)
             self.booking_column_widths = {}
             self.vessel_column_widths = {}
+            self.container_column_widths = {}
             for col in self.all_columns:
                 if col in self.column_vars:
                     self.column_vars[col].set(True)
@@ -998,6 +1466,11 @@ class App(ctk.CTk):
                     self.vessel_column_vars[col].set(True)
                 else:
                     self.vessel_column_vars[col] = ctk.BooleanVar(value=True)
+            for col in self.container_columns:
+                if col in self.container_column_vars:
+                    self.container_column_vars[col].set(True)
+                else:
+                    self.container_column_vars[col] = ctk.BooleanVar(value=True)
 
     def save_collection_settings(self):
         if self.active_collection_id is None:
@@ -1009,7 +1482,10 @@ class App(ctk.CTk):
             "booking_widths": self.booking_column_widths,
             "vessel_columns": self.vessel_columns,
             "vessel_visibility": {col: self.vessel_column_vars[col].get() for col in self.vessel_columns if col in self.vessel_column_vars},
-            "vessel_widths": self.vessel_column_widths
+            "vessel_widths": self.vessel_column_widths,
+            "container_columns": self.container_columns,
+            "container_visibility": {col: self.container_column_vars[col].get() for col in self.container_columns if col in self.container_column_vars},
+            "container_widths": self.container_column_widths
         }
         
         try:
@@ -1027,21 +1503,29 @@ class App(ctk.CTk):
         self.collection_menu.set(col_name)
         
         self.last_auto_updated_ids = set()
+        self.last_container_auto_updated_ids = set()
         self.load_collection_settings()
         
         current_tab = self.tab_view.get()
         if "Booking" in current_tab:
             self.draw_column_checklist()
+        elif "Container" in current_tab:
+            self.draw_container_column_checklist()
         else:
             self.draw_vessel_column_checklist()
         self.update_treeview_columns()
         self.update_vessel_treeview_columns()
+        self.update_container_treeview_columns()
 
         if self.auto_request_running:
             self.stop_auto_request_timer()
             self.start_auto_request_timer()
+        if self.container_auto_request_running:
+            self.stop_container_auto_request_timer()
+            self.start_container_auto_request_timer()
         self.load_bookings_from_db()
         self.load_vessel_schedules_from_db()
+        self.load_containers_from_db()
 
     def on_collection_changed(self, col_name):
         for col in self.collections:
@@ -1050,21 +1534,29 @@ class App(ctk.CTk):
                 self.active_collection_name = col["name"]
                 
                 self.last_auto_updated_ids = set()
+                self.last_container_auto_updated_ids = set()
                 self.load_collection_settings()
                 
                 current_tab = self.tab_view.get()
                 if "Booking" in current_tab:
                     self.draw_column_checklist()
+                elif "Container" in current_tab:
+                    self.draw_container_column_checklist()
                 else:
                     self.draw_vessel_column_checklist()
                 self.update_treeview_columns()
                 self.update_vessel_treeview_columns()
+                self.update_container_treeview_columns()
 
                 if self.auto_request_running:
                     self.stop_auto_request_timer()
                     self.start_auto_request_timer()
+                if self.container_auto_request_running:
+                    self.stop_container_auto_request_timer()
+                    self.start_container_auto_request_timer()
                 self.load_bookings_from_db()
                 self.load_vessel_schedules_from_db()
+                self.load_containers_from_db()
                 break
 
     def prompt_create_collection(self):
@@ -2118,6 +2610,13 @@ class App(ctk.CTk):
                 command=self.clear_data
             )
             self.export_btn.configure(command=self.export_excel)
+        elif "Container" in current_tab:
+            self.draw_container_column_checklist()
+            self.clear_btn.configure(
+                text="Xóa dữ liệu Cont" if self.language == "vi" else "Clear Cont Data",
+                command=self.clear_container_data
+            )
+            self.export_btn.configure(command=self.export_container_excel)
         else:
             self.draw_vessel_column_checklist()
             self.clear_btn.configure(
@@ -2300,6 +2799,563 @@ class App(ctk.CTk):
             except Exception as e:
                 print(f"Error clearing collection vessel schedules: {e}")
             self.refresh_vessel_schedule_data()
+
+    def _on_container_tree_click_release(self, event):
+        region = self.container_tree.identify_region(event.x, event.y)
+        self.after(50, self._save_container_column_widths)
+
+    def _save_container_column_widths(self):
+        if not self.container_tree["columns"]:
+            return
+        for col in self.container_tree["columns"]:
+            try:
+                self.container_column_widths[col] = self.container_tree.column(col, "width")
+            except Exception:
+                pass
+        self.save_collection_settings()
+
+    def update_container_treeview_columns(self):
+        selected_cols = [col for col in self.container_columns if self.container_column_vars[col].get()]
+        self.container_tree["columns"] = selected_cols
+        for col in selected_cols:
+            display_name = CONTAINER_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            align = self.get_column_alignment(col, is_container=True)
+            self.container_tree.heading(col, text=display_name, anchor=align)
+            
+            if col in self.container_column_widths:
+                w = self.container_column_widths[col]
+            else:
+                if col == "STT":
+                    w = 50
+                elif col in ["site_id"]:
+                    w = 80
+                elif col in ["containerno", "event_type"]:
+                    w = 120
+                elif col in ["event_time", "trans_in", "trans_out", "cust_approval_date", "queried_at"]:
+                    w = 150
+                else:
+                    w = 110
+
+            minwidth_val = 80
+            if col == "STT":
+                minwidth_val = 40
+            elif col in ["site_id"]:
+                minwidth_val = 60
+            elif col in ["containerno"]:
+                minwidth_val = 100
+            elif col in ["event_time", "trans_in", "trans_out", "cust_approval_date", "queried_at"]:
+                minwidth_val = 110
+
+            self.container_tree.column(col, width=w, minwidth=minwidth_val, anchor=align, stretch=False)
+        self.save_collection_settings()
+        self.populate_container_treeview()
+
+    def load_containers_from_db(self, query=None, field=None):
+        if query is None:
+            query = self.container_search_entry.get().strip()
+        if field is None:
+            selected_display = self.container_search_field_menu.get()
+            field = self.container_search_fields_mapping.get(selected_display, "all")
+            
+        if self.active_collection_id is None:
+            self.container_display_data = []
+            self.populate_container_treeview()
+            return
+            
+        self.container_display_data = get_containers(self.active_collection_id, search_query=query, search_field=field)
+        self.populate_container_treeview()
+
+    def perform_container_search(self):
+        self.last_container_auto_updated_ids = set()
+        query = self.container_search_entry.get().strip()
+        selected_display = self.container_search_field_menu.get()
+        field_name = self.container_search_fields_mapping.get(selected_display, "all")
+        self.load_containers_from_db(query if query else None, field_name)
+
+    def refresh_container_data(self):
+        self.container_search_entry.delete(0, "end")
+        default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
+        self.container_search_field_menu.set(default_val)
+        self.load_containers_from_db(query=None, field="all")
+
+    def populate_container_treeview(self):
+        for item in self.container_tree.get_children():
+            self.container_tree.delete(item)
+            
+        selected_cols = [col for col in self.container_columns if self.container_column_vars[col].get()]
+        
+        for idx, row_data in enumerate(self.container_display_data):
+            values = []
+            row_id = row_data.get("id")
+            for col in selected_cols:
+                if col == "STT":
+                    values.append(str(idx + 1))
+                else:
+                    val = row_data.get(col, "")
+                    if val is None or val == "None":
+                        val = ""
+                    if col == "queried_at" and row_id in self.last_container_auto_updated_ids:
+                        time_part = val.split(" ")[-1] if " " in val else val
+                        prefix = "Cập nhật lúc" if self.language == "vi" else "Updated at"
+                        val = f"✅ {prefix} {time_part}"
+                    values.append(str(val))
+            
+            tag = "evenrow" if idx % 2 == 0 else "oddrow"
+            self.container_tree.insert("", "end", iid=str(row_data["id"]), values=values, tags=(tag,))
+
+    def search_eport_container(self):
+        if self.active_collection_id is None:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn hoặc tạo một Bộ sưu tập trước khi tra cứu container." if self.language == "vi" else "Please select or create a Collection before searching containers."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+
+        port_val = self.container_port_menu.get()
+        site_id = "CTL" if "GNL" not in port_val else "GNL"
+        container_nos = self.container_no_entry.get().strip()
+        
+        if not container_nos:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng nhập số container để tra cứu." if self.language == "vi" else "Please enter container number to search."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+
+        self.last_container_auto_updated_ids = set()
+        orig_text = self.container_search_btn.cget("text")
+        loading_text = "Đang tra cứu..." if self.language == "vi" else "Searching..."
+        self.container_search_btn.configure(text=loading_text, state="disabled")
+        
+        def run_thread():
+            try:
+                results = search_containers(site_id, container_nos)
+                if results:
+                    insert_containers(self.active_collection_id, results)
+                    def success_ui():
+                        self.load_containers_from_db()
+                        title = "Thành công" if self.language == "vi" else "Success"
+                        msg = f"Đã lấy thành công {len(results)} dòng dữ liệu container!" if self.language == "vi" else f"Successfully fetched {len(results)} container records!"
+                        messagebox.showinfo(title, msg, parent=self)
+                    self.after(0, success_ui)
+                else:
+                    def empty_ui():
+                        title = "Không tìm thấy" if self.language == "vi" else "Not found"
+                        msg = "Không tìm thấy thông tin container nào." if self.language == "vi" else "No container information found."
+                        messagebox.showinfo(title, msg, parent=self)
+                    self.after(0, empty_ui)
+            except Exception as e:
+                def err_ui(err_msg):
+                    title = "Lỗi" if self.language == "vi" else "Error"
+                    msg = f"Lỗi tra cứu ePort: {err_msg}" if self.language == "vi" else f"ePort lookup error: {err_msg}"
+                    messagebox.showerror(title, msg, parent=self)
+                self.after(0, err_ui, str(e))
+            finally:
+                def reset_btn():
+                    self.container_search_btn.configure(text=orig_text, state="normal")
+                self.after(0, reset_btn)
+
+        import threading
+        threading.Thread(target=run_thread, daemon=True).start()
+
+    def delete_selected_container(self):
+        selected_items = self.container_tree.selection()
+        if not selected_items:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn dòng container cần xóa." if self.language == "vi" else "Please select a container row to delete."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        confirm_title = "Xác nhận xóa" if self.language == "vi" else "Confirm Delete"
+        confirm_msg = "Bạn có chắc chắn muốn xóa dòng container đang chọn khỏi cơ sở dữ liệu không?" if self.language == "vi" else "Are you sure you want to delete the selected container row?"
+        if not messagebox.askyesno(confirm_title, confirm_msg, parent=self):
+            return
+            
+        for item in selected_items:
+            db_id = int(item)
+            delete_container(db_id)
+            
+        self.load_containers_from_db()
+
+    def clear_container_data(self):
+        if self.active_collection_id is None:
+            return
+        confirm_title = "Xác nhận xóa sạch" if self.language == "vi" else "Confirm Clear"
+        confirm_msg = f"Bạn có chắc muốn xóa sạch toàn bộ dữ liệu container của Collection '{self.active_collection_name}' không?" if self.language == "vi" else f"Are you sure you want to clear all container data for collection '{self.active_collection_name}'?"
+        if messagebox.askyesno(confirm_title, confirm_msg, parent=self):
+            try:
+                clear_containers(self.active_collection_id)
+            except Exception as e:
+                print(f"Error clearing container data: {e}")
+            self.refresh_container_data()
+
+    def copy_selected_container_schedule(self):
+        selected = self.container_tree.selection()
+        if not selected:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Vui lòng chọn dòng container cần sao chép." if self.language == "vi" else "Please select a container row to copy."
+            messagebox.showwarning(title, msg, parent=self)
+            return
+            
+        db_id = int(selected[0])
+        row_data = None
+        for row in self.container_display_data:
+            if row["id"] == db_id:
+                row_data = row
+                break
+        if not row_data:
+            return
+            
+        lines = []
+        for col in self.container_columns:
+            if col == "STT":
+                continue
+            display_name = CONTAINER_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            val = row_data.get(col, "")
+            lines.append(f"{display_name}: {val}")
+            
+        formatted_str = "\n".join(lines)
+        self.clipboard_clear()
+        self.clipboard_append(formatted_str)
+        self.update()
+        
+        title = "Thành công" if self.language == "vi" else "Success"
+        msg = "Đã sao chép dữ liệu container vào Clipboard!" if self.language == "vi" else "Container details copied to clipboard!"
+        messagebox.showinfo(title, msg, parent=self)
+
+    def show_container_row_details(self, event):
+        selected_item = self.container_tree.selection()
+        if not selected_item:
+            return
+            
+        db_id = int(selected_item[0])
+        row_data = None
+        for row in self.container_display_data:
+            if row["id"] == db_id:
+                row_data = row
+                break
+        if not row_data:
+            return
+            
+        popup_title = "Chi tiết Container" if self.language == "vi" else "Container Details"
+        popup_header = "CHI TIẾT THÔNG TIN CONTAINER" if self.language == "vi" else "CONTAINER DETAILS"
+        copy_text = "Sao chép nhanh" if self.language == "vi" else "Copy Details"
+        close_text = "Đóng" if self.language == "vi" else "Close"
+
+        popup = ctk.CTkToplevel(self)
+        popup.title(popup_title)
+        popup.geometry("600x600")
+        popup.attributes("-topmost", True)
+        
+        scroll_frame = ctk.CTkScrollableFrame(popup)
+        scroll_frame.pack(fill="both", expand=True, padx=15, pady=15)
+        
+        title_label = ctk.CTkLabel(scroll_frame, text=popup_header, font=ctk.CTkFont(size=16, weight="bold"))
+        title_label.pack(pady=(10, 15))
+        
+        for col in self.container_columns:
+            if col == "STT":
+                continue
+            display_name = CONTAINER_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            val = row_data.get(col, "")
+            
+            row_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            row_frame.pack(fill="x", pady=2)
+            
+            lbl_name = ctk.CTkLabel(row_frame, text=f"{display_name}:", font=ctk.CTkFont(size=11, weight="bold"), width=200, anchor="w")
+            lbl_name.pack(side="left", padx=5)
+            
+            txt_val = ctk.CTkEntry(row_frame, height=22, font=ctk.CTkFont(size=11))
+            txt_val.pack(side="left", fill="x", expand=True, padx=5)
+            txt_val.insert(0, str(val) if val is not None else "")
+            txt_val.configure(state="readonly")
+            
+        btn_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(5, 15))
+        
+        def copy_popup_details():
+            lines = []
+            for col in self.container_columns:
+                if col == "STT":
+                    continue
+                display_name = CONTAINER_COLUMN_TRANSLATIONS[self.language].get(col, col)
+                val = row_data.get(col, "")
+                lines.append(f"{display_name}: {val}")
+            formatted_str = "\n".join(lines)
+            self.clipboard_clear()
+            self.clipboard_append(formatted_str)
+            self.update()
+            
+            title = "Thành công" if self.language == "vi" else "Success"
+            msg = "Đã sao chép dòng dữ liệu vào Clipboard!" if self.language == "vi" else "Row data copied to clipboard!"
+            messagebox.showinfo(title, msg, parent=popup)
+
+        popup_copy_btn = ctk.CTkButton(btn_frame, text=copy_text, command=copy_popup_details)
+        popup_copy_btn.pack(side="left", expand=True, padx=15)
+        
+        close_btn = ctk.CTkButton(btn_frame, text=close_text, command=popup.destroy)
+        close_btn.pack(side="left", expand=True, padx=15)
+
+    def export_container_excel(self):
+        if not self.container_display_data:
+            title = "Cảnh báo" if self.language == "vi" else "Warning"
+            msg = "Không có dữ liệu container để xuất!" if self.language == "vi" else "No container data to export!"
+            messagebox.showwarning(title, msg, parent=self)
+            return
+
+        title_save = "Lưu file Excel" if self.language == "vi" else "Save Excel File"
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx")],
+            title=title_save
+        )
+        if save_path:
+            try:
+                selected_cols = [col for col in self.container_columns if self.container_column_vars[col].get()]
+                export_headers = [CONTAINER_COLUMN_TRANSLATIONS[self.language].get(col, col) for col in selected_cols]
+                
+                rows_data = []
+                for idx, row_dict in enumerate(self.container_display_data):
+                    row_vals = []
+                    for col in selected_cols:
+                        if col == "STT":
+                            row_vals.append(idx + 1)
+                        else:
+                            val = row_dict.get(col, "")
+                            row_vals.append(val if val is not None else "")
+                    rows_data.append(row_vals)
+                    
+                export_to_excel(save_path, export_headers, rows_data)
+                
+                title = "Thành công" if self.language == "vi" else "Success"
+                msg = f"Đã xuất dữ liệu Excel thành công ra {save_path}" if self.language == "vi" else f"Excel exported successfully to {save_path}"
+                messagebox.showinfo(title, msg)
+            except Exception as e:
+                title = "Lỗi" if self.language == "vi" else "Error"
+                msg = f"Lỗi xuất Excel: {e}" if self.language == "vi" else f"Excel export error: {e}"
+                messagebox.showerror(title, msg)
+
+    def open_container_watchlist_dialog(self):
+        ContainerWatchlistDialog(self)
+
+    def toggle_container_auto_request(self):
+        if self.container_auto_switch.get():
+            self.container_auto_request_running = True
+            self.start_container_auto_request_timer()
+            status_text = "Trạng thái: Đang hoạt động" if self.language == "vi" else "Status: Running"
+            self.container_auto_status_lbl.configure(text=status_text, text_color="green")
+        else:
+            self.container_auto_request_running = False
+            self.stop_container_auto_request_timer()
+            status_text = "Trạng thái: Đang tắt" if self.language == "vi" else "Status: Inactive"
+            self.container_auto_status_lbl.configure(text=status_text, text_color="gray")
+
+    def start_container_auto_request_timer(self):
+        if not self.container_auto_request_running:
+            return
+        self.trigger_container_auto_request()
+
+    def stop_container_auto_request_timer(self):
+        if self.container_auto_timer_id is not None:
+            self.after_cancel(self.container_auto_timer_id)
+            self.container_auto_timer_id = None
+
+    def trigger_container_auto_request(self):
+        if not self.container_auto_request_running or self.active_collection_id is None:
+            return
+            
+        watchlist = get_container_watchlist(self.active_collection_id)
+        if not watchlist:
+            self.reschedule_container_auto_request()
+            return
+            
+        import threading
+        t = threading.Thread(target=self.run_container_auto_request_thread, args=(self.active_collection_id, watchlist), daemon=True)
+        t.start()
+
+    def run_container_auto_request_thread(self, col_id, watchlist):
+        success_count = 0
+        error_messages = []
+        updated_ids = []
+        
+        def update_fetching_status():
+            fetching_text = "Đang lấy dữ liệu..." if self.language == "vi" else "Fetching..."
+            self.container_auto_status_lbl.configure(text=f"Trạng thái: {fetching_text}", text_color="orange")
+        self.after(0, update_fetching_status)
+        
+        # Group containers by site_id so we do a single batch lookup per site_id
+        grouped = {}
+        for item in watchlist:
+            site = item["site_id"]
+            c_no = item["container_no"]
+            grouped.setdefault(site, []).append(c_no)
+            
+        for site_id, c_nos in grouped.items():
+            if not self.container_auto_request_running:
+                break
+                
+            joined_cont_nos = ", ".join(c_nos)
+            try:
+                results = search_containers(site_id, joined_cont_nos)
+                if results:
+                    ids = insert_containers(col_id, results)
+                    updated_ids.extend(ids)
+                    success_count += len(results)
+            except Exception as e:
+                error_messages.append(f"Cảng {site_id}: {e}")
+                
+        err_msg = "; ".join(error_messages) if error_messages else None
+        self.after(0, self.handle_container_auto_request_result, success_count, err_msg, updated_ids)
+
+    def handle_container_auto_request_result(self, success_count, error_msg, updated_ids=None):
+        if not self.container_auto_request_running:
+            return
+            
+        if updated_ids:
+            self.last_container_auto_updated_ids = set(updated_ids)
+        else:
+            self.last_container_auto_updated_ids = set()
+            
+        self.load_containers_from_db()
+            
+        now_str = datetime.now().strftime("%H:%M:%S")
+        if error_msg:
+            status_text = f"Lỗi lúc {now_str} (Lấy {success_count} dòng)" if self.language == "vi" else f"Error at {now_str} (Got {success_count} rows)"
+            self.container_auto_status_lbl.configure(text=status_text, text_color="red")
+        else:
+            status_text = f"Cập nhật lúc {now_str} (+{success_count} dòng)" if self.language == "vi" else f"Updated at {now_str} (+{success_count} rows)"
+            self.container_auto_status_lbl.configure(text=status_text, text_color="green")
+            
+        self.reschedule_container_auto_request()
+
+    def reschedule_container_auto_request(self):
+        if not self.container_auto_request_running:
+            return
+        try:
+            mins = float(self.container_interval_entry.get().strip())
+            if mins < 1.0:
+                mins = 1.0
+        except Exception:
+            mins = 5.0
+            
+        ms = int(mins * 60 * 1000)
+        self.container_auto_timer_id = self.after(ms, self.trigger_container_auto_request)
+
+    def update_container_search_fields_ui(self):
+        if self.language == "vi":
+            self.container_search_fields_mapping = {
+                "Tất cả các cột": "all",
+                "Mã cảng": "site_id",
+                "Số Container": "containerno",
+                "Thời gian sự kiện": "event_time",
+                "Loại sự kiện": "event_type",
+                "Hàng/Rỗng": "fel",
+                "ISO": "iso",
+                "Vị trí bãi": "location",
+                "Phương tiện/Tàu": "truck_vessel",
+                "Hãng tàu": "line_oper",
+                "Hướng nhập xuất": "im_exp",
+                "Vận đơn/Booking": "bill_book",
+                "Ghi chú": "note",
+                "Đủ ĐK qua khu vực HQGS": "custom_clearance_status",
+                "Tra cứu lúc": "queried_at"
+            }
+        else:
+            self.container_search_fields_mapping = {
+                "All Columns": "all",
+                "Site ID": "site_id",
+                "Container No": "containerno",
+                "Event Time": "event_time",
+                "Event Type": "event_type",
+                "F/E": "fel",
+                "ISO": "iso",
+                "Location": "location",
+                "Truck/Vessel": "truck_vessel",
+                "Operator": "line_oper",
+                "Im/Exp": "im_exp",
+                "Bill/Booking": "bill_book",
+                "Note": "note",
+                "Customs Status": "custom_clearance_status",
+                "Queried At": "queried_at"
+            }
+        values = list(self.container_search_fields_mapping.keys())
+        self.container_search_field_menu.configure(values=values)
+        default_val = "Tất cả các cột" if self.language == "vi" else "All Columns"
+        self.container_search_field_menu.set(default_val)
+
+    def draw_container_column_checklist(self):
+        for widget in self.checkbox_frame.winfo_children():
+            widget.destroy()
+
+        for idx, col in enumerate(self.container_columns):
+            display_name = CONTAINER_COLUMN_TRANSLATIONS[self.language].get(col, col)
+            var = self.container_column_vars.setdefault(col, ctk.BooleanVar(value=True))
+            cb = ctk.CTkCheckBox(
+                self.checkbox_frame, 
+                text="", 
+                variable=var, 
+                command=self.update_container_treeview_columns,
+                width=20,
+                checkbox_width=20,
+                checkbox_height=20
+            )
+            cb.grid(row=idx, column=0, padx=(5, 5), pady=3, sticky="w")
+            
+            entry_var = tk.StringVar(value=display_name)
+            entry = ctk.CTkEntry(
+                self.checkbox_frame,
+                textvariable=entry_var,
+                width=140,
+                height=24,
+                font=ctk.CTkFont(size=11)
+            )
+            entry.grid(row=idx, column=1, padx=2, pady=3, sticky="ew")
+            
+            if self.language == "vi":
+                entry.configure(state="normal")
+                entry.bind("<KeyRelease>", lambda e, c=col, ev=entry_var: self.update_container_vietnamese_translation(c, ev.get()))
+                entry.bind("<FocusOut>", lambda e, c=col, ev=entry_var: self.update_container_vietnamese_translation(c, ev.get()))
+            else:
+                entry.configure(state="disabled")
+            
+            up_btn = ctk.CTkButton(
+                self.checkbox_frame, 
+                text="▲", 
+                width=24, 
+                height=20,
+                fg_color="gray",
+                hover_color="darkgray",
+                command=lambda c=col: self.move_container_column_up(c)
+            )
+            up_btn.grid(row=idx, column=2, padx=2, pady=3)
+            
+            down_btn = ctk.CTkButton(
+                self.checkbox_frame, 
+                text="▼", 
+                width=24, 
+                height=20,
+                fg_color="gray",
+                hover_color="darkgray",
+                command=lambda c=col: self.move_container_column_down(c)
+            )
+            down_btn.grid(row=idx, column=3, padx=2, pady=3)
+
+    def update_container_vietnamese_translation(self, col, new_val):
+        if self.language == "vi":
+            CONTAINER_COLUMN_TRANSLATIONS["vi"][col] = new_val
+            self.update_container_treeview_columns()
+
+    def move_container_column_up(self, col):
+        idx = self.container_columns.index(col)
+        if idx > 0:
+            self.container_columns[idx], self.container_columns[idx-1] = self.container_columns[idx-1], self.container_columns[idx]
+            self.draw_container_column_checklist()
+            self.update_container_treeview_columns()
+
+    def move_container_column_down(self, col):
+        idx = self.container_columns.index(col)
+        if idx < len(self.container_columns) - 1:
+            self.container_columns[idx], self.container_columns[idx+1] = self.container_columns[idx+1], self.container_columns[idx]
+            self.draw_container_column_checklist()
+            self.update_container_treeview_columns()
 
 if __name__ == "__main__":
     app = App()
