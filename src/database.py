@@ -16,9 +16,21 @@ def init_db():
             CREATE TABLE IF NOT EXISTS collections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT UNIQUE NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                settings TEXT
             );
         """)
+
+        # Check if settings column exists in collections
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT settings FROM collections LIMIT 1;")
+        except sqlite3.OperationalError:
+            try:
+                cursor.execute("ALTER TABLE collections ADD COLUMN settings TEXT;")
+            except sqlite3.OperationalError:
+                pass
+
         
         # Create bookings table
         conn.execute("""
@@ -118,6 +130,12 @@ def delete_collection(col_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM collections WHERE id = ?;", (col_id,))
         conn.commit()
+
+def update_collection_settings(col_id: int, settings_str: str):
+    with get_connection() as conn:
+        conn.execute("UPDATE collections SET settings = ? WHERE id = ?;", (settings_str, col_id))
+        conn.commit()
+
 
 def insert_booking(col_id: int, data: dict) -> int:
     with get_connection() as conn:
@@ -234,6 +252,7 @@ def export_backup_data() -> dict:
         backup_data.append({
             "name": col["name"],
             "created_at": col["created_at"],
+            "settings": col.get("settings"),
             "bookings": bookings,
             "vessel_schedules": vessels
         })
@@ -247,6 +266,7 @@ def import_backup_data(backup_data: dict):
     for col_data in backup_data["collections"]:
         name = col_data.get("name")
         created_at = col_data.get("created_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        settings = col_data.get("settings")
         bookings = col_data.get("bookings", [])
         vessels = col_data.get("vessel_schedules", [])
         
@@ -255,8 +275,8 @@ def import_backup_data(backup_data: dict):
             cursor = conn.cursor()
             try:
                 cursor.execute(
-                    "INSERT INTO collections (name, created_at) VALUES (?, ?);",
-                    (name, created_at)
+                    "INSERT INTO collections (name, created_at, settings) VALUES (?, ?, ?);",
+                    (name, created_at, settings)
                 )
                 col_id = cursor.lastrowid
             except sqlite3.IntegrityError:
@@ -264,10 +284,11 @@ def import_backup_data(backup_data: dict):
                 suffix = datetime.now().strftime("%Y%m%d%H%M%S")
                 new_name = f"{name}_imported_{suffix}"
                 cursor.execute(
-                    "INSERT INTO collections (name, created_at) VALUES (?, ?);",
-                    (new_name, created_at)
+                    "INSERT INTO collections (name, created_at, settings) VALUES (?, ?, ?);",
+                    (new_name, created_at, settings)
                 )
                 col_id = cursor.lastrowid
+
                 
             conn.commit()
             
@@ -321,8 +342,9 @@ def import_backup_data(backup_data: dict):
                 })
             insert_vessel_schedules(first_col_id, mapped_schedules)
 
-def insert_vessel_schedules(col_id: int, schedules: list[dict]):
+def insert_vessel_schedules(col_id: int, schedules: list[dict]) -> list[int]:
     queried_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    inserted_ids = []
     with get_connection() as conn:
         cursor = conn.cursor()
         for s in schedules:
@@ -350,7 +372,10 @@ def insert_vessel_schedules(col_id: int, schedules: list[dict]):
                 s.get("REMARKS", ""),
                 queried_at
             ))
+            if cursor.lastrowid:
+                inserted_ids.append(cursor.lastrowid)
         conn.commit()
+    return inserted_ids
 
 def get_vessel_schedules(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
     with get_connection() as conn:

@@ -10,7 +10,7 @@ try:
     from src.extractor import extract_booking_data
     from src.exporter import export_to_excel
     from src.database import (
-        init_db, create_collection, get_collections, delete_collection, 
+        init_db, create_collection, get_collections, delete_collection, update_collection_settings,
         insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
         insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules,
         get_watchlist, add_to_watchlist, remove_from_watchlist
@@ -20,7 +20,7 @@ except ModuleNotFoundError:
     from extractor import extract_booking_data
     from exporter import export_to_excel
     from database import (
-        init_db, create_collection, get_collections, delete_collection, 
+        init_db, create_collection, get_collections, delete_collection, update_collection_settings,
         insert_booking, get_bookings, delete_booking, export_backup_data, import_backup_data,
         insert_vessel_schedules, get_vessel_schedules, delete_vessel_schedule, clear_vessel_schedules,
         get_watchlist, add_to_watchlist, remove_from_watchlist
@@ -174,10 +174,10 @@ class VesselWatchlistDialog(ctk.CTkToplevel):
         self.scroll_x.config(command=self.tree.xview)
         
         # Setup table headers
-        self.tree.heading("ID", text="ID")
-        self.tree.heading("Port", text="Cảng / Port")
-        self.tree.heading("Vessel", text="Tên tàu / Vessel")
-        self.tree.heading("Voyage", text="Chuyến / Voyage")
+        self.tree.heading("ID", text="ID", anchor="center")
+        self.tree.heading("Port", text="Cảng / Port", anchor="w")
+        self.tree.heading("Vessel", text="Tên tàu / Vessel", anchor="w")
+        self.tree.heading("Voyage", text="Chuyến / Voyage", anchor="center")
         
         self.tree.column("ID", width=50, minwidth=50, stretch=False, anchor="center")
         self.tree.column("Port", width=150, minwidth=100, anchor="w")
@@ -331,8 +331,15 @@ class App(ctk.CTk):
             "queried_at"
         ]
 
+        self.default_all_columns = list(self.all_columns)
+        self.default_vessel_columns = list(self.vessel_columns)
+
         self.vessel_auto_timer_id = None
         self.auto_request_running = False
+
+        self.booking_column_widths = {}
+        self.vessel_column_widths = {}
+        self.last_auto_updated_ids = set()
 
         # Config grid
         self.grid_columnconfigure(1, weight=1)
@@ -550,6 +557,9 @@ class App(ctk.CTk):
         # Double click to view details
         self.tree.bind("<Double-1>", self.show_row_details)
 
+        # Capture column widths after user drag-resizes
+        self.tree.bind("<ButtonRelease-1>", self._on_booking_tree_click_release)
+
         # --- ePort SNP Tab ---
         self.tab_vessel.grid_rowconfigure(3, weight=1)
         self.tab_vessel.grid_columnconfigure(0, weight=1)
@@ -708,6 +718,9 @@ class App(ctk.CTk):
         # Bind double-click event to show details
         self.vessel_tree.bind("<Double-1>", self.show_vessel_row_details)
 
+        # Capture column widths after user drag-resizes
+        self.vessel_tree.bind("<ButtonRelease-1>", self._on_vessel_tree_click_release)
+
         # Setup ePort Vessel Treeview Columns
         self.vessel_tree["columns"] = self.vessel_columns
         self.update_vessel_treeview_columns()
@@ -720,6 +733,39 @@ class App(ctk.CTk):
         self.load_collections_to_ui()
         self.draw_column_checklist()
         self.update_treeview_columns()
+
+    def _on_booking_tree_click_release(self, event):
+        """Capture column widths after user drag-resizes a column separator."""
+        region = self.tree.identify_region(event.x, event.y)
+        # Use a small delay to let Tkinter finish processing the resize internally
+        self.after(50, self._save_booking_column_widths)
+
+    def _save_booking_column_widths(self):
+        """Read actual column widths from the Treeview and store them."""
+        if not self.tree["columns"]:
+            return
+        for col in self.tree["columns"]:
+            try:
+                self.booking_column_widths[col] = self.tree.column(col, "width")
+            except Exception:
+                pass
+        self.save_collection_settings()
+
+    def _on_vessel_tree_click_release(self, event):
+        """Capture column widths after user drag-resizes a vessel column separator."""
+        region = self.vessel_tree.identify_region(event.x, event.y)
+        self.after(50, self._save_vessel_column_widths)
+
+    def _save_vessel_column_widths(self):
+        """Read actual column widths from the vessel Treeview and store them."""
+        if not self.vessel_tree["columns"]:
+            return
+        for col in self.vessel_tree["columns"]:
+            try:
+                self.vessel_column_widths[col] = self.vessel_tree.column(col, "width")
+            except Exception:
+                pass
+        self.save_collection_settings()
 
     def change_font_size(self, delta):
         self.font_size = max(8, min(30, self.font_size + delta))
@@ -741,13 +787,13 @@ class App(ctk.CTk):
                 t.tag_configure("oddrow", background="#2D3238", foreground="white")
                 t.tag_configure("evenrow", background="#1F2326", foreground="white")
             self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height, background="#1F2326", fieldbackground="#1F2326", foreground="white", gridcolor="#3F444A")
-            self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#2D3238", foreground="white")
+            self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#2D3238", foreground="white", relief="raised", borderwidth=1)
         else:
             for t in trees:
                 t.tag_configure("oddrow", background="#F2F7FA", foreground="black")
                 t.tag_configure("evenrow", background="#FFFFFF", foreground="black")
             self.style.configure("Treeview", font=("Segoe UI", self.font_size), rowheight=row_height, background="#FFFFFF", fieldbackground="#FFFFFF", foreground="black", gridcolor="#D3D3D3")
-            self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#EAEAEA", foreground="black")
+            self.style.configure("Treeview.Heading", font=("Segoe UI", self.font_size, "bold"), background="#EAEAEA", foreground="black", relief="raised", borderwidth=1)
 
     def change_language(self, val):
         if val == "English":
@@ -841,6 +887,20 @@ class App(ctk.CTk):
             self.set_active_collection(newest["id"], newest["name"])
         elif self.active_collection_name in col_names:
             self.collection_menu.set(self.active_collection_name)
+            col_id = None
+            for col in self.collections:
+                if col["name"] == self.active_collection_name:
+                    col_id = col["id"]
+                    break
+            self.active_collection_id = col_id
+            self.load_collection_settings()
+            current_tab = self.tab_view.get()
+            if "Booking" in current_tab:
+                self.draw_column_checklist()
+            else:
+                self.draw_vessel_column_checklist()
+            self.update_treeview_columns()
+            self.update_vessel_treeview_columns()
         elif self.collections:
             self.set_active_collection(self.collections[0]["id"], self.collections[0]["name"])
         else:
@@ -853,10 +913,130 @@ class App(ctk.CTk):
             self.load_bookings_from_db()
             self.load_vessel_schedules_from_db()
 
+    def get_column_alignment(self, col, is_vessel=False):
+        if col == "STT":
+            return "center"
+        if is_vessel:
+            if col in ["site_id", "agent", "in_gate", "actual_berth_time", "actual_departure_time", "closing_time", "closing_time_icd", "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "queried_at"]:
+                return "center"
+            return "w"
+        else:
+            if col in ["Booking No", "Block", "Equipment Type", "Q'ty", "Port Cargo Cut-off", "ETD"]:
+                return "center"
+            return "w"
+
+    def load_collection_settings(self):
+        if self.active_collection_id is None:
+            return
+
+        current_col = None
+        for col in self.collections:
+            if col["id"] == self.active_collection_id:
+                current_col = col
+                break
+
+        if current_col and current_col.get("settings"):
+            try:
+                settings = json.loads(current_col["settings"])
+                
+                # Load booking columns
+                saved_booking_cols = settings.get("booking_columns", [])
+                if saved_booking_cols:
+                    valid_saved = [c for c in saved_booking_cols if c in self.default_all_columns]
+                    missing = [c for c in self.default_all_columns if c not in valid_saved]
+                    self.all_columns = valid_saved + missing
+                
+                saved_booking_vis = settings.get("booking_visibility", {})
+                for col in self.all_columns:
+                    val = saved_booking_vis.get(col, True)
+                    if col in self.column_vars:
+                        self.column_vars[col].set(val)
+                    else:
+                        self.column_vars[col] = ctk.BooleanVar(value=val)
+                        
+                saved_booking_widths = settings.get("booking_widths", {})
+                if saved_booking_widths:
+                    self.booking_column_widths = saved_booking_widths
+                else:
+                    self.booking_column_widths = {}
+
+                # Load vessel columns
+                saved_vessel_cols = settings.get("vessel_columns", [])
+                if saved_vessel_cols:
+                    valid_saved = [c for c in saved_vessel_cols if c in self.default_vessel_columns]
+                    missing = [c for c in self.default_vessel_columns if c not in valid_saved]
+                    self.vessel_columns = valid_saved + missing
+                    
+                saved_vessel_vis = settings.get("vessel_visibility", {})
+                for col in self.vessel_columns:
+                    val = saved_vessel_vis.get(col, True)
+                    if col in self.vessel_column_vars:
+                        self.vessel_column_vars[col].set(val)
+                    else:
+                        self.vessel_column_vars[col] = ctk.BooleanVar(value=val)
+
+                saved_vessel_widths = settings.get("vessel_widths", {})
+                if saved_vessel_widths:
+                    self.vessel_column_widths = saved_vessel_widths
+                else:
+                    self.vessel_column_widths = {}
+            except Exception as e:
+                print(f"Error loading collection settings: {e}")
+        else:
+            # Reset to defaults
+            self.all_columns = list(self.default_all_columns)
+            self.vessel_columns = list(self.default_vessel_columns)
+            self.booking_column_widths = {}
+            self.vessel_column_widths = {}
+            for col in self.all_columns:
+                if col in self.column_vars:
+                    self.column_vars[col].set(True)
+                else:
+                    self.column_vars[col] = ctk.BooleanVar(value=True)
+            for col in self.vessel_columns:
+                if col in self.vessel_column_vars:
+                    self.vessel_column_vars[col].set(True)
+                else:
+                    self.vessel_column_vars[col] = ctk.BooleanVar(value=True)
+
+    def save_collection_settings(self):
+        if self.active_collection_id is None:
+            return
+            
+        settings = {
+            "booking_columns": self.all_columns,
+            "booking_visibility": {col: self.column_vars[col].get() for col in self.all_columns if col in self.column_vars},
+            "booking_widths": self.booking_column_widths,
+            "vessel_columns": self.vessel_columns,
+            "vessel_visibility": {col: self.vessel_column_vars[col].get() for col in self.vessel_columns if col in self.vessel_column_vars},
+            "vessel_widths": self.vessel_column_widths
+        }
+        
+        try:
+            update_collection_settings(self.active_collection_id, json.dumps(settings, ensure_ascii=False))
+            for col in self.collections:
+                if col["id"] == self.active_collection_id:
+                    col["settings"] = json.dumps(settings, ensure_ascii=False)
+                    break
+        except Exception as e:
+            print(f"Error saving collection settings: {e}")
+
     def set_active_collection(self, col_id, col_name):
         self.active_collection_id = col_id
         self.active_collection_name = col_name
         self.collection_menu.set(col_name)
+        
+        self.last_auto_updated_ids = set()
+        self.load_collection_settings()
+        
+        current_tab = self.tab_view.get()
+        if "Booking" in current_tab:
+            self.draw_column_checklist()
+        else:
+            self.draw_vessel_column_checklist()
+        self.update_treeview_columns()
+        self.update_vessel_treeview_columns()
+
         if self.auto_request_running:
             self.stop_auto_request_timer()
             self.start_auto_request_timer()
@@ -868,6 +1048,18 @@ class App(ctk.CTk):
             if col["name"] == col_name:
                 self.active_collection_id = col["id"]
                 self.active_collection_name = col["name"]
+                
+                self.last_auto_updated_ids = set()
+                self.load_collection_settings()
+                
+                current_tab = self.tab_view.get()
+                if "Booking" in current_tab:
+                    self.draw_column_checklist()
+                else:
+                    self.draw_vessel_column_checklist()
+                self.update_treeview_columns()
+                self.update_vessel_treeview_columns()
+
                 if self.auto_request_running:
                     self.stop_auto_request_timer()
                     self.start_auto_request_timer()
@@ -1279,8 +1471,11 @@ class App(ctk.CTk):
         self.tree["columns"] = selected_cols
         for col in selected_cols:
             display_name = COLUMN_TRANSLATIONS[self.language].get(col, col)
-            self.tree.heading(col, text=display_name)
-            self.tree.column(col, width=125, minwidth=100)
+            align = self.get_column_alignment(col, is_vessel=False)
+            self.tree.heading(col, text=display_name, anchor=align)
+            w = self.booking_column_widths.get(col, 125)
+            self.tree.column(col, width=w, minwidth=100, anchor=align, stretch=False)
+        self.save_collection_settings()
         self.populate_treeview()
 
     def select_pdfs(self):
@@ -1361,18 +1556,12 @@ class App(ctk.CTk):
         
         for idx, row_data in enumerate(self.display_data):
             values = []
-            for col_idx, col in enumerate(selected_cols):
-                val = row_data.get(col, "null")
-                if col_idx == 0:
-                    if col == "STT":
-                        values.append(str(idx + 1))
-                    else:
-                        values.append(str(val))
+            for col in selected_cols:
+                if col == "STT":
+                    values.append(str(idx + 1))
                 else:
-                    if col == "STT":
-                        values.append(f"│  {idx + 1}")
-                    else:
-                        values.append(f"│  {val}")
+                    val = row_data.get(col, "null")
+                    values.append(str(val))
             
             tag = "evenrow" if idx % 2 == 0 else "oddrow"
             self.tree.insert("", "end", iid=str(row_data["id"]), values=values, tags=(tag,))
@@ -1427,21 +1616,43 @@ class App(ctk.CTk):
         self.vessel_tree["columns"] = selected_cols
         for col in selected_cols:
             display_name = VESSEL_COLUMN_TRANSLATIONS[self.language].get(col, col)
-            self.vessel_tree.heading(col, text=display_name)
-            # Adjust widths for certain fields
-            if col == "STT":
-                self.vessel_tree.column(col, width=50, minwidth=40, anchor="center")
-            elif col in ["site_id", "agent"]:
-                self.vessel_tree.column(col, width=80, minwidth=60, anchor="center")
-            elif col in ["vessel_name", "in_out_voyage"]:
-                self.vessel_tree.column(col, width=160, minwidth=120, anchor="w")
-            elif col in ["actual_berth_time", "actual_departure_time", "closing_time", "closing_time_icd", "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "queried_at"]:
-                self.vessel_tree.column(col, width=150, minwidth=110, anchor="center")
+            align = self.get_column_alignment(col, is_vessel=True)
+            self.vessel_tree.heading(col, text=display_name, anchor=align)
+            
+            # Use saved width if available, otherwise use default per column type
+            if col in self.vessel_column_widths:
+                w = self.vessel_column_widths[col]
             else:
-                self.vessel_tree.column(col, width=120, minwidth=80, anchor="w")
+                if col == "STT":
+                    w = 50
+                elif col in ["site_id", "agent"]:
+                    w = 80
+                elif col in ["vessel_name", "in_out_voyage"]:
+                    w = 160
+                elif col in ["actual_berth_time", "actual_departure_time", "closing_time", "closing_time_icd", "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "queried_at"]:
+                    w = 150
+                else:
+                    w = 120
+
+            minwidth_val = 80
+            if col == "STT":
+                minwidth_val = 40
+            elif col in ["site_id", "agent"]:
+                minwidth_val = 60
+            elif col in ["vessel_name", "in_out_voyage"]:
+                minwidth_val = 120
+            elif col in ["actual_berth_time", "actual_departure_time", "closing_time", "closing_time_icd", "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "queried_at"]:
+                minwidth_val = 110
+
+            self.vessel_tree.column(col, width=w, minwidth=minwidth_val, anchor=align, stretch=False)
+        self.save_collection_settings()
         self.populate_vessel_treeview()
 
     def destroy(self):
+        try:
+            self.save_collection_settings()
+        except Exception:
+            pass
         self.auto_request_running = False
         if self.vessel_auto_timer_id is not None:
             self.after_cancel(self.vessel_auto_timer_id)
@@ -1516,6 +1727,7 @@ class App(ctk.CTk):
     def run_auto_request_thread(self, col_id, watchlist):
         success_count = 0
         error_messages = []
+        updated_ids = []
         
         def update_fetching_status():
             fetching_text = "Đang lấy dữ liệu..." if self.language == "vi" else "Fetching..."
@@ -1540,17 +1752,23 @@ class App(ctk.CTk):
                             filtered.append(r)
                             
                     if filtered:
-                        insert_vessel_schedules(col_id, filtered)
+                        ids = insert_vessel_schedules(col_id, filtered)
+                        updated_ids.extend(ids)
                         success_count += len(filtered)
             except Exception as e:
                 error_messages.append(f"{vessel_name}: {e}")
                 
         err_msg = "; ".join(error_messages) if error_messages else None
-        self.after(0, self.handle_auto_request_result, success_count, err_msg)
+        self.after(0, self.handle_auto_request_result, success_count, err_msg, updated_ids)
 
-    def handle_auto_request_result(self, success_count, error_msg):
+    def handle_auto_request_result(self, success_count, error_msg, updated_ids=None):
         if not self.auto_request_running:
             return
+            
+        if updated_ids:
+            self.last_auto_updated_ids = set(updated_ids)
+        else:
+            self.last_auto_updated_ids = set()
             
         # Refresh treeview/database data on screen (unconditionally so it's always up to date)
         self.load_vessel_schedules_from_db()
@@ -1580,6 +1798,7 @@ class App(ctk.CTk):
         self.vessel_auto_timer_id = self.after(ms, self.trigger_auto_request)
 
     def search_eport_vessel(self):
+        self.last_auto_updated_ids = set()
         if self.active_collection_id is None:
             title = "Cảnh báo" if self.language == "vi" else "Warning"
             msg = "Vui lòng chọn hoặc tạo một Bộ sưu tập trước khi tra cứu lịch tàu." if self.language == "vi" else "Please select or create a Collection before searching vessel schedules."
@@ -1652,6 +1871,7 @@ class App(ctk.CTk):
         self.populate_vessel_treeview()
 
     def perform_vessel_search(self):
+        self.last_auto_updated_ids = set()
         query = self.vessel_search_entry.get().strip()
         selected_display = self.vessel_search_field_menu.get()
         field_name = self.vessel_search_fields_mapping.get(selected_display, "all")
@@ -1666,21 +1886,19 @@ class App(ctk.CTk):
         
         for idx, row_data in enumerate(self.vessel_display_data):
             values = []
-            for col_idx, col in enumerate(selected_cols):
-                val = row_data.get(col, "")
-                if val is None or val == "None":
-                    val = ""
-                    
-                if col_idx == 0:
-                    if col == "STT":
-                        values.append(str(idx + 1))
-                    else:
-                        values.append(str(val))
+            row_id = row_data.get("id")
+            for col in selected_cols:
+                if col == "STT":
+                    values.append(str(idx + 1))
                 else:
-                    if col == "STT":
-                        values.append(f"│  {idx + 1}")
-                    else:
-                        values.append(f"│  {val}")
+                    val = row_data.get(col, "")
+                    if val is None or val == "None":
+                        val = ""
+                    if col == "queried_at" and row_id in self.last_auto_updated_ids:
+                        time_part = val.split(" ")[-1] if " " in val else val
+                        prefix = "Cập nhật lúc" if self.language == "vi" else "Updated at"
+                        val = f"✅ {prefix} {time_part}"
+                    values.append(str(val))
             
             tag = "evenrow" if idx % 2 == 0 else "oddrow"
             self.vessel_tree.insert("", "end", iid=str(row_data["id"]), values=values, tags=(tag,))

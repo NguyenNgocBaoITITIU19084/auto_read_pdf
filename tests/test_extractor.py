@@ -61,3 +61,36 @@ def test_extract_booking_data_none_text(mock_pdf_open, mock_exists):
     result = extract_booking_data("test.pdf")
     assert result["Pre Carrier"] == "null"
     assert result["Trunk Vessel"] == "null"
+
+@patch("src.extractor.os.path.exists")
+@patch("src.extractor.pdfplumber.open")
+def test_extract_booking_data_squished_text(mock_pdf_open, mock_exists):
+    mock_exists.return_value = True
+    mock_pdf = MagicMock()
+    mock_page = MagicMock()
+    mock_page.extract_text.return_value = (
+        "BookingNo:SGNGN5353700 BookingRef.No.:SGNGN5353700 BookingDate:06Jul26\n"
+        "TrunkVessel : YMWONDERLAND031E(FP2) LatestETA/ETD : 18Jul26/21Jul26\n"
+        "PortofDischarging : TACOMA,WA (Block:1) Terminal : HUSKYTERMINAL\n"
+        "PlaceofDelivery : MINNEAPOLIS,MN Terminal : UPRAIL-MINNEAPOLIS(RAILRAMP)\n"
+        "EquipmentType/Q’ty: 20'DRYST.(SOC)-1\n"
+        "EmptyPickUPCY : SOLOGSONGTHANDEPOT EmptyPickUpDate : 15Jul2600:00\n"
+        "FullReturnCY : CATLAI TERMINAL FullReturnDate :\n"
+        "PortCargoCut-off : 18Jul2617:00 RailReceivingDate : ~"
+    )
+    mock_pdf.pages = [mock_page]
+    mock_pdf_open.return_value.__enter__.return_value = mock_pdf
+    
+    result = extract_booking_data("test.pdf")
+    assert result["Booking No"] == "SGNGN5353700"
+    assert result["Port of Discharging"] == "TACOMA,WA (Block:1)"
+    assert result["Place of Delivery"] == "MINNEAPOLIS,MN"
+    assert result["Block"] == "1"
+    assert result["Equipment Type"] == "20'DRYST.(SOC)"
+    assert result["Q'ty"] == "1"
+    assert result["Empty Pick Up CY"] == "SOLOGSONGTHANDEPOT"
+    assert result["Full return CY"] == "CATLAI TERMINAL"
+    assert result["Port Cargo Cut-off"] == "18Jul2617:00"
+    assert result["Trunk Vessel"] == "YMWONDERLAND031E(FP2)"
+    assert result["ETD_Trunk"] == "21Jul26"
+

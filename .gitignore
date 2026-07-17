@@ -65,3 +65,6 @@ venv.bak/
 *.xlsx
 *.xls
 *.pdf
+
+
+booking_data.db

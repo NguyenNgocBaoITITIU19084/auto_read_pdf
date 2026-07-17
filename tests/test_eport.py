@@ -212,3 +212,42 @@ def test_vessel_watchlist_operations():
     remove_from_watchlist(niken["id"])
     assert len(get_watchlist(col_id)) == 1
     assert get_watchlist(col_id)[0]["vessel_name"] == "EVER MEMO"
+
+def test_collection_settings_operations():
+    from src.database import create_collection, get_collections, update_collection_settings, export_backup_data, import_backup_data
+    
+    col_id = create_collection("Settings Test Collection")
+    
+    # Check default settings is None/empty
+    collections = get_collections()
+    test_col = [c for c in collections if c["id"] == col_id][0]
+    assert test_col["settings"] is None
+    
+    # Update settings
+    settings_data = '{"booking_columns": ["STT", "ETD"], "booking_visibility": {"STT": true}}'
+    update_collection_settings(col_id, settings_data)
+    
+    # Verify settings updated
+    collections = get_collections()
+    test_col = [c for c in collections if c["id"] == col_id][0]
+    assert test_col["settings"] == settings_data
+    
+    # Test Backup & Restore of Settings
+    backup = export_backup_data()
+    backed_col = [c for c in backup["collections"] if c["name"] == "Settings Test Collection"][0]
+    assert backed_col["settings"] == settings_data
+    
+    # Delete collections to restore
+    with sqlite3.connect("booking_data.db") as conn:
+        conn.execute("DELETE FROM collections;")
+        conn.commit()
+        
+    assert len(get_collections()) == 0
+    
+    # Restore
+    import_backup_data(backup)
+    
+    # Verify restored collections have settings
+    restored = get_collections()
+    assert len(restored) == 1
+    assert restored[0]["settings"] == settings_data

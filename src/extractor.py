@@ -40,17 +40,17 @@ def extract_booking_data(pdf_path: str) -> dict:
                     text += extracted_text + "\n"
             
             # Extract Booking No
-            booking_match = re.search(r"Booking No\s*:\s*([A-Z0-9]+)", text, re.IGNORECASE)
+            booking_match = re.search(r"Booking\s*No\s*:\s*([A-Z0-9]+)", text, re.IGNORECASE)
             if booking_match:
                 result["Booking No"] = booking_match.group(1).strip()
             
             # Extract Port of Discharging
-            pod_match = re.search(r"Port of Discharg(?:e|ing)?\s*:\s*(.*?)(?=\s+(?:Place\s+of\s+Delivery|Final\s+Destination|Terminal)|$)", text, re.IGNORECASE)
+            pod_match = re.search(r"Port\s*of\s*Discharg(?:e|ing)?\s*:\s*(.*?)(?=\s*(?:Place\s*of\s*Delivery|Final\s*Destination|Terminal)|$)", text, re.IGNORECASE)
             if pod_match:
                 result["Port of Discharging"] = pod_match.group(1).strip()
 
             # Extract Place of Delivery / Final Destination
-            deliv_match = re.search(r"(?:Place of Delivery|Final Destination)\s*:\s*(.*?)(?=\s+Terminal|$)", text, re.IGNORECASE)
+            deliv_match = re.search(r"(?:Place\s*of\s*Delivery|Final\s*Destination)\s*:\s*(.*?)(?=\s*Terminal|$)", text, re.IGNORECASE)
             if deliv_match:
                 result["Place of Delivery"] = deliv_match.group(1).strip()
             
@@ -60,22 +60,22 @@ def extract_booking_data(pdf_path: str) -> dict:
                 result["Block"] = block_match.group(1).strip()
             
             # Extract T/S Port
-            ts_match = re.search(r"T/S Port\s*:\s*(.*?)(?=\s+(?:POD\s*/|Terminal)|$)", text, re.IGNORECASE)
+            ts_match = re.search(r"T/S\s*Port\s*:\s*(.*?)(?=\s*(?:POD\s*/|Terminal)|$)", text, re.IGNORECASE)
             if ts_match:
                 result["T/S Port"] = ts_match.group(1).strip()
             
             # Extract Empty Pick Up CY
-            empty_cy_match = re.search(r"Empty Pick UP CY\s*:\s*(.*?)(?=\s+Empty\s+Pick\s+Up\s+Date|$)", text, re.IGNORECASE)
+            empty_cy_match = re.search(r"Empty\s*Pick\s*UP\s*CY\s*:\s*(.*?)(?=\s*Empty\s*Pick\s*Up\s*Date|$)", text, re.IGNORECASE)
             if empty_cy_match:
                 result["Empty Pick Up CY"] = empty_cy_match.group(1).strip()
             
             # Extract Full Return CY
-            full_cy_match = re.search(r"Full Return CY\s*:\s*(.*?)(?=\s+Full\s+Return\s+Date|$)", text, re.IGNORECASE)
+            full_cy_match = re.search(r"Full\s*Return\s*CY\s*:\s*(.*?)(?=\s*Full\s*Return\s*Date|$)", text, re.IGNORECASE)
             if full_cy_match:
                 result["Full return CY"] = full_cy_match.group(1).strip()
             
             # Extract Equipment Type/Q'ty
-            eq_match = re.search(r"Equipment Type/Q['’]ty\s*:\s*(.*?)(?=\n|$)", text, re.IGNORECASE)
+            eq_match = re.search(r"Equipment\s*Type/Q['’]ty\s*:\s*(.*?)(?=\n|$)", text, re.IGNORECASE)
             if eq_match:
                 eq_val = eq_match.group(1).strip()
                 split_match = re.search(r'^(.*?)(?:\.-|-)\s*(\d+)$', eq_val)
@@ -87,7 +87,7 @@ def extract_booking_data(pdf_path: str) -> dict:
                     result["Q'ty"] = ""
             
             # Extract Port Cargo Cut-off
-            cutoff_match = re.search(r"Port Cargo Cut-off\s*:\s*(.*?)(?=\n|Rail\s*Receiving\s*Date|$)", text, re.IGNORECASE)
+            cutoff_match = re.search(r"Port\s*Cargo\s*Cut[- ]*off\s*:\s*(.*?)(?=\n|Rail\s*Receiving\s*Date|$)", text, re.IGNORECASE)
             if cutoff_match:
                 result["Port Cargo Cut-off"] = cutoff_match.group(1).strip()
             
@@ -97,7 +97,7 @@ def extract_booking_data(pdf_path: str) -> dict:
             trunk_vessel = ""
             etd_trunk = ""
             
-            pre_carrier_match = re.search(r"Pre Carrier\s*:\s*(.*?)\s*Latest ETA/ETD\s*:\s*([^\s\n]*)", text, re.IGNORECASE)
+            pre_carrier_match = re.search(r"Pre\s*Carrier\s*:\s*(.*?)\s*Latest\s*ETA/ETD\s*:\s*([^\s\n]*)", text, re.IGNORECASE)
             if pre_carrier_match:
                 pre_val = pre_carrier_match.group(1).strip()
                 eta_etd_val = pre_carrier_match.group(2).strip()
@@ -105,7 +105,7 @@ def extract_booking_data(pdf_path: str) -> dict:
                     pre_carrier = pre_val
                     etd_pre = parse_etd(eta_etd_val)
                     
-            trunk_match = re.search(r"Trunk Vessel\s*:\s*(.*?)\s*Latest ETA/ETD\s*:\s*([^\s\n]*)", text, re.IGNORECASE)
+            trunk_match = re.search(r"Trunk\s*Vessel\s*:\s*(.*?)\s*Latest\s*ETA/ETD\s*:\s*([^\s\n]*)", text, re.IGNORECASE)
             if trunk_match:
                 trunk_val = trunk_match.group(1).strip()
                 eta_etd_val = trunk_match.group(2).strip()
