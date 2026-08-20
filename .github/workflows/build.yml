@@ -1,48 +1,172 @@
-name: Build Executables
+name: Build & Package Desktop Apps (Mac & Win)
 
 on:
   push:
     branches:
-      - master
       - main
-  workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: windows-latest
-            script: build_win.py
-            artifact_name: AutoReadPDF-Windows
-            path_to_upload: dist/AutoReadPDF
-          - os: macos-latest
-            script: build_mac.py
-            artifact_name: AutoReadPDF-MacOS
-            path_to_upload: dist/AutoReadPDF
-
+  # ==========================================================
+  # 1. Build macOS Application (DMG & ZIP)
+  # ==========================================================
+  build-macos:
+    name: Build macOS (Universal / DMG & ZIP)
+    runs-on: macos-latest
     steps:
-      - name: Checkout Code
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 🐍 Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # Stable version for building executable
+          python-version: '3.11'
+          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: 📦 Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Build Script
-        run: python ${{ matrix.script }}
+      - name: 🧪 Run Backend Unit Tests
+        run: pytest tests/
 
-      - name: Upload Build Artifact
+      - name: 📦 Install Root & Frontend Node Dependencies
+        run: |
+          npm install
+          cd frontend && npm install && cd ..
+
+      - name: 🏗️ Build Frontend Web Bundle
+        run: npm run build:frontend
+
+      - name: 🐍 Build Standalone Python Backend Executable
+        run: |
+          export PYINSTALLER_CONFIG_DIR="$(pwd)/.pyinstaller_cache"
+          pyinstaller --noconfirm --onedir --name backend_app --clean \
+            --hidden-import=uvicorn.logging \
+            --hidden-import=uvicorn.loops \
+            --hidden-import=uvicorn.loops.auto \
+            --hidden-import=uvicorn.protocols \
+            --hidden-import=uvicorn.protocols.http \
+            --hidden-import=uvicorn.protocols.http.auto \
+            backend/app/main.py
+
+      - name: ⚡ Package macOS App with Electron Builder
+        run: npx electron-builder --mac
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📤 Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.path_to_upload }}
+          name: AutoReadPDF-MacOS
+          path: |
+            dist_electron/*.dmg
+            dist_electron/*.zip
           if-no-files-found: error
+
+  # ==========================================================
+  # 2. Build Windows Application (Installer & Portable EXE)
+  # ==========================================================
+  build-windows:
+    name: Build Windows (NSIS Installer & Portable)
+    runs-on: windows-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🧪 Run Backend Unit Tests
+        run: pytest tests/
+
+      - name: 📦 Install Root & Frontend Node Dependencies
+        run: |
+          npm install
+          cd frontend && npm install && cd ..
+
+      - name: 🏗️ Build Frontend Web Bundle
+        run: npm run build:frontend
+
+      - name: 🐍 Build Standalone Python Backend Executable
+        run: |
+          pyinstaller --noconfirm --onedir --name backend_app --clean `
+            --hidden-import=uvicorn.logging `
+            --hidden-import=uvicorn.loops `
+            --hidden-import=uvicorn.loops.auto `
+            --hidden-import=uvicorn.protocols `
+            --hidden-import=uvicorn.protocols.http `
+            --hidden-import=uvicorn.protocols.http.auto `
+            backend/app/main.py
+
+      - name: ⚡ Package Windows App with Electron Builder
+        run: npx electron-builder --win --x64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📤 Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoReadPDF-Windows
+          path: |
+            dist_electron/*.exe
+          if-no-files-found: error
+
+  # ==========================================================
+  # 3. Automatic GitHub Release on Tag (v*)
+  # ==========================================================
+  release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 📥 Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoReadPDF-MacOS
+          path: release_assets/
+
+      - name: 📥 Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoReadPDF-Windows
+          path: release_assets/
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release_assets/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

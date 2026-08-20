@@ -2,6 +2,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const { app } = require('electron');
 
 let pyProcess = null;
 const BACKEND_PORT = 8000;
@@ -19,15 +20,19 @@ function getPythonPath() {
     return venvPythonWin;
   }
 
-  // Packaged mode check
-  const packagedPyMac = path.join(process.resourcesPath, 'backend_dist', 'backend_app');
-  const packagedPyWin = path.join(process.resourcesPath, 'backend_dist', 'backend_app.exe');
-
-  if (fs.existsSync(packagedPyMac)) {
-    return packagedPyMac;
-  }
-  if (fs.existsSync(packagedPyWin)) {
-    return packagedPyWin;
+  // Packaged mode check inside extraResources
+  if (process.resourcesPath) {
+    const packagedCandidates = [
+      path.join(process.resourcesPath, 'backend_dist', 'backend_app'),
+      path.join(process.resourcesPath, 'backend_dist', 'backend_app.exe'),
+      path.join(process.resourcesPath, 'backend_dist', 'backend_app', 'backend_app'),
+      path.join(process.resourcesPath, 'backend_dist', 'backend_app', 'backend_app.exe'),
+    ];
+    for (const cand of packagedCandidates) {
+      if (fs.existsSync(cand)) {
+        return cand;
+      }
+    }
   }
 
   // Fallback to system python
@@ -71,20 +76,37 @@ async function startPythonBackend() {
 
   const pythonPath = getPythonPath();
   const rootDir = path.join(__dirname, '..');
+  const isPackaged = app ? app.isPackaged : false;
+  const userDataDir = app ? app.getPath('userData') : rootDir;
+  
+  // Ensure fresh, writable user database path (no pre-packaged sample DB)
+  const dbPath = process.env.DB_PATH || (isPackaged 
+    ? path.join(userDataDir, 'booking_data.db') 
+    : path.join(rootDir, 'backend', 'booking_data.db'));
 
   console.log(`[Python Manager] Starting Python backend using: ${pythonPath}`);
+  console.log(`[Python Manager] Target SQLite DB Path: ${dbPath}`);
 
   // If using packaged binary directly
   if (pythonPath.includes('backend_dist')) {
     pyProcess = spawn(pythonPath, [], {
-      cwd: rootDir,
-      env: { ...process.env, PORT: String(BACKEND_PORT) },
+      cwd: path.dirname(pythonPath),
+      env: { 
+        ...process.env, 
+        PORT: String(BACKEND_PORT),
+        DB_PATH: dbPath,
+      },
     });
   } else {
     // Run module backend.app.main
     pyProcess = spawn(pythonPath, ['-m', 'backend.app.main'], {
       cwd: rootDir,
-      env: { ...process.env, PORT: String(BACKEND_PORT), PYTHONPATH: rootDir },
+      env: { 
+        ...process.env, 
+        PORT: String(BACKEND_PORT), 
+        PYTHONPATH: rootDir,
+        DB_PATH: dbPath,
+      },
     });
   }
 

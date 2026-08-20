@@ -7,13 +7,13 @@
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": ".venv/bin/python -m backend.app.main",
     "dev": "cross-env NODE_ENV=development concurrently -k -n \"FRONTEND,BACKEND,ELECTRON\" -c \"blue,green,magenta\" \"cd frontend && npm run dev\" \".venv/bin/python -m backend.app.main\" \"wait-on http://localhost:5173 && wait-on http-get://127.0.0.1:8000/health && electron .\"",
-    "build:frontend": "cd frontend && npm run build",
-    "build:py:mac": ".venv/bin/pyinstaller --noconfirm --onedir --name backend_app --clean backend/app/main.py",
-    "build:py:win": ".venv/Scripts/pyinstaller --noconfirm --onedir --name backend_app --clean backend/app/main.py",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:py:mac": "cross-env PYINSTALLER_CONFIG_DIR=.pyinstaller_cache pyinstaller --noconfirm --onedir --name backend_app --clean --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto backend/app/main.py",
+    "build:py:win": "pyinstaller --noconfirm --onedir --name backend_app --clean --hidden-import=uvicorn.logging --hidden-import=uvicorn.loops --hidden-import=uvicorn.loops.auto --hidden-import=uvicorn.protocols --hidden-import=uvicorn.protocols.http --hidden-import=uvicorn.protocols.http.auto backend/app/main.py",
     "build": "npm run build:frontend && electron-builder",
-    "build:mac": "npm run build:frontend && electron-builder --mac",
-    "build:win": "npm run build:frontend && electron-builder --win",
-    "test:py": ".venv/bin/pytest tests/"
+    "build:mac": "npm run build:frontend && npm run build:py:mac && electron-builder --mac",
+    "build:win": "npm run build:frontend && npm run build:py:win && electron-builder --win",
+    "test:py": "pytest tests/"
   },
   "keywords": [
     "electron",
@@ -40,21 +40,44 @@
     "files": [
       "electron/**/*",
       "frontend/dist/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.db",
+      "!**/*.sqlite",
+      "!**/*.sqlite3"
     ],
     "extraResources": [
       {
         "from": "dist/backend_app",
         "to": "backend_dist",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*",
+          "!**/*.db",
+          "!**/*.sqlite",
+          "!**/*.sqlite3",
+          "!**/__pycache__/**"
+        ]
       }
     ],
     "mac": {
-      "target": ["dmg", "zip"],
-      "category": "public.app-category.productivity"
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "artifactName": "${productName}-${version}-Mac-${arch}.${ext}"
     },
     "win": {
-      "target": ["nsis", "portable"]
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

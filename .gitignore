@@ -66,5 +66,16 @@ venv.bak/
 *.xls
 *.pdf
 
+# Node & Electron Builds
 node_modules/
+dist/
+dist_electron/
+frontend/dist/
+.pyinstaller_cache/
+
+# SQLite Databases (Ensure no sample DB is committed)
+*.db
+*.sqlite
+*.sqlite3
 booking_data.db
+backend/booking_data.db
