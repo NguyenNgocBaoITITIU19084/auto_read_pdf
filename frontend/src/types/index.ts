@@ -116,7 +116,7 @@ export interface ColumnSetting {
   customName?: string;
 }
 
-export type MatchType = 'exact' | 'contains';
+export type MatchType = 'exact' | 'contains' | 'starts_with' | 'ends_with' | 'any';
 export type TargetTable = 'all' | 'booking' | 'container' | 'vessel';
 
 export interface ColorPreset {

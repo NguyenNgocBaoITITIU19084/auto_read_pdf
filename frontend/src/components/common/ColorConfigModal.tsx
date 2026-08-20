@@ -109,7 +109,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
     setTargetTable(rule.target_table);
     setColumnKey(rule.column_key);
     setMatchValue(rule.match_value);
-    setMatchType(rule.match_type);
+    setMatchType(rule.match_type || 'exact');
     if (rule.custom_bg || rule.custom_text) {
       setIsCustomColor(true);
       setCustomBg(rule.custom_bg || '#ffe4e6');
@@ -125,15 +125,15 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
   const handleCancelEdit = () => {
     setEditingId(null);
     setMatchValue('');
+    setMatchType('exact');
     setPresetId('rose');
     setIsCustomColor(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!matchValue.trim()) return;
-
-    const trimmedMatchValue = matchValue.trim();
+    const trimmedMatchValue = matchType === 'any' ? '*' : matchValue.trim();
+    if (matchType !== 'any' && !trimmedMatchValue) return;
 
     // Check if an existing rule with exact target_table, column_key, and match_value exists
     let targetRuleId = editingId;
@@ -190,6 +190,10 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
   const previewBadgeClass = !isCustomColor && activePreset
     ? activePreset.badgeClass
     : '';
+
+  const previewText = matchType === 'any'
+    ? (columnKey !== 'all' ? `[Mọi giá trị ${columnKey}]` : 'Giá trị bất kỳ')
+    : (matchValue.trim() || 'Giá trị mẫu');
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t.common.colorConfig} maxWidth="max-w-4xl">
@@ -257,21 +261,6 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
               </select>
             </div>
 
-            {/* Match Value */}
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                {t.common.matchValue}
-              </label>
-              <input
-                type="text"
-                required
-                value={matchValue}
-                onChange={(e) => setMatchValue(e.target.value)}
-                placeholder="vd: Chưa duyệt (N), Y, UNLOAD..."
-                className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-primary-500 focus:outline-none"
-              />
-            </div>
-
             {/* Match Type */}
             <div>
               <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
@@ -279,12 +268,51 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
               </label>
               <select
                 value={matchType}
-                onChange={(e) => setMatchType(e.target.value as MatchType)}
+                onChange={(e) => {
+                  const newType = e.target.value as MatchType;
+                  setMatchType(newType);
+                  if (newType === 'any') {
+                    setMatchValue('*');
+                  } else if (matchValue === '*') {
+                    setMatchValue('');
+                  }
+                }}
                 className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-primary-500 focus:outline-none"
               >
                 <option value="exact">{t.common.exactMatch}</option>
                 <option value="contains">{t.common.containsMatch}</option>
+                <option value="starts_with">{t.common.startsWithMatch}</option>
+                <option value="ends_with">{t.common.endsWithMatch}</option>
+                <option value="any">{t.common.anyMatch}</option>
               </select>
+            </div>
+
+            {/* Match Value */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                {t.common.matchValue}
+              </label>
+              {matchType === 'any' ? (
+                <div className="w-full text-xs font-medium bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-500 dark:text-slate-400 italic flex items-center gap-1.5 truncate" title={t.common.anyValueNote}>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="truncate">Áp dụng mọi giá trị</span>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  required
+                  value={matchValue}
+                  onChange={(e) => setMatchValue(e.target.value)}
+                  placeholder={
+                    matchType === 'starts_with'
+                      ? 'vd: TCLU, MSCU...'
+                      : matchType === 'ends_with'
+                      ? 'vd: 40HC, 20DC...'
+                      : 'vd: Chưa duyệt (N), CTL, UNLOAD...'
+                  }
+                  className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-primary-500 focus:outline-none"
+                />
+              )}
             </div>
           </div>
 
@@ -411,7 +439,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
                 style={previewBadgeStyle}
                 className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-bold border shadow-2xs ${previewBadgeClass}`}
               >
-                {matchValue.trim() || 'Chưa duyệt (N)'}
+                {previewText}
               </span>
             </div>
 
@@ -463,6 +491,16 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
                   : undefined;
                 const badgeClass = !rule.custom_bg && preset ? preset.badgeClass : '';
 
+                const displayMatchValue = rule.match_type === 'any' || rule.match_value === '*'
+                  ? 'Toàn bộ cột (*)'
+                  : rule.match_value;
+
+                const matchTypeLabel = 
+                  rule.match_type === 'any' || rule.match_value === '*' ? 'toàn bộ cột' :
+                  rule.match_type === 'starts_with' ? 'bắt đầu bằng' :
+                  rule.match_type === 'ends_with' ? 'kết thúc bằng' :
+                  rule.match_type === 'contains' ? 'chứa từ khóa' : 'khớp chính xác';
+
                 return (
                   <div
                     key={rule.id}
@@ -477,9 +515,9 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
                       <span
                         style={badgeStyle}
                         className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border shadow-2xs shrink-0 max-w-[130px] truncate ${badgeClass}`}
-                        title={rule.match_value}
+                        title={displayMatchValue}
                       >
-                        {rule.match_value}
+                        {displayMatchValue}
                       </span>
 
                       <div className="min-w-0 flex-1 text-[11px]">
@@ -492,7 +530,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
                           </span>
                         </div>
                         <span className="text-[10px] text-slate-400">
-                          {rule.match_type === 'contains' ? 'chứa từ khóa' : 'khớp chính xác'}
+                          {matchTypeLabel}
                         </span>
                       </div>
                     </div>

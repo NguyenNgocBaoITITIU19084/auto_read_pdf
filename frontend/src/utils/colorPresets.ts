@@ -208,31 +208,46 @@ export function findMatchingColorRule(
     if (!isSpecificCol && !isAllCol) return;
 
     const ruleMatchVal = (rule.match_value || '').trim();
-    if (!ruleMatchVal) return;
-
     const ruleUpper = ruleMatchVal.toUpperCase();
     let isMatch = false;
-    let isExact = false;
+    let matchScore = 0;
 
-    if (rule.match_type === 'contains') {
-      if (upperVal.includes(ruleUpper)) {
+    if (rule.match_type === 'any' || ruleMatchVal === '*' || (rule.match_type as string) === 'not_empty') {
+      // Matches any non-empty / non-null value in the column
+      isMatch = true;
+      matchScore = 5;
+    } else if (rule.match_type === 'starts_with') {
+      if (ruleMatchVal && upperVal.startsWith(ruleUpper)) {
         isMatch = true;
-        isExact = upperVal === ruleUpper;
+        matchScore = upperVal === ruleUpper ? 25 : 20;
+      }
+    } else if (rule.match_type === 'ends_with') {
+      if (ruleMatchVal && upperVal.endsWith(ruleUpper)) {
+        isMatch = true;
+        matchScore = upperVal === ruleUpper ? 25 : 20;
+      }
+    } else if (rule.match_type === 'contains') {
+      if (ruleMatchVal && upperVal.includes(ruleUpper)) {
+        isMatch = true;
+        matchScore = upperVal === ruleUpper ? 25 : 15;
       }
     } else {
-      if (upperVal === ruleUpper) {
+      // Default exact match
+      if (ruleMatchVal && upperVal === ruleUpper) {
         isMatch = true;
-        isExact = true;
+        matchScore = 30;
       }
     }
 
     if (!isMatch) return;
 
     // Calculate priority score (higher is better)
-    let score = 0;
+    // Table specificity: 100 for specific, 0 for all
+    // Column specificity: 50 for specific, 0 for all
+    // Match type specificity: 30 (exact) > 20 (prefix/suffix) > 15 (contains) > 5 (any)
+    let score = matchScore;
     if (isSpecificTable) score += 100;
     if (isSpecificCol) score += 50;
-    if (isExact) score += 20;
 
     const orderVal = typeof rule.id === 'number' ? rule.id : idx;
     matchingCandidates.push({ rule, priority: score, idOrIndex: orderVal });
