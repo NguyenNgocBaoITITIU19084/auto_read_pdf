@@ -3,6 +3,7 @@ import { Download, Upload, Database } from 'lucide-react';
 import { Modal } from './Modal';
 import { useApp } from '../../context/AppContext';
 import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
+import { AISettingsCard } from './AISettingsCard';
 import { getBackupDb, restoreBackupDb } from '../../services/api';
 
 interface BackupModalProps {
@@ -59,8 +60,11 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t.common.settings} maxWidth="max-w-lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={t.common.settings} maxWidth="max-w-xl">
       <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+        {/* Gemini Vision AI & OCR Configuration */}
+        <AISettingsCard />
+
         {/* Auto Sync & Interval Configuration */}
         <AutoSyncSettingsCard />
 

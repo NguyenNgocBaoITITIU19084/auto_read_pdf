@@ -116,6 +116,7 @@ export interface ColumnSetting {
   customName?: string;
 }
 
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container';
 export type MatchType = 'exact' | 'contains' | 'starts_with' | 'ends_with' | 'any';
 export type TargetTable = 'all' | 'booking' | 'container' | 'vessel';
 
@@ -146,3 +147,95 @@ export interface ColorRule {
   is_enabled: boolean;
   created_at?: string;
 }
+
+export interface DashboardKPIs {
+  total_bookings: number;
+  total_estimated_teus: number;
+  customs_uncleared: number;
+  customs_cleared: number;
+  infras_unpaid: number;
+  infras_paid: number;
+  containers_in_yard: number;
+  containers_out_yard: number;
+  total_vessels: number;
+  watchlist_vessels: number;
+  total_containers: number;
+  watchlist_containers: number;
+}
+
+export interface DistributionItem {
+  name: string;
+  count: number;
+  percentage: number;
+}
+
+export interface CriticalCutoffAlert {
+  id: number;
+  booking_no?: string;
+  carrier?: string;
+  cutoff_time?: string;
+  vessel?: string;
+  port_of_discharging?: string;
+}
+
+export interface UnclearedContainerAlert {
+  id: number;
+  site_id?: string;
+  containerno: string;
+  event_time?: string;
+  event_type?: string;
+  in_yard?: string;
+  custom_clearance_status?: string;
+  infras_fee_status?: string;
+  fel?: string;
+  iso?: string;
+  location?: string;
+}
+
+export interface UpcomingVesselAlert {
+  id: number;
+  site_id?: string;
+  vessel_name: string;
+  in_out_voyage?: string;
+  actual_berth_time?: string;
+  actual_departure_time?: string;
+  closing_time?: string;
+}
+
+export interface DashboardAlerts {
+  critical_cutoffs: CriticalCutoffAlert[];
+  uncleared_containers: UnclearedContainerAlert[];
+  upcoming_vessels: UpcomingVesselAlert[];
+}
+
+export interface DashboardDistributions {
+  carriers: DistributionItem[];
+  sites: DistributionItem[];
+  equipment_types: DistributionItem[];
+  container_events: DistributionItem[];
+}
+
+export interface DashboardSummary {
+  updated_at: string;
+  scope: {
+    collection_id?: number | null;
+    collection_name: string;
+  };
+  kpis: DashboardKPIs;
+  alerts: DashboardAlerts;
+  distributions: DashboardDistributions;
+}
+
+export interface AISettings {
+  has_key: boolean;
+  masked_key: string;
+  raw_key?: string;
+  gemini_model: string;
+  ocr_engine: string;
+}
+
+export interface ExtractImageResponse {
+  status: string;
+  data: Partial<Booking>;
+}
+

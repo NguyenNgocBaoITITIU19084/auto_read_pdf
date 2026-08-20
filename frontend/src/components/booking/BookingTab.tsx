@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet, 
-  SlidersHorizontal, Eye, Copy, FileText
+  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Camera, Image as ImageIcon
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Booking } from '../../types';
@@ -9,6 +9,7 @@ import { getBookings, uploadPDFs, deleteBooking, clearBookings } from '../../ser
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BookingDetailModal } from './BookingDetailModal';
+import { ImageBookingModal } from './ImageBookingModal';
 import { ResizableTh } from '../common/ResizableTh';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
@@ -17,13 +18,23 @@ import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
 
-export const BookingTab: React.FC = () => {
+interface BookingTabProps {
+  initialSearchQuery?: string;
+}
+
+export const BookingTab: React.FC<BookingTabProps> = ({ initialSearchQuery }) => {
   const { t, activeCollection, addToast } = useApp();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
+
+  useEffect(() => {
+    if (initialSearchQuery !== undefined) {
+      setSearchQuery(initialSearchQuery);
+    }
+  }, [initialSearchQuery]);
 
   // Pagination state
   const [pageSize, setPageSize] = useState<number>(() => {
@@ -35,9 +46,39 @@ export const BookingTab: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Modal states
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
+  const [activeImageBlob, setActiveImageBlob] = useState<Blob | null>(null);
+
+  // Global clipboard paste listener (Ctrl+V / Cmd+V)
+  useEffect(() => {
+    const handleGlobalPaste = (e: ClipboardEvent) => {
+      if (!e.clipboardData) return;
+      
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            e.preventDefault();
+            setActiveImageFile(null);
+            setActiveImageBlob(blob);
+            setIsImageModalOpen(true);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => {
+      window.removeEventListener('paste', handleGlobalPaste);
+    };
+  }, []);
 
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "Tên file PDF", label: t.booking.columns["Tên file PDF"], visible: true },
@@ -126,13 +167,30 @@ export const BookingTab: React.FC = () => {
 
   const handleFilesUpload = async (files: FileList | File[]) => {
     if (!activeCollection || files.length === 0) return;
+    
+    const validExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp'];
+    const fileArray = Array.from(files).filter(f => {
+      const ext = f.name.substring(f.name.lastIndexOf('.')).toLowerCase();
+      return validExtensions.includes(ext);
+    });
+
+    if (fileArray.length === 0) {
+      addToast('Vui lòng chọn file định dạng PDF hoặc hình ảnh (.png, .jpg, .jpeg, .webp, .bmp)', 'error');
+      return;
+    }
+
+    // If exactly 1 image file is uploaded/dropped, open the interactive review modal
+    const isSingleImage = fileArray.length === 1 && !fileArray[0].name.toLowerCase().endsWith('.pdf');
+    if (isSingleImage) {
+      setActiveImageFile(fileArray[0]);
+      setActiveImageBlob(null);
+      setIsImageModalOpen(true);
+      return;
+    }
+
+    // Batch upload processing
     try {
       setUploading(true);
-      const fileArray = Array.from(files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
-      if (fileArray.length === 0) {
-        addToast('Vui lòng chọn các file định dạng .pdf', 'error');
-        return;
-      }
       const res = await uploadPDFs(activeCollection.id, fileArray);
       addToast(t.booking.uploadSuccess.replace('{count}', res.count.toString()), 'success');
       await loadData();
@@ -202,7 +260,7 @@ export const BookingTab: React.FC = () => {
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf"
+          accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp"
           className="hidden"
           onChange={(e) => e.target.files && handleFilesUpload(e.target.files)}
         />
@@ -215,7 +273,7 @@ export const BookingTab: React.FC = () => {
           </span>
           <span className="text-slate-400 hidden sm:inline">•</span>
           <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
-            (Dongjin, PIL, ONE, SITC, Cosco...)
+            (PDF, PNG, JPG, Screenshot Ctrl+V)
           </span>
         </div>
       </div>
@@ -256,6 +314,20 @@ export const BookingTab: React.FC = () => {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <Tooltip content={t.booking.scanImageTooltip}>
+            <button
+              onClick={() => {
+                setActiveImageFile(null);
+                setActiveImageBlob(null);
+                setIsImageModalOpen(true);
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm transition-all"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{t.booking.scanImage}</span>
+            </button>
+          </Tooltip>
+
           <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
             <button
               onClick={() => setIsColumnConfigOpen(true)}
@@ -451,6 +523,14 @@ export const BookingTab: React.FC = () => {
         columns={columns}
         onChange={setColumns}
         onReset={resetColumns}
+      />
+
+      <ImageBookingModal
+        isOpen={isImageModalOpen}
+        onClose={() => setIsImageModalOpen(false)}
+        initialImageFile={activeImageFile}
+        initialImageBlob={activeImageBlob}
+        onSavedSuccess={loadData}
       />
     </div>
   );

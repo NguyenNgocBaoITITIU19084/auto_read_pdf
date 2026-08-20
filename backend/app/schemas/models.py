@@ -99,3 +99,41 @@ class ColorRuleResponse(BaseModel):
     custom_text: Optional[str] = None
     is_enabled: bool
     created_at: str
+
+class DashboardKPIs(BaseModel):
+    total_bookings: int
+    total_estimated_teus: int
+    customs_uncleared: int
+    customs_cleared: int
+    infras_unpaid: int
+    infras_paid: int
+    containers_in_yard: int
+    containers_out_yard: int
+    total_vessels: int
+    watchlist_vessels: int
+    total_containers: int
+    watchlist_containers: int
+
+class DistributionItem(BaseModel):
+    name: str
+    count: int
+    percentage: float
+
+class DashboardAlerts(BaseModel):
+    critical_cutoffs: List[dict]
+    uncleared_containers: List[dict]
+    upcoming_vessels: List[dict]
+
+class DashboardDistributions(BaseModel):
+    carriers: List[DistributionItem]
+    sites: List[DistributionItem]
+    equipment_types: List[DistributionItem]
+    container_events: List[DistributionItem]
+
+class DashboardSummaryResponse(BaseModel):
+    updated_at: str
+    scope: dict
+    kpis: DashboardKPIs
+    alerts: DashboardAlerts
+    distributions: DashboardDistributions
+

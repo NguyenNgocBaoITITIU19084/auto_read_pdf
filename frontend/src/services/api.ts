@@ -48,6 +48,28 @@ export const uploadPDFs = async (collectionId: number, files: File[]): Promise<{
   return res.data;
 };
 
+export const uploadFiles = uploadPDFs;
+
+export const extractBookingImageApi = async (file: File, apiKey?: string): Promise<Partial<Booking>> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (apiKey) {
+    formData.append('api_key', apiKey);
+  }
+  const res = await apiClient.post<{ status: string; data: Partial<Booking> }>('/bookings/extract-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return res.data.data;
+};
+
+export const saveManualBookingApi = async (collectionId: number, booking: Partial<Booking>): Promise<Booking> => {
+  const res = await apiClient.post<{ status: string; id: number; item: Booking }>('/bookings/manual-save', {
+    collection_id: collectionId,
+    booking,
+  });
+  return res.data.item;
+};
+
 export const deleteBooking = async (id: number): Promise<void> => {
   await apiClient.delete(`/bookings/${id}`);
 };
@@ -226,3 +248,40 @@ export const resetColorRulesApi = async (): Promise<ColorRule[]> => {
   const res = await apiClient.post<ColorRule[]>('/color-rules/reset');
   return res.data;
 };
+
+// Dashboard
+export const getDashboardSummaryApi = async (collectionId?: number): Promise<import('../types').DashboardSummary> => {
+  const params: any = {};
+  if (collectionId !== undefined && collectionId !== null) {
+    params.collection_id = collectionId;
+  }
+  const res = await apiClient.get<import('../types').DashboardSummary>('/dashboard/summary', { params });
+  return res.data;
+};
+
+// AI & System Settings
+export const getAISettingsApi = async (): Promise<import('../types').AISettings> => {
+  const res = await apiClient.get<import('../types').AISettings>('/settings/ai');
+  return res.data;
+};
+
+export const saveAISettingsApi = async (settings: {
+  gemini_api_key?: string;
+  gemini_model?: string;
+  ocr_engine?: string;
+}): Promise<{ status: string; message: string }> => {
+  const res = await apiClient.post('/settings/ai', settings);
+  return res.data;
+};
+
+export const testAIApiKeyApi = async (
+  apiKey: string,
+  model?: string
+): Promise<{ valid: boolean; message: string }> => {
+  const res = await apiClient.post('/settings/ai/test', {
+    gemini_api_key: apiKey,
+    gemini_model: model || 'gemini-2.0-flash',
+  });
+  return res.data;
+};
+

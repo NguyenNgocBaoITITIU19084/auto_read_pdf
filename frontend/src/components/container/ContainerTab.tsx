@@ -21,7 +21,11 @@ import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
 
-export const ContainerTab: React.FC = () => {
+interface ContainerTabProps {
+  initialSearchQuery?: string;
+}
+
+export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }) => {
   const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
   const [containers, setContainers] = useState<ContainerInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,8 +42,14 @@ export const ContainerTab: React.FC = () => {
   });
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
+
+  useEffect(() => {
+    if (initialSearchQuery !== undefined) {
+      setSearchQuery(initialSearchQuery);
+    }
+  }, [initialSearchQuery]);
 
   const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_container_site_id') || 'CTL');
   const [containerNosInput, setContainerNosInput] = useState('');

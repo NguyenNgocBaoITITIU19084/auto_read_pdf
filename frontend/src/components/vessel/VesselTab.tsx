@@ -21,7 +21,11 @@ import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
 
-export const VesselTab: React.FC = () => {
+interface VesselTabProps {
+  initialSearchQuery?: string;
+}
+
+export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
   const [schedules, setSchedules] = useState<VesselSchedule[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,8 +40,14 @@ export const VesselTab: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Search in database
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
+
+  useEffect(() => {
+    if (initialSearchQuery !== undefined) {
+      setSearchQuery(initialSearchQuery);
+    }
+  }, [initialSearchQuery]);
 
   // ePort query inputs
   const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_vessel_site_id') || 'CTL');

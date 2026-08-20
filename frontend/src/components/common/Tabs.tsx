@@ -1,8 +1,8 @@
 import React from 'react';
-import { FileText, Ship, Box } from 'lucide-react';
+import { LayoutDashboard, FileText, Ship, Box } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
-export type TabId = 'booking' | 'vessel' | 'container';
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container';
 
 interface TabsProps {
   activeTab: TabId;
@@ -13,6 +13,11 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange }) => {
   const { t } = useApp();
 
   const tabItems: { id: TabId; label: string; icon: React.ReactNode }[] = [
+    {
+      id: 'dashboard',
+      label: t.tabs.dashboard,
+      icon: <LayoutDashboard className="w-4 h-4" />,
+    },
     {
       id: 'booking',
       label: t.tabs.booking,

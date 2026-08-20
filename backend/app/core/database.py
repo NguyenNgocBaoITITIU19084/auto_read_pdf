@@ -270,6 +270,15 @@ def init_db():
                     now_str
                 ))
 
+        # Create system_settings table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+
         conn.commit()
 
 def create_collection(name: str) -> int:
@@ -918,3 +927,241 @@ def reset_color_rules_to_default() -> list[dict]:
             ))
         conn.commit()
     return get_color_rules()
+
+def _calculate_teus(qty_str: str, equip_str: str) -> int:
+    """Helper to estimate TEUs from quantity and equipment type strings."""
+    import re
+    if not qty_str and not equip_str:
+        return 1
+    total = 0
+    # Search for patterns like '2x40HC', '1 x 20GP', '3*45'
+    matches = re.findall(r'(\d+)\s*[*xX]\s*(\d{2})', qty_str or "")
+    if matches:
+        for count_s, size_s in matches:
+            count = int(count_s)
+            multiplier = 2 if int(size_s) >= 40 else 1
+            total += count * multiplier
+        return total if total > 0 else 1
+    
+    # Check numeric quantity with equipment type
+    digits = re.findall(r'\d+', qty_str or "")
+    count = int(digits[0]) if digits else 1
+    multiplier = 2 if (equip_str and ("40" in equip_str or "45" in equip_str)) else 1
+    return count * multiplier
+
+def get_dashboard_summary(collection_id: int = None) -> dict:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Scope information
+        scope_info = {"collection_id": collection_id, "collection_name": "Tất cả bộ sưu tập"}
+        if collection_id is not None:
+            cursor.execute("SELECT id, name FROM collections WHERE id = ?;", (collection_id,))
+            col_row = cursor.fetchone()
+            if col_row:
+                scope_info = {"collection_id": col_row["id"], "collection_name": col_row["name"]}
+
+        where_clause = "WHERE collection_id = ?" if collection_id is not None else ""
+        params = (collection_id,) if collection_id is not None else ()
+
+        # 1. Booking KPIs
+        cursor.execute(f"SELECT COUNT(*), qty, equipment_type FROM bookings {where_clause};", params)
+        booking_count_row = cursor.fetchone()
+        total_bookings = booking_count_row[0] if booking_count_row else 0
+
+        cursor.execute(f"SELECT qty, equipment_type FROM bookings {where_clause};", params)
+        booking_rows = cursor.fetchall()
+        total_estimated_teus = sum(_calculate_teus(b["qty"], b["equipment_type"]) for b in booking_rows)
+
+        # 2. Container KPIs
+        cursor.execute(f"""
+            SELECT 
+                COUNT(*) as total_containers,
+                SUM(CASE WHEN custom_clearance_status LIKE '%Chưa duyệt%' OR custom_clearance_status = 'N' THEN 1 ELSE 0 END) as customs_uncleared,
+                SUM(CASE WHEN custom_clearance_status LIKE '%Đã duyệt%' OR custom_clearance_status = 'Y' THEN 1 ELSE 0 END) as customs_cleared,
+                SUM(CASE WHEN infras_fee_status LIKE '%Chưa%' OR infras_fee_status = '3' THEN 1 ELSE 0 END) as infras_unpaid,
+                SUM(CASE WHEN infras_fee_status LIKE '%Đã%' OR infras_fee_status = '1' OR infras_fee_status = '2' THEN 1 ELSE 0 END) as infras_paid,
+                SUM(CASE WHEN in_yard = 'Y' OR in_yard = '1' OR in_yard LIKE '%in%' THEN 1 ELSE 0 END) as containers_in_yard,
+                SUM(CASE WHEN in_yard = 'N' OR in_yard = '0' OR in_yard LIKE '%out%' THEN 1 ELSE 0 END) as containers_out_yard
+            FROM containers {where_clause};
+        """, params)
+        cont_kpi = cursor.fetchone()
+        total_containers = cont_kpi["total_containers"] if cont_kpi and cont_kpi["total_containers"] else 0
+        customs_uncleared = cont_kpi["customs_uncleared"] if cont_kpi and cont_kpi["customs_uncleared"] else 0
+        customs_cleared = cont_kpi["customs_cleared"] if cont_kpi and cont_kpi["customs_cleared"] else 0
+        infras_unpaid = cont_kpi["infras_unpaid"] if cont_kpi and cont_kpi["infras_unpaid"] else 0
+        infras_paid = cont_kpi["infras_paid"] if cont_kpi and cont_kpi["infras_paid"] else 0
+        containers_in_yard = cont_kpi["containers_in_yard"] if cont_kpi and cont_kpi["containers_in_yard"] else 0
+        containers_out_yard = cont_kpi["containers_out_yard"] if cont_kpi and cont_kpi["containers_out_yard"] else 0
+
+        # 3. Vessel KPIs
+        cursor.execute(f"SELECT COUNT(*) FROM vessel_schedules {where_clause};", params)
+        vessel_row = cursor.fetchone()
+        total_vessels = vessel_row[0] if vessel_row else 0
+
+        cursor.execute(f"SELECT COUNT(*) FROM vessel_watchlists {where_clause};", params)
+        vw_row = cursor.fetchone()
+        watchlist_vessels = vw_row[0] if vw_row else 0
+
+        cursor.execute(f"SELECT COUNT(*) FROM container_watchlists {where_clause};", params)
+        cw_row = cursor.fetchone()
+        watchlist_containers = cw_row[0] if cw_row else 0
+
+        # 4. Critical Alerts
+        # Cutoffs: bookings with cutoff_time
+        cursor.execute(f"""
+            SELECT id, booking_no, carrier, cutoff_time, vessel, port_of_discharging
+            FROM bookings
+            {where_clause} {"AND" if where_clause else "WHERE"} cutoff_time IS NOT NULL AND cutoff_time != ''
+            ORDER BY cutoff_time ASC
+            LIMIT 10;
+        """, params)
+        critical_cutoffs = [dict(r) for r in cursor.fetchall()]
+
+        # Uncleared containers (Customs not cleared or infras fee unpaid)
+        cursor.execute(f"""
+            SELECT id, site_id, containerno, event_time, event_type, in_yard, 
+                   custom_clearance_status, infras_fee_status, fel, iso, location
+            FROM containers
+            {where_clause} {"AND" if where_clause else "WHERE"} 
+                (custom_clearance_status LIKE '%Chưa%' OR custom_clearance_status = 'N' 
+                 OR infras_fee_status LIKE '%Chưa%' OR infras_fee_status = '3')
+            ORDER BY event_time DESC, id DESC
+            LIMIT 10;
+        """, params)
+        uncleared_containers = [dict(r) for r in cursor.fetchall()]
+
+        # Upcoming vessel berthing
+        cursor.execute(f"""
+            SELECT id, site_id, vessel_name, in_out_voyage, actual_berth_time, actual_departure_time, closing_time
+            FROM vessel_schedules
+            {where_clause} {"AND" if where_clause else "WHERE"} 
+                (actual_berth_time IS NOT NULL AND actual_berth_time != '')
+            ORDER BY actual_berth_time ASC
+            LIMIT 10;
+        """, params)
+        upcoming_vessels = [dict(r) for r in cursor.fetchall()]
+
+        # 5. Visual Distributions
+        # Top Carriers
+        cursor.execute(f"""
+            SELECT carrier as name, COUNT(*) as count 
+            FROM bookings 
+            {where_clause} {"AND" if where_clause else "WHERE"} carrier IS NOT NULL AND TRIM(carrier) != ''
+            GROUP BY carrier 
+            ORDER BY count DESC 
+            LIMIT 8;
+        """, params)
+        carrier_rows = cursor.fetchall()
+        total_c_count = sum(r["count"] for r in carrier_rows) if carrier_rows else 1
+        carrier_dist = [
+            {"name": r["name"], "count": r["count"], "percentage": round((r["count"] / total_c_count) * 100, 1)}
+            for r in carrier_rows
+        ]
+
+        # Port/Site distribution (aggregated across containers & vessels)
+        cursor.execute(f"""
+            SELECT site_id as name, COUNT(*) as count FROM (
+                SELECT site_id FROM containers {where_clause}
+                UNION ALL
+                SELECT site_id FROM vessel_schedules {where_clause}
+            )
+            WHERE name IS NOT NULL AND TRIM(name) != ''
+            GROUP BY name
+            ORDER BY count DESC
+            LIMIT 8;
+        """, (*params, *params) if params else ())
+        site_rows = cursor.fetchall()
+        total_s_count = sum(r["count"] for r in site_rows) if site_rows else 1
+        site_dist = [
+            {"name": r["name"], "count": r["count"], "percentage": round((r["count"] / total_s_count) * 100, 1)}
+            for r in site_rows
+        ]
+
+        # Equipment Types
+        cursor.execute(f"""
+            SELECT equipment_type as name, COUNT(*) as count
+            FROM bookings
+            {where_clause} {"AND" if where_clause else "WHERE"} equipment_type IS NOT NULL AND TRIM(equipment_type) != ''
+            GROUP BY equipment_type
+            ORDER BY count DESC
+            LIMIT 8;
+        """, params)
+        eq_rows = cursor.fetchall()
+        total_eq_count = sum(r["count"] for r in eq_rows) if eq_rows else 1
+        eq_dist = [
+            {"name": r["name"], "count": r["count"], "percentage": round((r["count"] / total_eq_count) * 100, 1)}
+            for r in eq_rows
+        ]
+
+        # Container Events
+        cursor.execute(f"""
+            SELECT event_type as name, COUNT(*) as count
+            FROM containers
+            {where_clause} {"AND" if where_clause else "WHERE"} event_type IS NOT NULL AND TRIM(event_type) != ''
+            GROUP BY event_type
+            ORDER BY count DESC
+            LIMIT 8;
+        """, params)
+        ev_rows = cursor.fetchall()
+        total_ev_count = sum(r["count"] for r in ev_rows) if ev_rows else 1
+        ev_dist = [
+            {"name": r["name"], "count": r["count"], "percentage": round((r["count"] / total_ev_count) * 100, 1)}
+            for r in ev_rows
+        ]
+
+        return {
+            "updated_at": now_str,
+            "scope": scope_info,
+            "kpis": {
+                "total_bookings": total_bookings,
+                "total_estimated_teus": total_estimated_teus,
+                "customs_uncleared": customs_uncleared,
+                "customs_cleared": customs_cleared,
+                "infras_unpaid": infras_unpaid,
+                "infras_paid": infras_paid,
+                "containers_in_yard": containers_in_yard,
+                "containers_out_yard": containers_out_yard,
+                "total_vessels": total_vessels,
+                "watchlist_vessels": watchlist_vessels,
+                "total_containers": total_containers,
+                "watchlist_containers": watchlist_containers
+            },
+            "alerts": {
+                "critical_cutoffs": critical_cutoffs,
+                "uncleared_containers": uncleared_containers,
+                "upcoming_vessels": upcoming_vessels
+            },
+            "distributions": {
+                "carriers": carrier_dist,
+                "sites": site_dist,
+                "equipment_types": eq_dist,
+                "container_events": ev_dist
+            }
+        }
+
+def get_system_setting(key: str, default: str = "") -> str:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM system_settings WHERE key = ?;", (key,))
+        row = cursor.fetchone()
+        return row[0] if row else default
+
+def set_system_setting(key: str, value: str):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT INTO system_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;
+        """, (key, value, now_str))
+        conn.commit()
+
+def get_all_system_settings() -> dict:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM system_settings;")
+        return {r[0]: r[1] for r in cursor.fetchall()}
+

@@ -177,3 +177,75 @@ def test_scheduler_endpoints(mock_sync):
     
     # Turn off
     client.post("/api/v1/scheduler/toggle", json={"enable": False})
+
+@patch("backend.app.api.bookings.extract_booking_from_image")
+def test_image_upload_and_extract_endpoints(mock_extract_img):
+    mock_extract_img.return_value = {
+        "STT": "",
+        "Tên file PDF": "photo.jpg",
+        "Booking No": "SGN601175800",
+        "Carrier": "PIL",
+        "Port of Discharging": "KOTA KINABALU",
+        "Place of Delivery": "KOTA KINABALU",
+        "Block": "null",
+        "T/S Port": "SINGAPORE",
+        "Equipment Type": "40HC",
+        "Q'ty": "2",
+        "Empty Pick Up CY": "TAN CANG HIEP LUC",
+        "Full return CY": "CATLAI TERMINAL",
+        "Port Cargo Cut-off": "13/07/2026 02:00",
+        "Pre Carrier": "KOTA NEKAD 0272S",
+        "ETD_Pre": "14/07/2026",
+        "Trunk Vessel": "KOTA JAYA 2612E",
+        "ETD_Trunk": "24/07/2026",
+        "Vessel": "KOTA NEKAD 0272S",
+        "ETD": "14/07/2026"
+    }
+
+    cols = client.get("/api/v1/collections").json()
+    col_id = cols[0]["id"]
+
+    # 1. Test image upload in batch
+    img_content = b"\xff\xd8\xff\xe0mockjpegdata"
+    files = [("files", ("booking_snap.jpg", io.BytesIO(img_content), "image/jpeg"))]
+    data = {"collection_id": col_id}
+    
+    res_upload = client.post("/api/v1/bookings/upload", data=data, files=files)
+    assert res_upload.status_code == 200
+    assert res_upload.json()["count"] == 1
+    
+    # 2. Test single image extract preview endpoint
+    extract_files = {"file": ("booking_snap.jpg", io.BytesIO(img_content), "image/jpeg")}
+    res_extract = client.post("/api/v1/bookings/extract-image", files=extract_files)
+    assert res_extract.status_code == 200
+    extracted = res_extract.json()
+    assert extracted["status"] == "success"
+    assert extracted["data"]["Booking No"] == "SGN601175800"
+
+    # 3. Test manual save endpoint
+    save_payload = {
+        "collection_id": col_id,
+        "booking": extracted["data"]
+    }
+    res_save = client.post("/api/v1/bookings/manual-save", json=save_payload)
+    assert res_save.status_code == 200
+    assert res_save.json()["status"] == "success"
+    saved_id = res_save.json()["id"]
+    assert saved_id > 0
+
+def test_ai_settings_endpoints():
+    # 1. Update AI settings
+    res_update = client.post("/api/v1/settings/ai", json={
+        "gemini_api_key": "AIzaSyTestKey12345",
+        "gemini_model": "gemini-2.0-flash",
+        "ocr_engine": "auto"
+    })
+    assert res_update.status_code == 200
+    
+    # 2. Get AI settings
+    res_get = client.get("/api/v1/settings/ai")
+    assert res_get.status_code == 200
+    settings = res_get.json()
+    assert settings["has_key"] is True
+    assert settings["masked_key"].startswith("AIza")
+    assert settings["gemini_model"] == "gemini-2.0-flash"
