@@ -36,12 +36,13 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange }) => {
   ];
 
   return (
-    <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center gap-1 shrink-0">
+    <div data-tour="nav-tabs" className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center gap-1 shrink-0">
       {tabItems.map((tab) => {
         const isActive = activeTab === tab.id;
         return (
           <button
             key={tab.id}
+            data-tour={`tab-${tab.id}`}
             onClick={() => onChange(tab.id)}
             className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
               isActive

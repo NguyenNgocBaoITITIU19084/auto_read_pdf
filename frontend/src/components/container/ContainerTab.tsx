@@ -20,6 +20,7 @@ import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } 
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
+import { subscribeTourActions } from '../../services/tourService';
 
 interface ContainerTabProps {
   initialSearchQuery?: string;
@@ -61,6 +62,18 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const [watchlist, setWatchlist] = useState<ContainerWatchlist[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
+
+  // Listen to interactive tour triggers (open/close Container Watchlist modal)
+  useEffect(() => {
+    const unsubscribe = subscribeTourActions((action) => {
+      if (action === 'openContainerWatchlist') {
+        setIsWatchlistOpen(true);
+      } else if (action === 'closeContainerWatchlist') {
+        setIsWatchlistOpen(false);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "site_id", label: t.container.columns["site_id"], visible: true },
@@ -409,7 +422,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Searcher Form */}
-      <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
+      <div data-tour="container-query-form" className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         <form onSubmit={handleQueryEport} className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="w-52 shrink-0">
@@ -451,14 +464,16 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               <span>{querying ? t.common.loading : t.container.queryBtn}</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setIsWatchlistOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 dark:bg-primary-950/50 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 transition-colors ml-auto shrink-0"
-            >
-              <BookmarkPlus className="w-3.5 h-3.5" />
-              <span>{t.container.watchlistTitle}</span>
-            </button>
+            <div data-tour="container-watchlist-btn" className="ml-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsWatchlistOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 dark:bg-primary-950/50 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 transition-colors shrink-0"
+              >
+                <BookmarkPlus className="w-3.5 h-3.5" />
+                <span>{t.container.watchlistTitle}</span>
+              </button>
+            </div>
           </div>
 
           {/* Options: IsSearchByInYard & IsSearchByBatch */}
@@ -526,7 +541,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           </div>
 
           {/* Event Type Filter Dropdown */}
-          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 shrink-0">
+          <div data-tour="container-event-pills" className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 shrink-0">
             <Filter className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400 shrink-0" />
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
               {t.container.filterByEvent || 'Tác nghiệp'}:
@@ -674,7 +689,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       )}
 
       {/* Container Table */}
-      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div data-tour="container-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">

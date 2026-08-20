@@ -27,7 +27,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
-      <Header />
+      <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
       <Tabs activeTab={activeTab} onChange={setActiveTab} />
       <main className="flex-1 overflow-hidden flex flex-col">
         {activeTab === 'dashboard' && (

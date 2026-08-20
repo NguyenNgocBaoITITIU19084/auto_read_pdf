@@ -1,16 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   FolderPlus, Trash2, Moon, Sun, Database, 
-  RefreshCw, Layers, ShieldCheck, Settings2, Palette
+  RefreshCw, Layers, ShieldCheck, Settings2, Palette,
+  HelpCircle, Compass, Sparkles, BookOpen, ChevronRight
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { TabId } from './Tabs';
 import { Modal } from './Modal';
 import { BackupModal } from './BackupModal';
 import { CollectionManagerModal } from './CollectionManagerModal';
 import { ColorConfigModal } from './ColorConfigModal';
 import { Tooltip } from './Tooltip';
+import { 
+  startFullAppTour, startTabTour, 
+  hasCompletedOnboarding, setOnboardingCompleted,
+  subscribeTourActions
+} from '../../services/tourService';
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  activeTab?: TabId;
+  onNavigateTab?: (tabId: TabId, searchKeyword?: string) => void;
+}
+
+export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavigateTab }) => {
   const { 
     t, language, setLanguage, isDark, setIsDark, 
     collections, activeCollection, setActiveCollection, 
@@ -24,6 +36,34 @@ export const Header: React.FC = () => {
   const [isCollectionManagerOpen, setIsCollectionManagerOpen] = useState(false);
   const [isColorConfigOpen, setIsColorConfigOpen] = useState(false);
 
+  const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
+  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  // First time onboarding check
+  useEffect(() => {
+    const isCompleted = hasCompletedOnboarding();
+    if (!isCompleted) {
+      // Delay slightly for smooth initial rendering
+      const timer = setTimeout(() => {
+        setIsWelcomeModalOpen(true);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // Listen to interactive tour triggers (open/close color config)
+  useEffect(() => {
+    const unsubscribe = subscribeTourActions((action) => {
+      if (action === 'openColorConfig') {
+        setIsColorConfigOpen(true);
+      } else if (action === 'closeColorConfig') {
+        setIsColorConfigOpen(false);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
   const submitCreateCollection = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newColName.trim()) return;
@@ -32,23 +72,43 @@ export const Header: React.FC = () => {
     setIsNewColOpen(false);
   };
 
-  const confirmDelete = async () => {
-    if (!activeCollection) return;
-    if (window.confirm(t.common.deleteConfirm)) {
-      await handleDeleteCollection(activeCollection.id);
-    }
-  };
-
   const intervalLabel = syncInterval >= 60 && syncInterval % 60 === 0 
     ? `${syncInterval / 60}h` 
     : `${syncInterval}p`;
 
+  const handleStartFullTour = () => {
+    setIsHelpModalOpen(false);
+    setIsWelcomeModalOpen(false);
+    setTimeout(() => {
+      startFullAppTour({
+        t,
+        onTabChange: (tab) => onNavigateTab && onNavigateTab(tab),
+      });
+    }, 150);
+  };
+
+  const handleStartTabTour = () => {
+    setIsHelpModalOpen(false);
+    setTimeout(() => {
+      startTabTour(activeTab, { t });
+    }, 150);
+  };
+
+  const handleDismissWelcome = () => {
+    setIsWelcomeModalOpen(false);
+    if (dontShowAgain) {
+      setOnboardingCompleted(true);
+    }
+  };
+
+  const activeTabName = t.tabs[activeTab] || activeTab;
+
   return (
-    <header className="h-13 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between shrink-0 shadow-sm gap-3 overflow-x-auto select-none">
+    <header className="h-13 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between shrink-0 shadow-sm gap-3 select-none z-30">
       {/* Left: Brand & Collection Selector */}
       <div className="flex items-center gap-4 shrink-0">
         {/* Brand */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div data-tour="brand" className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-primary-600 to-sky-400 flex items-center justify-center text-white shadow-md shadow-primary-500/20 shrink-0">
             <ShieldCheck className="w-4.5 h-4.5" />
           </div>
@@ -63,7 +123,7 @@ export const Header: React.FC = () => {
         </div>
 
         {/* Collection Dropdown */}
-        <div className="flex items-center gap-2 pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
+        <div data-tour="collection-selector" className="flex items-center gap-2 pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0">
             <Layers className="w-3.5 h-3.5" />
             <span>{t.common.collection}:</span>
@@ -109,78 +169,148 @@ export const Header: React.FC = () => {
       {/* Right Controls */}
       <div className="flex items-center gap-2.5 shrink-0">
         {/* Auto Sync Toggle */}
-        <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (mỗi ${syncInterval} phút). Nhấp để tắt hoặc vào tab Watchlist để đổi thời gian` : `Tự động đồng bộ đang TẮT (chu kỳ ${syncInterval} phút). Nhấp để bật hoặc vào tab Watchlist để đổi thời gian`} position="bottom">
-          <button
-            onClick={() => toggleAutoSync()}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap shrink-0 ${
-              autoSyncEnabled
-                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 shadow-xs shadow-emerald-500/10'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-750'
-            }`}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'animate-spin text-emerald-600' : ''}`} />
-            <span>{t.common.autoSync}: {autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
-          </button>
-        </Tooltip>
+        <div data-tour="auto-sync">
+          <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (mỗi ${syncInterval} phút). Nhấp để tắt hoặc vào tab Watchlist để đổi thời gian` : `Tự động đồng bộ đang TẮT (chu kỳ ${syncInterval} phút). Nhấp để bật hoặc vào tab Watchlist để đổi thời gian`} position="bottom">
+            <button
+              onClick={() => toggleAutoSync()}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap shrink-0 ${
+                autoSyncEnabled
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 shadow-xs shadow-emerald-500/10'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-750'
+              }`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'animate-spin text-emerald-600' : ''}`} />
+              <span>{t.common.autoSync}: {autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
+            </button>
+          </Tooltip>
+        </div>
 
         {/* Color Rules Configuration */}
-        <Tooltip content={t.common.colorConfig} position="bottom">
-          <button
-            onClick={() => setIsColorConfigOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
-          >
-            <Palette className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
-            <span>{t.common.colorConfig}</span>
-          </button>
-        </Tooltip>
+        <div data-tour="color-rules">
+          <Tooltip content={t.common.colorConfig} position="bottom">
+            <button
+              onClick={() => setIsColorConfigOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Palette className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
+              <span>{t.common.colorConfig}</span>
+            </button>
+          </Tooltip>
+        </div>
 
         {/* Backup & Restore Modal */}
-        <Tooltip content="Cài đặt & Sao lưu/Khôi phục dữ liệu JSON" position="bottom">
-          <button
-            onClick={() => setIsBackupOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
-          >
-            <Database className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-            <span>{t.common.settings}</span>
-          </button>
-        </Tooltip>
+        <div data-tour="settings">
+          <Tooltip content="Cài đặt & Sao lưu/Khôi phục dữ liệu JSON" position="bottom">
+            <button
+              onClick={() => setIsBackupOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Database className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+              <span>{t.common.settings}</span>
+            </button>
+          </Tooltip>
+        </div>
+
+        {/* Help & Guided Tour Button */}
+        <div data-tour="help-tour">
+          <Tooltip content={t.tour.helpBtnTooltip} position="bottom">
+            <button
+              onClick={() => setIsHelpModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-700 hover:to-indigo-700 text-white shadow-sm shadow-primary-500/20 transition-all shrink-0 cursor-pointer"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Hướng dẫn</span>
+            </button>
+          </Tooltip>
+        </div>
 
         {/* Language Switcher */}
-        <Tooltip content="Chuyển đổi ngôn ngữ Tiếng Việt / English" position="bottom">
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold shrink-0">
-            <button
-              onClick={() => setLanguage('vi')}
-              className={`px-2.5 py-1 rounded-lg transition-all ${
-                language === 'vi'
-                  ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-300 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              VI
-            </button>
-            <button
-              onClick={() => setLanguage('en')}
-              className={`px-2.5 py-1 rounded-lg transition-all ${
-                language === 'en'
-                  ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-300 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-100'
-              }`}
-            >
-              EN
-            </button>
-          </div>
-        </Tooltip>
+        <div data-tour="lang-toggle">
+          <Tooltip content="Chuyển đổi ngôn ngữ Tiếng Việt / English" position="bottom">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold shrink-0">
+              <button
+                onClick={() => setLanguage('vi')}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  language === 'vi'
+                    ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                VI
+              </button>
+              <button
+                onClick={() => setLanguage('en')}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  language === 'en'
+                    ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-300 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                EN
+              </button>
+            </div>
+          </Tooltip>
+        </div>
 
         {/* Dark / Light Toggle */}
-        <Tooltip content={isDark ? "Chuyển sang giao diện Sáng" : "Chuyển sang giao diện Tối"} position="bottom">
-          <button
-            onClick={() => setIsDark(!isDark)}
-            className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-          >
-            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
-        </Tooltip>
+        <div data-tour="theme-toggle">
+          <Tooltip content={isDark ? "Chuyển sang giao diện Sáng" : "Chuyển sang giao diện Tối"} position="bottom">
+            <button
+              onClick={() => setIsDark(!isDark)}
+              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
+            >
+              {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </Tooltip>
+        </div>
       </div>
+
+      {/* Welcome Onboarding Modal for First Time Users */}
+      <Modal
+        isOpen={isWelcomeModalOpen}
+        onClose={handleDismissWelcome}
+        title={t.tour.welcomeModalTitle}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4 pt-1">
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-primary-50 dark:bg-primary-950/40 border border-primary-100 dark:border-primary-900/60">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary-600 to-sky-400 flex items-center justify-center text-white shadow-md shrink-0">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              {t.tour.welcomeModalDesc}
+            </p>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={dontShowAgain}
+              onChange={(e) => setDontShowAgain(e.target.checked)}
+              className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500"
+            />
+            <span>{t.tour.dontShowAgain}</span>
+          </label>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={handleDismissWelcome}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+            >
+              {t.tour.skipTourBtn}
+            </button>
+            <button
+              type="button"
+              onClick={handleStartFullTour}
+              className="px-4 py-2 text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-xl shadow-md shadow-primary-500/20 transition-all flex items-center gap-1.5"
+            >
+              <Compass className="w-3.5 h-3.5" />
+              <span>{t.tour.startTourBtn}</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* New Collection Modal */}
       <Modal
@@ -239,6 +369,72 @@ export const Header: React.FC = () => {
         isOpen={isColorConfigOpen}
         onClose={() => setIsColorConfigOpen(false)}
       />
+
+      {/* Interactive Help & Tour Center Modal */}
+      <Modal
+        isOpen={isHelpModalOpen}
+        onClose={() => setIsHelpModalOpen(false)}
+        title={t.tour.helpMenuTitle}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-3 pt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Chọn chuyến tham quan hướng dẫn tương tác hoặc khám phá các tính năng chuyên sâu:
+          </p>
+
+          <div className="grid grid-cols-1 gap-2.5">
+            {/* Full App Tour Option */}
+            <button
+              type="button"
+              onClick={handleStartFullTour}
+              className="w-full text-left p-3.5 rounded-2xl bg-gradient-to-r from-primary-50 to-sky-50 dark:from-primary-950/40 dark:to-sky-950/30 border border-primary-200 dark:border-primary-800/80 hover:border-primary-400 dark:hover:border-primary-600 transition-all flex items-start gap-3.5 group cursor-pointer shadow-xs"
+            >
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary-600 to-sky-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-primary-500/20 group-hover:scale-105 transition-transform">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
+                  <span className="text-primary-700 dark:text-primary-300 font-extrabold">{t.tour.fullTourTitle}</span>
+                  <ChevronRight className="w-4 h-4 text-primary-500 group-hover:translate-x-1 transition-transform" />
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                  {t.tour.fullTourSubtitle}
+                </p>
+              </div>
+            </button>
+
+            {/* Current Active Tab Tour Option */}
+            <button
+              type="button"
+              onClick={handleStartTabTour}
+              className="w-full text-left p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 hover:border-primary-400 dark:hover:border-primary-600 transition-all flex items-start gap-3.5 group cursor-pointer shadow-xs"
+            >
+              <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
+                  <span>{t.tour.tabTourTitle} ({activeTabName})</span>
+                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  {t.tour.tabTourSubtitle}
+                </p>
+              </div>
+            </button>
+          </div>
+
+          <div className="flex items-center justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsHelpModalOpen(false)}
+              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+            >
+              {t.common.close}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </header>
   );
 };

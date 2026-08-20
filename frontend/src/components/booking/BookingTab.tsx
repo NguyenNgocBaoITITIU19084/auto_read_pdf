@@ -17,6 +17,7 @@ import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
+import { subscribeTourActions } from '../../services/tourService';
 
 interface BookingTabProps {
   initialSearchQuery?: string;
@@ -78,6 +79,20 @@ export const BookingTab: React.FC<BookingTabProps> = ({ initialSearchQuery }) =>
     return () => {
       window.removeEventListener('paste', handleGlobalPaste);
     };
+  }, []);
+
+  // Listen to interactive tour triggers (open/close AI image OCR modal)
+  useEffect(() => {
+    const unsubscribe = subscribeTourActions((action) => {
+      if (action === 'openImageModal') {
+        setActiveImageFile(null);
+        setActiveImageBlob(null);
+        setIsImageModalOpen(true);
+      } else if (action === 'closeImageModal') {
+        setIsImageModalOpen(false);
+      }
+    });
+    return unsubscribe;
   }, []);
 
   const defaultColumns: ColumnDef[] = useMemo(() => [
@@ -246,6 +261,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({ initialSearchQuery }) =>
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Dropzone */}
       <div
+        data-tour="booking-dropzone"
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
@@ -281,7 +297,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({ initialSearchQuery }) =>
       {/* Control Bar: Search & Action buttons */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         {/* Search */}
-        <div className="flex items-center gap-2 flex-1 max-w-md">
+        <div data-tour="booking-search" className="flex items-center gap-2 flex-1 max-w-md">
           <select
             value={searchField}
             onChange={(e) => setSearchField(e.target.value)}
@@ -314,40 +330,46 @@ export const BookingTab: React.FC<BookingTabProps> = ({ initialSearchQuery }) =>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <Tooltip content={t.booking.scanImageTooltip}>
-            <button
-              onClick={() => {
-                setActiveImageFile(null);
-                setActiveImageBlob(null);
-                setIsImageModalOpen(true);
-              }}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm transition-all"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>{t.booking.scanImage}</span>
-            </button>
-          </Tooltip>
+          <div data-tour="booking-ai-ocr">
+            <Tooltip content={t.booking.scanImageTooltip}>
+              <button
+                onClick={() => {
+                  setActiveImageFile(null);
+                  setActiveImageBlob(null);
+                  setIsImageModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm transition-all"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{t.booking.scanImage}</span>
+              </button>
+            </Tooltip>
+          </div>
 
-          <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
-            <button
-              onClick={() => setIsColumnConfigOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors"
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>{t.common.columnsConfig}</span>
-            </button>
-          </Tooltip>
+          <div data-tour="booking-col-config">
+            <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
+              <button
+                onClick={() => setIsColumnConfigOpen(true)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span>{t.common.columnsConfig}</span>
+              </button>
+            </Tooltip>
+          </div>
 
-          <Tooltip content="Xuất danh sách Booking ra file Excel">
-            <button
-              onClick={() => setIsExportOpen(true)}
-              disabled={bookings.length === 0}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>{t.common.exportExcel}</span>
-            </button>
-          </Tooltip>
+          <div data-tour="booking-export">
+            <Tooltip content="Xuất danh sách Booking ra file Excel">
+              <button
+                onClick={() => setIsExportOpen(true)}
+                disabled={bookings.length === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>{t.common.exportExcel}</span>
+              </button>
+            </Tooltip>
+          </div>
 
           <Tooltip content="Tải lại dữ liệu">
             <button
@@ -372,7 +394,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({ initialSearchQuery }) =>
       </div>
 
       {/* Main Table */}
-      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div data-tour="booking-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">

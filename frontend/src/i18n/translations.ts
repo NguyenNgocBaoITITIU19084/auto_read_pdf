@@ -307,6 +307,174 @@ export const translations = {
         "item_key": "Khóa ePort (Item Key)",
         "queried_at": "Cập nhật lúc"
       }
+    },
+    tour: {
+      helpBtnTooltip: "Hướng dẫn sử dụng & Khám phá tính năng",
+      helpMenuTitle: "Hướng Dẫn & Trợ Giúp",
+      fullTourTitle: "🚀 Hướng dẫn Tổng quan (Toàn bộ App)",
+      fullTourSubtitle: "Tìm hiểu toàn diện quy trình làm việc và các tính năng",
+      tabTourTitle: "💡 Hướng dẫn Màn hình này",
+      tabTourSubtitle: "Khám phá chi tiết các công cụ trên tab hiện tại",
+      welcomeModalTitle: "Chào mừng bạn đến với Auto Read PDF Pro v2.0!",
+      welcomeModalDesc: "Bạn có muốn tham gia một chuyến tham quan nhanh (2 phút) để khám phá các tính năng và cách sử dụng hiệu quả không?",
+      startTourBtn: "Bắt đầu khám phá ngay",
+      skipTourBtn: "Để sau",
+      dontShowAgain: "Không hiện lại thông báo này",
+      btnNext: "Tiếp tục →",
+      btnPrev: "← Quay lại",
+      btnDone: "Hoàn tất ✨",
+      btnSkip: "Bỏ qua",
+      progressText: "{current} trên {total}",
+      steps: {
+        brand: {
+          title: "Auto Read PDF Pro v2.0",
+          desc: "Hệ thống quản lý dữ liệu xuất nhập khẩu & logistics thông minh: trích xuất Booking PDF/Ảnh chụp bằng AI OCR và theo dõi Lịch tàu, Container ePort Tân Cảng tự động."
+        },
+        collection: {
+          title: "Quản Lý Bộ Sưu Tập",
+          desc: "Tạo và chuyển đổi linh hoạt giữa các Bộ sưu tập riêng biệt cho từng dự án, lô hàng hoặc theo từng tháng. Dữ liệu booking, lịch tàu, container được lưu trữ riêng theo từng BST."
+        },
+        autoSync: {
+          title: "Tự Động Đồng Bộ Dữ Liệu",
+          desc: "Bật/Tắt chế độ tự động cập nhật dữ liệu lịch tàu và container trong danh sách theo dõi (Watchlist) định kỳ (mặc định mỗi 10 phút) hoàn toàn tự động."
+        },
+        colorRules: {
+          title: "Cấu Hình Màu Sắc Dữ Liệu",
+          desc: "Tùy biến luật đổi màu trực quan cho các trạng thái thông quan, tình trạng nợ phí CSHT, hạn cut-off, tác nghiệp bãi cảng... giúp phát hiện ngay các sự cố vận hành."
+        },
+        colorTarget: {
+          title: "1. Chọn Bảng & Cột Áp Dụng",
+          desc: "Chọn bảng cần đổi màu (Container, Booking PDF, Lịch tàu ePort) và chọn cột dữ liệu mục tiêu (hoặc áp dụng cho 'Tất cả các cột')."
+        },
+        colorCondition: {
+          title: "2. Thiết Lập Điều Kiện So Khớp",
+          desc: "Hỗ trợ 5 kiểu khớp: 'Khớp chính xác', 'Chứa từ khóa', 'Bắt đầu bằng', 'Kết thúc bằng' hoặc 'Toàn bộ cột (mọi ô có dữ liệu)'. Nhập từ khóa bạn muốn làm nổi bật (VD: UNLOAD, Chưa duyệt, GNL...)."
+        },
+        colorPalette: {
+          title: "3. Chọn Bảng Màu & Xem Trước",
+          desc: "Chọn nhanh từ các bộ màu thiết kế sẵn (Xanh lá, Đỏ/Hồng cảnh báo, Vàng cam, Xanh dương...) hoặc tự nhập mã màu HEX riêng (Màu nền, Màu viền, Màu chữ). Hệ thống hỗ trợ xem trước trực tiếp trước khi lưu."
+        },
+        settings: {
+          title: "Cài Đặt & Sao Lưu Dữ Liệu",
+          desc: "Nơi cấu hình Google Gemini API Key để nhận diện ảnh chụp siêu tốc, tải file sao lưu JSON an toàn hoặc khôi phục dữ liệu khi cần."
+        },
+        langSwitch: {
+          title: "Chuyển Đổi Ngôn Ngữ",
+          desc: "Chuyển đổi giao diện tức thì giữa Tiếng Việt (VI) và Tiếng Anh (EN)."
+        },
+        themeToggle: {
+          title: "Giao Diện Sáng / Tối",
+          desc: "Chuyển đổi nhanh chóng giữa chế độ nền sáng hoặc nền tối (Dark Mode) êm dịu cho mắt khi làm việc ban đêm."
+        },
+        navTabs: {
+          title: "Thanh Điều Hướng Phân Hệ",
+          desc: "Chuyển đổi linh hoạt giữa 4 phân hệ chính: Bảng điều hành tổng quan, Quản lý Booking PDF/Ảnh, Lịch tàu ePort và Tra cứu Container."
+        },
+        helpTour: {
+          title: "Nút Trợ Giúp & Hướng Dẫn",
+          desc: "Bất cứ lúc nào cần hỗ trợ hoặc muốn xem lại hướng dẫn từng tính năng, bạn chỉ cần nhấp vào biểu tượng dấu chấm hỏi (?) này!"
+        },
+        // Dashboard Tab
+        dashboardScope: {
+          title: "Phạm Vi Dữ Liệu",
+          desc: "Chuyển đổi giữa xem dữ liệu tổng hợp toàn hệ thống (tất cả các bộ sưu tập) hoặc chỉ riêng bộ sưu tập đang chọn."
+        },
+        dashboardKPIs: {
+          title: "Các Chỉ Số Vận Hành (KPIs)",
+          desc: "Theo dõi nhanh tổng sản lượng TEUs, số lượng container chưa duyệt hải quan, chưa đóng phí CSHT cảng biển và số lượng container đang nằm tại bãi."
+        },
+        dashboardAlerts: {
+          title: "Cảnh Báo Vận Hành Khẩn Cấp",
+          desc: "Tự động phát hiện các booking sắp đến giờ cắt máng (cut-off) và container tồn bãi có nguy cơ trễ hạn để bấm 'Chuyển tới' xử lý ngay."
+        },
+        dashboardCharts: {
+          title: "Biểu Đồ Phân Bổ Trực Quan",
+          desc: "Phân tích cơ cấu hãng tàu, phân bổ sản lượng theo các cảng/ICD (Cát Lái, Hiệp Phước, Sóng Thần...) và các sự kiện tác nghiệp bãi."
+        },
+        // Booking Tab
+        bookingDropzone: {
+          title: "Kéo Thả File Booking & Ảnh Chụp",
+          desc: "Kéo thả nhiều file PDF hoặc ảnh chụp booking vào đây (hỗ trợ dán trực tiếp phím tắt Ctrl+V / Cmd+V từ ảnh chụp màn hình). Hệ thống sẽ tự động trích xuất 14 trường dữ liệu tức thì!"
+        },
+        bookingSearch: {
+          title: "Tìm Kiếm & Lọc Dữ Liệu",
+          desc: "Tìm kiếm nhanh theo số Booking, hãng tàu, cảng đích, bãi cấp rỗng hoặc nơi hạ bãi theo từng cột cụ thể."
+        },
+        bookingAiOCR: {
+          title: "Quét & Nhận Diện Ảnh (AI Vision OCR)",
+          desc: "Tính năng bóc tách dữ liệu từ ảnh chụp thông minh bằng mô hình Google Gemini Vision AI, xử lý được ảnh chụp nghiêng, mờ, màn hình điện thoại hoặc file scan PDF."
+        },
+        ocrDropzone: {
+          title: "Vùng Tải Ảnh & Dán Clipboard (Ctrl+V)",
+          desc: "Kéo thả ảnh hoặc dán trực tiếp từ clipboard (Ctrl+V / Cmd+V). Bạn cũng có thể bấm chọn ảnh khác bất cứ lúc nào."
+        },
+        ocrControls: {
+          title: "Công Cụ Xoay, Phóng To & AI Model",
+          desc: "Dễ dàng xoay ảnh 90°, phóng to/thu nhỏ để đối chiếu văn bản gốc. Hỗ trợ cấu hình khóa API Gemini AI riêng để đạt tốc độ xử lý cao nhất."
+        },
+        ocrFields: {
+          title: "Kiểm Tra & Lưu 14 Trường Dữ Liệu",
+          desc: "Hệ thống tự động điền sẵn 14 trường: Số Booking, Hãng tàu, Cảng đích, Điểm giao, Loại cont, Số lượng, Bãi cấp rỗng, Nơi hạ bãi, Giờ cắt máng, Tên tàu, Ngày chạy... Bạn có thể chỉnh sửa trực tiếp và bấm 'Lưu vào Bộ sưu tập'."
+        },
+        bookingColumns: {
+          title: "Tùy Biến Cột Hiển Thị",
+          desc: "Bật/tắt ẩn hiện, kéo thả sắp xếp lại thứ tự cột hoặc đổi tên hiển thị các cột dữ liệu theo thói quen của bạn."
+        },
+        bookingExport: {
+          title: "Xuất Báo Cáo Excel",
+          desc: "Xuất toàn bộ hoặc các dòng booking đã chọn ra file Excel định dạng chuẩn chỉ với 1 cú click."
+        },
+        bookingTable: {
+          title: "Bảng Dữ Liệu & Thao Tác Nhanh",
+          desc: "Nhấp đúp chuột vào bất kỳ dòng nào để xem chi tiết đầy đủ, hoặc dùng các nút thao tác nhanh để sao chép dữ liệu dòng vào clipboard."
+        },
+        // Vessel Tab
+        vesselQuery: {
+          title: "Tra Cứu Lịch Tàu ePort Tân Cảng",
+          desc: "Chọn mã cảng (CTL, GNL, THP, CMS, IST, TNT), nhập tên tàu và số chuyến để tra cứu thời gian cập bến (ETA), rời bến (ETD), giờ mở cổng và hạn đóng máng."
+        },
+        vesselWatchlistBtn: {
+          title: "Quản Lý Watchlist Lịch Tàu",
+          desc: "Mở danh sách giám sát lịch tàu trọng điểm. Khi bật Auto-Sync, hệ thống sẽ tự động tra cứu lại định kỳ trên hệ thống ePort SNP để cập nhật thay đổi giờ tàu chạy và giờ đóng máng."
+        },
+        vesselWatchlistForm: {
+          title: "Thêm Chuyến Tàu Vào Theo Dõi",
+          desc: "Chọn bến cảng, nhập tên tàu và số chuyến để thêm vào danh sách theo dõi tự động."
+        },
+        vesselWatchlistSync: {
+          title: "Đồng Bộ & Quản Lý Tàu Giám Sát",
+          desc: "Bấm 'Đồng bộ Watchlist' để cập nhật tức thì dữ liệu của toàn bộ các tàu đang theo dõi, hoặc xóa các tàu đã hoàn tất chuyến."
+        },
+        vesselTable: {
+          title: "Danh Sách Lịch Tàu & Bookmark",
+          desc: "Xem kết quả tra cứu với nhãn thời gian cập nhật gần nhất. Nhấp vào icon dấu sao/bookmark ở cột Thao tác để thêm/bỏ tàu vào danh sách theo dõi."
+        },
+        // Container Tab
+        containerQuery: {
+          title: "Tra Cứu Container ePort",
+          desc: "Nhập danh sách nhiều số Container (ngăn cách bằng dấu phẩy, khoảng trắng hoặc dòng mới), tùy chọn 'Chỉ vòng luân chuyển cuối' hoặc 'Tìm kiếm theo lô'."
+        },
+        containerEventPills: {
+          title: "Lọc Nhanh Theo Tác Nghiệp Bãi",
+          desc: "Lọc nhanh danh sách container theo từng loại tác nghiệp: UNLOAD (Dỡ tàu), INGATE (Vào bãi), STACKING (Xếp bãi), OUTGATE (Xuất bãi), LOAD (Lên tàu)."
+        },
+        containerWatchlistBtn: {
+          title: "Quản Lý Watchlist Container",
+          desc: "Giám sát liên tục các container quan trọng để nhận thông tin cập nhật tức thì về vị trí bãi, biến động tác nghiệp và trạng thái tờ khai Hải quan."
+        },
+        containerWatchlistForm: {
+          title: "Thêm Container Vào Giám Sát",
+          desc: "Chọn mã cảng, nhập số container và chọn loại tác nghiệp cần theo dõi sát sao."
+        },
+        containerWatchlistList: {
+          title: "Theo Dõi Trạng Thái & Đồng Bộ",
+          desc: "Xem toàn bộ container trong danh sách giám sát và đồng bộ dữ liệu nhanh từ ePort SNP."
+        },
+        containerTable: {
+          title: "Bảng Thông Tin Container & Hải Quan",
+          desc: "Theo dõi chi tiết vị trí bãi, xe/tàu vận chuyển, trạng thái tờ khai Hải quan và tình trạng đóng phí Cơ sở hạ tầng cảng biển."
+        }
+      }
     }
   },
   en: {
@@ -614,6 +782,174 @@ export const translations = {
         "note": "Note",
         "item_key": "Item Key",
         "queried_at": "Queried At"
+      }
+    },
+    tour: {
+      helpBtnTooltip: "User Guide & Feature Walkthrough",
+      helpMenuTitle: "Help & Interactive Guide",
+      fullTourTitle: "🚀 Full App Tour (Overview)",
+      fullTourSubtitle: "Learn the end-to-end workflow and core features",
+      tabTourTitle: "💡 Current Tab Guide",
+      tabTourSubtitle: "Explore detailed tools on the active screen",
+      welcomeModalTitle: "Welcome to Auto Read PDF Pro v2.0!",
+      welcomeModalDesc: "Would you like to take a quick interactive tour (2 minutes) to explore key features and best practices?",
+      startTourBtn: "Start Tour Now",
+      skipTourBtn: "Maybe Later",
+      dontShowAgain: "Don't show this again",
+      btnNext: "Next →",
+      btnPrev: "← Back",
+      btnDone: "Finish ✨",
+      btnSkip: "Skip",
+      progressText: "{current} of {total}",
+      steps: {
+        brand: {
+          title: "Auto Read PDF Pro v2.0",
+          desc: "Intelligent logistics and import/export data workspace: AI OCR extraction for PDF/images and automated tracking for SNP ePort vessel schedules & containers."
+        },
+        collection: {
+          title: "Collections Management",
+          desc: "Create and switch between isolated collections for different projects, shipments, or months. All booking, vessel, and container records are segregated per collection."
+        },
+        autoSync: {
+          title: "Automated Data Sync",
+          desc: "Toggle automatic background polling for all vessels and containers in your Watchlist (default every 10 minutes) without manual intervention."
+        },
+        colorRules: {
+          title: "Visual Color Rules",
+          desc: "Set up customizable color highlights for customs clearance statuses, unpaid infrastructure fees, closing cut-offs, and yard events to quickly spot operational risks."
+        },
+        colorTarget: {
+          title: "1. Select Target Table & Column",
+          desc: "Choose target table (Container, Booking PDF, Vessel Schedule) and target column (or apply across 'All Columns')."
+        },
+        colorCondition: {
+          title: "2. Set Match Condition & Keyword",
+          desc: "Supports 5 match types: 'Exact Match', 'Contains Keyword', 'Starts With', 'Ends With', or 'Entire Column (any non-empty value)'. Enter the value you want highlighted."
+        },
+        colorPalette: {
+          title: "3. Choose Color Palette & Preview",
+          desc: "Select from curated presets (Emerald, Rose, Amber, Sky, Purple) or specify custom HEX colors (Background, Border, Text). Live preview is rendered in real time."
+        },
+        settings: {
+          title: "Settings & DB Backup",
+          desc: "Configure your Google Gemini API Key for high-speed AI image OCR, export safe JSON backups, or restore database state anytime."
+        },
+        langSwitch: {
+          title: "Language Switcher",
+          desc: "Instantly switch the interface language between Vietnamese (VI) and English (EN)."
+        },
+        themeToggle: {
+          title: "Dark / Light Mode",
+          desc: "Toggle between bright day mode and eye-friendly Dark Mode for late-night shifts."
+        },
+        navTabs: {
+          title: "Navigation Tabs",
+          desc: "Seamlessly navigate between 4 core modules: Overview Dashboard, Booking Manager (PDF/OCR), ePort Vessel Schedule, and Container Tracking."
+        },
+        helpTour: {
+          title: "Help & Guided Tours",
+          desc: "Whenever you need assistance or want to review features, simply click this Help (?) button anytime!"
+        },
+        // Dashboard Tab
+        dashboardScope: {
+          title: "Data Scope",
+          desc: "Toggle between viewing aggregate system-wide metrics across all collections or focusing only on the current collection."
+        },
+        dashboardKPIs: {
+          title: "Key Performance Indicators (KPIs)",
+          desc: "Quickly track total estimated TEUs volume, uncleared customs count, unpaid port infrastructure fees, and containers currently in the yard."
+        },
+        dashboardAlerts: {
+          title: "Critical Operations Alerts",
+          desc: "Automated warnings for bookings approaching cut-off deadlines and uncleared containers in the yard, with 1-click 'Jump to' actions."
+        },
+        dashboardCharts: {
+          title: "Visual Breakdown & Analytics",
+          desc: "Analyze carrier distribution, volume breakdown across terminal sites (Cat Lai, Hiep Phuoc, Song Than...), and port yard event breakdown."
+        },
+        // Booking Tab
+        bookingDropzone: {
+          title: "Drag & Drop PDFs & Images",
+          desc: "Drop multiple PDF files or booking photos here (supports direct clipboard paste Ctrl+V / Cmd+V from screenshots). The system automatically extracts 14 fields instantly!"
+        },
+        bookingSearch: {
+          title: "Search & Filter Data",
+          desc: "Search quickly across Booking No, Carrier, Discharging Port, Empty CY, or Return CY with specific column filtering."
+        },
+        bookingAiOCR: {
+          title: "AI Vision & OCR Scanner",
+          desc: "Intelligent data extraction powered by Google Gemini Vision AI model, handling skewed phone photos, mobile screenshots, and scanned PDFs."
+        },
+        ocrDropzone: {
+          title: "Image Upload & Clipboard Paste (Ctrl+V)",
+          desc: "Drag & drop booking photos or paste directly from clipboard (Ctrl+V / Cmd+V). You can switch or re-upload images anytime."
+        },
+        ocrControls: {
+          title: "Rotate 90°, Zoom & AI Model Setup",
+          desc: "Easily rotate image 90° or zoom in/out to compare with original text. Configure custom Gemini API Key for high concurrency."
+        },
+        ocrFields: {
+          title: "Review & Save 14 Extracted Fields",
+          desc: "System auto-fills 14 fields: Booking No, Carrier, Discharging Port, Delivery CY, Equipment, Qty, Cut-off time, Vessel, ETD... Edit inline and click 'Save to Collection'."
+        },
+        bookingColumns: {
+          title: "Customize Columns",
+          desc: "Show, hide, reorder, or rename table columns according to your team's workflow."
+        },
+        bookingExport: {
+          title: "Export to Excel",
+          desc: "Export selected or all booking records to standardized Excel spreadsheets with 1 click."
+        },
+        bookingTable: {
+          title: "Data Grid & Row Actions",
+          desc: "Double click any row for full detail inspection, or use quick action buttons to copy rows directly to your clipboard."
+        },
+        // Vessel Tab
+        vesselQuery: {
+          title: "SNP ePort Vessel Schedule Lookup",
+          desc: "Select port site (CTL, GNL, THP, CMS, IST, TNT), enter vessel name and voyage to check ETA berth time, ETD departure, gate open, and cut-off deadlines."
+        },
+        vesselWatchlistBtn: {
+          title: "Manage Vessel Watchlist",
+          desc: "Open monitored vessel schedules list. When Auto-Sync is ON, schedules are periodically polled from SNP ePort to automatically update departure & cut-off times."
+        },
+        vesselWatchlistForm: {
+          title: "Add Vessel to Watchlist",
+          desc: "Select port terminal, enter vessel name and voyage to monitor automatically."
+        },
+        vesselWatchlistSync: {
+          title: "Sync & Monitor Tracked Vessels",
+          desc: "Click 'Sync Watchlist' to immediately refresh real-time statuses from SNP ePort, or remove completed voyages."
+        },
+        vesselTable: {
+          title: "Vessel Schedules & Bookmark",
+          desc: "View queried schedules with recent update badges. Click the bookmark icon in the Actions column to add or remove vessels from the Watchlist."
+        },
+        // Container Tab
+        containerQuery: {
+          title: "Container Tracking Lookup",
+          desc: "Enter batch container numbers (comma, space, or newline separated), with options for 'Last Cycle Only' or 'Batch search'."
+        },
+        containerEventPills: {
+          title: "Quick Event Filters",
+          desc: "Filter containers instantly by yard event: UNLOAD, INGATE, STACKING, OUTGATE, and LOAD."
+        },
+        containerWatchlistBtn: {
+          title: "Manage Container Watchlist",
+          desc: "Continuously monitor priority containers to receive instant notifications on yard movements and customs status."
+        },
+        containerWatchlistForm: {
+          title: "Add Container to Watchlist",
+          desc: "Select port terminal, enter container number and specify target yard event."
+        },
+        containerWatchlistList: {
+          title: "Status Monitoring & Quick Sync",
+          desc: "View all tracked containers in watchlist and trigger instant polling from SNP ePort."
+        },
+        containerTable: {
+          title: "Container Grid & Customs Status",
+          desc: "Monitor detailed yard locations, truck/vessel transport, Customs clearance status, and Port Infrastructure fee payment status."
+        }
       }
     }
   }

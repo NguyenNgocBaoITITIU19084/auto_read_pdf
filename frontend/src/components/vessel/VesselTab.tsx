@@ -20,6 +20,7 @@ import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } 
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
+import { subscribeTourActions } from '../../services/tourService';
 
 interface VesselTabProps {
   initialSearchQuery?: string;
@@ -59,6 +60,18 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   const [watchlist, setWatchlist] = useState<VesselWatchlist[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
+
+  // Listen to interactive tour triggers (open/close Vessel Watchlist modal)
+  useEffect(() => {
+    const unsubscribe = subscribeTourActions((action) => {
+      if (action === 'openVesselWatchlist') {
+        setIsWatchlistOpen(true);
+      } else if (action === 'closeVesselWatchlist') {
+        setIsWatchlistOpen(false);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "site_id", label: t.vessel.columns["site_id"], visible: true },
@@ -311,7 +324,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Searcher Form */}
-      <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
+      <div data-tour="vessel-query-form" className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         <form onSubmit={handleQueryEport} className="flex flex-wrap items-center gap-2.5">
           <div className="w-52 shrink-0">
             <select
@@ -362,14 +375,16 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
             <span>{querying ? t.common.loading : t.vessel.queryBtn}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setIsWatchlistOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 dark:bg-primary-950/50 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 transition-colors ml-auto shrink-0"
-          >
-            <BookmarkPlus className="w-3.5 h-3.5" />
-            <span>{t.vessel.watchlistTitle}</span>
-          </button>
+          <div data-tour="vessel-watchlist-btn" className="ml-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsWatchlistOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 dark:bg-primary-950/50 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 transition-colors shrink-0"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5" />
+              <span>{t.vessel.watchlistTitle}</span>
+            </button>
+          </div>
         </form>
       </div>
 
@@ -464,7 +479,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
       </div>
 
       {/* Vessel Schedules Table */}
-      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div data-tour="vessel-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">

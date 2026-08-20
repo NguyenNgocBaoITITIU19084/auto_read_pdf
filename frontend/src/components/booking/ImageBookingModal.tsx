@@ -223,7 +223,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
         className="flex flex-col md:flex-row gap-4 h-[75vh] max-h-[720px] select-none outline-none"
       >
         {/* Left Side: Image Preview & Manipulation */}
-        <div className="w-full md:w-1/2 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">
+        <div data-tour="ocr-controls" className="w-full md:w-1/2 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">
           {imagePreviewUrl ? (
             <>
               {/* Floating Image Control Bar */}
@@ -312,6 +312,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
           ) : (
             /* Upload / Dropzone Empty State */
             <div
+              data-tour="ocr-dropzone"
               onDrop={handleDrop}
               onDragOver={(e) => e.preventDefault()}
               onClick={() => fileInputRef.current?.click()}
@@ -345,7 +346,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
         </div>
 
         {/* Right Side: Extracted Fields Form */}
-        <div className="w-full md:w-1/2 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div data-tour="ocr-fields" className="w-full md:w-1/2 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
           {/* Header Status Bar */}
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/50 shrink-0">
             <div className="flex items-center gap-2">

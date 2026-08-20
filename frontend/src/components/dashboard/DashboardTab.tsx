@@ -71,7 +71,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Scope Selector */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+          <div data-tour="dashboard-scope" className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs font-semibold">
             <button
               onClick={() => setScopeMode('all')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
@@ -110,45 +110,51 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
       </div>
 
       {/* 1. KPI Cards */}
-      <KPICards
-        kpis={summary?.kpis || {
-          total_bookings: 0,
-          total_estimated_teus: 0,
-          customs_uncleared: 0,
-          customs_cleared: 0,
-          infras_unpaid: 0,
-          infras_paid: 0,
-          containers_in_yard: 0,
-          containers_out_yard: 0,
-          total_vessels: 0,
-          watchlist_vessels: 0,
-          total_containers: 0,
-          watchlist_containers: 0,
-        }}
-        loading={loading}
-      />
+      <div data-tour="dashboard-kpis">
+        <KPICards
+          kpis={summary?.kpis || {
+            total_bookings: 0,
+            total_estimated_teus: 0,
+            customs_uncleared: 0,
+            customs_cleared: 0,
+            infras_unpaid: 0,
+            infras_paid: 0,
+            containers_in_yard: 0,
+            containers_out_yard: 0,
+            total_vessels: 0,
+            watchlist_vessels: 0,
+            total_containers: 0,
+            watchlist_containers: 0,
+          }}
+          loading={loading}
+        />
+      </div>
 
       {/* 2. Urgent Alerts Section */}
-      <AlertsSection
-        alerts={summary?.alerts || {
-          critical_cutoffs: [],
-          uncleared_containers: [],
-          upcoming_vessels: [],
-        }}
-        onNavigateTab={onNavigateTab}
-        loading={loading}
-      />
+      <div data-tour="dashboard-alerts">
+        <AlertsSection
+          alerts={summary?.alerts || {
+            critical_cutoffs: [],
+            uncleared_containers: [],
+            upcoming_vessels: [],
+          }}
+          onNavigateTab={onNavigateTab}
+          loading={loading}
+        />
+      </div>
 
       {/* 3. Breakdown Charts */}
-      <BreakdownCharts
-        distributions={summary?.distributions || {
-          carriers: [],
-          sites: [],
-          equipment_types: [],
-          container_events: [],
-        }}
-        loading={loading}
-      />
+      <div data-tour="dashboard-charts">
+        <BreakdownCharts
+          distributions={summary?.distributions || {
+            carriers: [],
+            sites: [],
+            equipment_types: [],
+            container_events: [],
+          }}
+          loading={loading}
+        />
+      </div>
     </div>
   );
 };
