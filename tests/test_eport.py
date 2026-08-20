@@ -170,7 +170,7 @@ def test_search_vessels_client_success(mock_post):
     mock_post.assert_called_once()
     args, kwargs = mock_post.call_args
     assert kwargs["json"]["siteId"] == "GNL"
-    assert kwargs["json"]["vesselName"] == "EVER MEMO/1461-012E"
+    assert kwargs["json"]["vesselName"] == "EVER MEMO"
 
 @patch("requests.post")
 def test_search_vessels_client_failures(mock_post):
@@ -179,7 +179,7 @@ def test_search_vessels_client_failures(mock_post):
     with pytest.raises(ConnectionError):
         search_vessels("GNL", "EVER MEMO")
 
-    # Test API error response
+    # Test API error response (returns empty list without crashing)
     mock_post.side_effect = None
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -188,8 +188,8 @@ def test_search_vessels_client_failures(mock_post):
         "content": "Invalid request parameters"
     }
     mock_post.return_value = mock_response
-    with pytest.raises(ValueError, match="Invalid request parameters"):
-        search_vessels("GNL", "EVER MEMO")
+    res = search_vessels("GNL", "EVER MEMO")
+    assert res == []
 
 def test_vessel_watchlist_operations():
     from src.database import create_collection

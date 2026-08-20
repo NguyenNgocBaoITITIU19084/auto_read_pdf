@@ -7,7 +7,7 @@ from backend.app.core.database import (
 )
 from backend.app.services.eport_client import search_vessels, search_containers
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("backend.background_tasks")
 
 scheduler = AsyncIOScheduler()
 is_auto_sync_enabled = False
@@ -17,35 +17,41 @@ async def sync_vessel_watchlists():
     try:
         watchlists = await asyncio.to_thread(get_all_watchlists)
         if not watchlists:
+            logger.info("[Auto-Sync Vessels] ℹ️ Watchlist is empty, nothing to sync.")
             return
             
-        logger.info(f"Auto-syncing {len(watchlists)} vessel watchlist items...")
+        logger.info(f"[Auto-Sync Vessels] 🚀 Auto-syncing {len(watchlists)} vessel watchlist item(s)...")
         for idx, item in enumerate(watchlists):
             col_id = item["collection_id"]
             site_id = item["site_id"]
             vessel_name = item["vessel_name"]
             voyage = item.get("voyage", "")
+            logger.info(f"[Auto-Sync Vessels] ({idx + 1}/{len(watchlists)}) Syncing: Vessel='{vessel_name}', Voyage='{voyage}', Site='{site_id}', Collection={col_id}")
             try:
                 schedules = await asyncio.to_thread(search_vessels, site_id, vessel_name, voyage)
                 if schedules:
                     await asyncio.to_thread(insert_vessel_schedules, col_id, schedules)
-                    logger.info(f"Updated {len(schedules)} schedules for vessel {vessel_name}")
+                    logger.info(f"[Auto-Sync Vessels] ✅ Updated {len(schedules)} schedule(s) for '{vessel_name}' ({voyage})")
+                else:
+                    logger.warning(f"[Auto-Sync Vessels] ⚠️ No schedules found for '{vessel_name}' ({voyage}) at site '{site_id}'")
             except Exception as e:
-                logger.warning(f"Error syncing vessel {vessel_name}/{voyage}: {e}")
+                logger.error(f"[Auto-Sync Vessels] ❌ Error syncing vessel {vessel_name}/{voyage}: {e}")
             
             # Wait 2 seconds between each vessel API call to avoid overloading ePort
             if idx < len(watchlists) - 1:
                 await asyncio.sleep(2)
+        logger.info("[Auto-Sync Vessels] 🎉 Completed syncing all vessel watchlists.")
     except Exception as e:
-        logger.error(f"Error in sync_vessel_watchlists: {e}")
+        logger.error(f"[Auto-Sync Vessels] ❌ Fatal error in sync_vessel_watchlists: {e}")
 
 async def sync_container_watchlists():
     try:
         c_watchlists = await asyncio.to_thread(get_all_container_watchlists)
         if not c_watchlists:
+            logger.info("[Auto-Sync Containers] ℹ️ Watchlist is empty, nothing to sync.")
             return
             
-        logger.info(f"Auto-syncing {len(c_watchlists)} container watchlist items...")
+        logger.info(f"[Auto-Sync Containers] 🚀 Auto-syncing {len(c_watchlists)} container watchlist item(s)...")
         by_col_and_site = {}
         for cw in c_watchlists:
             key = (cw["collection_id"], cw["site_id"])
@@ -54,22 +60,26 @@ async def sync_container_watchlists():
             by_col_and_site[key].append(cw["container_no"])
             
         for (col_id, site_id), cont_list in by_col_and_site.items():
+            cont_str = ",".join(cont_list)
+            logger.info(f"[Auto-Sync Containers] Syncing {len(cont_list)} container(s) for Collection {col_id} at site '{site_id}': {cont_str}")
             try:
-                cont_str = ",".join(cont_list)
                 results = await asyncio.to_thread(search_containers, site_id, cont_str)
                 if results:
                     await asyncio.to_thread(insert_containers, col_id, results)
-                    logger.info(f"Updated {len(results)} container events for {cont_str}")
+                    logger.info(f"[Auto-Sync Containers] ✅ Updated {len(results)} container event(s) for {cont_str}")
+                else:
+                    logger.warning(f"[Auto-Sync Containers] ⚠️ No container info found for {cont_str} at site '{site_id}'")
             except Exception as e:
-                logger.warning(f"Error syncing containers {cont_list}: {e}")
+                logger.error(f"[Auto-Sync Containers] ❌ Error syncing containers {cont_list}: {e}")
+        logger.info("[Auto-Sync Containers] 🎉 Completed syncing all container watchlists.")
     except Exception as e:
-        logger.error(f"Error in sync_container_watchlists: {e}")
+        logger.error(f"[Auto-Sync Containers] ❌ Fatal error in sync_container_watchlists: {e}")
 
 async def run_sync_all():
-    logger.info("Starting Auto-Sync cycle for all watchlists...")
+    logger.info("🔄 ==================== Starting Auto-Sync Cycle ====================")
     await sync_vessel_watchlists()
     await sync_container_watchlists()
-    logger.info("Auto-Sync cycle completed.")
+    logger.info("🏁 ==================== Auto-Sync Cycle Finished ====================")
 
 def setup_scheduler():
     try:

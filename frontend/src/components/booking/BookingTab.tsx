@@ -12,6 +12,9 @@ import { BookingDetailModal } from './BookingDetailModal';
 import { ResizableTh } from '../common/ResizableTh';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
+import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
+import { Pagination } from '../common/Pagination';
+import { TableSkeleton } from '../common/TableSkeleton';
 
 export const BookingTab: React.FC = () => {
   const { t, activeCollection, addToast } = useApp();
@@ -20,6 +23,13 @@ export const BookingTab: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState('all');
+
+  // Pagination state
+  const [pageSize, setPageSize] = useState<number>(() => {
+    const saved = localStorage.getItem('booking_page_size');
+    return saved && !isNaN(Number(saved)) ? Number(saved) : 50;
+  });
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -103,8 +113,15 @@ export const BookingTab: React.FC = () => {
   };
 
   useEffect(() => {
+    setCurrentPage(1);
     loadData();
   }, [activeCollection, searchQuery, searchField]);
+
+  const paginatedBookings = useMemo(() => {
+    if (pageSize >= bookings.length || pageSize <= 0) return bookings;
+    const start = (currentPage - 1) * pageSize;
+    return bookings.slice(start, start + pageSize);
+  }, [bookings, currentPage, pageSize]);
 
   const handleFilesUpload = async (files: FileList | File[]) => {
     if (!activeCollection || files.length === 0) return;
@@ -156,13 +173,14 @@ export const BookingTab: React.FC = () => {
     }
   };
 
-  const copyRow = (booking: Booking) => {
-    const text = Object.entries(booking)
-      .filter(([k]) => k !== 'id')
-      .map(([k, v]) => `${k}: ${v}`)
-      .join('\n');
-    navigator.clipboard.writeText(text);
-    addToast(t.common.copySuccess, 'success');
+  const copyRow = async (booking: Booking) => {
+    const text = formatRowForCopy(booking, columns);
+    const success = await copyTextToClipboard(text);
+    if (success) {
+      addToast(t.common.copySuccess, 'success');
+    } else {
+      addToast(t.common.error, 'error');
+    }
   };
 
   return (
@@ -306,7 +324,16 @@ export const BookingTab: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-              {bookings.length === 0 ? (
+              {loading ? (
+                <TableSkeleton
+                  columns={columns}
+                  columnWidths={columnWidths}
+                  rowCount={Math.min(pageSize, 8)}
+                  hasCheckbox={false}
+                  hasActions={true}
+                  actionColClass="w-16"
+                />
+              ) : bookings.length === 0 ? (
                 <tr>
                   <td
                     colSpan={columns.filter((c) => c.visible).length + 2}
@@ -317,14 +344,14 @@ export const BookingTab: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                bookings.map((booking, idx) => (
+                paginatedBookings.map((booking, idx) => (
                   <tr
                     key={booking.id || idx}
                     onDoubleClick={() => setSelectedBooking(booking)}
                     className="hover:bg-sky-100/80 dark:hover:bg-sky-950/70 hover:shadow-xs transition-colors group cursor-pointer"
                   >
                     <td className="py-1.5 px-2.5 text-center font-medium text-slate-400 w-10">
-                      {idx + 1}
+                      {(currentPage - 1) * pageSize + idx + 1}
                     </td>
                     {columns
                       .filter((c) => c.visible)
@@ -383,13 +410,18 @@ export const BookingTab: React.FC = () => {
           </table>
         </div>
 
-        {/* Footer info */}
-        <div className="px-3.5 py-1.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
-          <span>
-            {t.common.total}: <strong className="text-slate-800 dark:text-slate-200">{bookings.length}</strong> {t.common.items}
-          </span>
-          <span>Kéo đường viền cột để đổi độ rộng • Double-click vào hàng để xem chi tiết</span>
-        </div>
+        {/* Pagination Footer */}
+        <Pagination
+          currentPage={currentPage}
+          totalItems={bookings.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            localStorage.setItem('booking_page_size', String(newSize));
+            setCurrentPage(1);
+          }}
+        />
       </div>
 
       {/* Modals */}

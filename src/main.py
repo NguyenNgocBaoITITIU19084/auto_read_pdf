@@ -167,6 +167,24 @@ CONTAINER_COLUMN_TRANSLATIONS = {
     }
 }
 
+PORT_DISPLAY_MAP = {
+    "CTL": "Cát Lái (CTL)",
+    "GNL": "Cát Lái Giang Nam (GNL)",
+    "THP": "Tân Cảng Hiệp Phước (THP)",
+    "CMS": "CMS ICD Nhơn Trạch (CMS)",
+    "IST": "ICD Tân Cảng Sóng Thần (IST)",
+    "TNT": "ICD Tân Cảng Nhơn Trạch (TNT)",
+}
+PORT_MENU_VALUES = list(PORT_DISPLAY_MAP.values())
+
+def parse_site_id(port_str: str) -> str:
+    if not port_str:
+        return "CTL"
+    for site_id in PORT_DISPLAY_MAP:
+        if f"({site_id})" in port_str or port_str.strip().upper() == site_id:
+            return site_id
+    return "CTL"
+
 class VesselWatchlistDialog(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
@@ -192,11 +210,11 @@ class VesselWatchlistDialog(ctk.CTkToplevel):
         
         self.port_menu = ctk.CTkOptionMenu(
             self.form_frame,
-            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
-            width=150
+            values=PORT_MENU_VALUES,
+            width=190
         )
         self.port_menu.pack(side="left", padx=5)
-        self.port_menu.set("Cát Lái (CTL)")
+        self.port_menu.set(PORT_DISPLAY_MAP["CTL"])
         
         self.vessel_entry = ctk.CTkEntry(self.form_frame, placeholder_text="Tên tàu / Vessel...", width=150)
         self.vessel_entry.pack(side="left", padx=5)
@@ -241,9 +259,9 @@ class VesselWatchlistDialog(ctk.CTkToplevel):
         self.tree.heading("Voyage", text="Chuyến / Voyage", anchor="center")
         
         self.tree.column("ID", width=50, minwidth=50, stretch=False, anchor="center")
-        self.tree.column("Port", width=150, minwidth=100, anchor="w")
-        self.tree.column("Vessel", width=250, minwidth=150, anchor="w")
-        self.tree.column("Voyage", width=150, minwidth=100, anchor="center")
+        self.tree.column("Port", width=190, minwidth=120, anchor="w")
+        self.tree.column("Vessel", width=230, minwidth=140, anchor="w")
+        self.tree.column("Voyage", width=130, minwidth=90, anchor="center")
         
         # --- Bottom actions ---
         self.actions_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -279,7 +297,7 @@ class VesselWatchlistDialog(ctk.CTkToplevel):
             
         watchlist = get_watchlist(self.parent.active_collection_id)
         for item in watchlist:
-            port_display = "Cát Lái (CTL)" if item["site_id"] == "CTL" else "Cát Lái Giang Nam (GNL)"
+            port_display = PORT_DISPLAY_MAP.get(item["site_id"], item["site_id"])
             self.tree.insert("", "end", values=(
                 item["id"],
                 port_display,
@@ -295,9 +313,7 @@ class VesselWatchlistDialog(ctk.CTkToplevel):
             return
             
         port_val = self.port_menu.get()
-        site_id = "CTL"
-        if "GNL" in port_val:
-            site_id = "GNL"
+        site_id = parse_site_id(port_val)
             
         vessel = self.vessel_entry.get().strip()
         voyage = self.voyage_entry.get().strip()
@@ -358,11 +374,11 @@ class ContainerWatchlistDialog(ctk.CTkToplevel):
         
         self.port_menu = ctk.CTkOptionMenu(
             self.form_frame,
-            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
-            width=150
+            values=PORT_MENU_VALUES,
+            width=190
         )
         self.port_menu.pack(side="left", padx=5)
-        self.port_menu.set("Cát Lái (CTL)")
+        self.port_menu.set(PORT_DISPLAY_MAP["CTL"])
         
         self.container_entry = ctk.CTkEntry(self.form_frame, placeholder_text="Số Container / Container No...", width=200)
         self.container_entry.pack(side="left", padx=5)
@@ -440,7 +456,7 @@ class ContainerWatchlistDialog(ctk.CTkToplevel):
             
         watchlist = get_container_watchlist(self.parent.active_collection_id)
         for item in watchlist:
-            port_display = "Cát Lái (CTL)" if item["site_id"] == "CTL" else "Cát Lái Giang Nam (GNL)"
+            port_display = PORT_DISPLAY_MAP.get(item["site_id"], item["site_id"])
             self.tree.insert("", "end", values=(
                 item["id"],
                 port_display,
@@ -455,7 +471,7 @@ class ContainerWatchlistDialog(ctk.CTkToplevel):
             return
             
         port_val = self.port_menu.get()
-        site_id = "CTL" if "GNL" not in port_val else "GNL"
+        site_id = parse_site_id(port_val)
         container_no = self.container_entry.get().strip().upper()
         
         if not container_no:
@@ -832,11 +848,11 @@ class App(ctk.CTk):
 
         self.vessel_port_menu = ctk.CTkOptionMenu(
             self.vessel_action_frame,
-            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
-            width=180
+            values=PORT_MENU_VALUES,
+            width=200
         )
         self.vessel_port_menu.pack(side="left", padx=5)
-        self.vessel_port_menu.set("Cát Lái (CTL)")
+        self.vessel_port_menu.set(PORT_DISPLAY_MAP["CTL"])
 
         # Vessel Name Entry
         self.vessel_name_entry = ctk.CTkEntry(self.vessel_action_frame, placeholder_text="Tên tàu / Vessel...", width=160)
@@ -997,11 +1013,11 @@ class App(ctk.CTk):
 
         self.container_port_menu = ctk.CTkOptionMenu(
             self.container_action_frame,
-            values=["Cát Lái (CTL)", "Cát Lái Giang Nam (GNL)"],
-            width=180
+            values=PORT_MENU_VALUES,
+            width=200
         )
         self.container_port_menu.pack(side="left", padx=5)
-        self.container_port_menu.set("Cát Lái (CTL)")
+        self.container_port_menu.set(PORT_DISPLAY_MAP["CTL"])
 
         # Container Numbers Entry
         self.container_no_entry = ctk.CTkEntry(
@@ -2299,10 +2315,7 @@ class App(ctk.CTk):
 
         # Read parameters
         port_val = self.vessel_port_menu.get()
-        # Extract CTL or GNL from Cát Lái (CTL) / Cát Lái Giang Nam (GNL)
-        site_id = "CTL"
-        if "GNL" in port_val:
-            site_id = "GNL"
+        site_id = parse_site_id(port_val)
             
         vessel_name = self.vessel_name_entry.get().strip()
         voyage = self.vessel_voyage_entry.get().strip()
@@ -2911,7 +2924,7 @@ class App(ctk.CTk):
             return
 
         port_val = self.container_port_menu.get()
-        site_id = "CTL" if "GNL" not in port_val else "GNL"
+        site_id = parse_site_id(port_val)
         container_nos = self.container_no_entry.get().strip()
         
         if not container_nos:

@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Ship, Search, RefreshCw, Trash2, FileSpreadsheet, 
-  SlidersHorizontal, Eye, BookmarkPlus, BookmarkCheck
+  SlidersHorizontal, Eye, BookmarkPlus, BookmarkCheck, Copy
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { VesselSchedule, VesselWatchlist } from '../../types';
 import { 
-  getVessels, searchVesselsApi, deleteVessel, clearVessels, 
+  getVessels, searchVesselsApi, deleteVessel, deleteVesselsBatch, clearVessels, 
   addVesselWatchlist, getVesselWatchlist, deleteVesselWatchlist 
 } from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
@@ -16,20 +16,30 @@ import { VesselWatchlistModal } from './VesselWatchlistModal';
 import { ResizableTh } from '../common/ResizableTh';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
-import { formatTimeAgo, isRecentUpdate } from '../../utils/formatters';
+import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
+import { Pagination } from '../common/Pagination';
+import { TableSkeleton } from '../common/TableSkeleton';
 
 export const VesselTab: React.FC = () => {
   const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
   const [schedules, setSchedules] = useState<VesselSchedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [querying, setQuerying] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  // Pagination state
+  const [pageSize, setPageSize] = useState<number>(() => {
+    const saved = localStorage.getItem('vessel_page_size');
+    return saved && !isNaN(Number(saved)) ? Number(saved) : 50;
+  });
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Search in database
   const [searchQuery, setSearchQuery] = useState('');
   const [searchField, setSearchField] = useState('all');
 
   // ePort query inputs
-  const [siteId, setSiteId] = useState('CTL');
+  const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_vessel_site_id') || 'CTL');
   const [vesselName, setVesselName] = useState('');
   const [voyage, setVoyage] = useState('');
 
@@ -126,28 +136,47 @@ export const VesselTab: React.FC = () => {
   };
 
   useEffect(() => {
+    setSelectedIds([]);
+    setCurrentPage(1);
     loadData(true);
     loadWatchlist();
   }, [activeCollection, searchQuery, searchField]);
 
+  const paginatedSchedules = useMemo(() => {
+    if (pageSize >= schedules.length || pageSize <= 0) return schedules;
+    const start = (currentPage - 1) * pageSize;
+    return schedules.slice(start, start + pageSize);
+  }, [schedules, currentPage, pageSize]);
+
+  // Periodic polling when auto-sync is active to automatically reflect new vessel schedules & statuses
+  useEffect(() => {
+    if (!autoSyncEnabled || !activeCollection) return;
+
+    const timer = setInterval(() => {
+      loadData(false);
+    }, 10000);
+
+    return () => clearInterval(timer);
+  }, [autoSyncEnabled, activeCollection, searchQuery, searchField]);
+
+  const normalizeStr = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
   // Match a schedule item with watchlist
   const getWatchlistItem = (item: VesselSchedule): VesselWatchlist | undefined => {
-    const itemName = (item.vessel_name || '').trim().toLowerCase();
-    const itemVoyage = (item.in_out_voyage || '').trim().toLowerCase();
+    const itemName = normalizeStr(item.vessel_name);
+    const itemVoyage = normalizeStr(item.in_out_voyage);
     const itemSite = (item.site_id || '').trim().toUpperCase();
 
     return watchlist.find((w) => {
       const wSite = (w.site_id || '').trim().toUpperCase();
       if (wSite && itemSite && wSite !== itemSite) return false;
 
-      const wName = (w.vessel_name || '').trim().toLowerCase();
-      if (wName !== itemName && !itemName.includes(wName) && !wName.includes(itemName)) {
-        return false;
-      }
+      const wName = normalizeStr(w.vessel_name);
+      if (wName !== itemName) return false;
 
-      const wVoyage = (w.voyage || '').trim().toLowerCase();
-      if (wVoyage) {
-        return itemVoyage === wVoyage || itemVoyage.includes(wVoyage) || wVoyage.includes(itemVoyage);
+      const wVoyage = normalizeStr(w.voyage);
+      if (wVoyage && itemVoyage) {
+        return wVoyage === itemVoyage;
       }
 
       return true;
@@ -166,13 +195,43 @@ export const VesselTab: React.FC = () => {
       } else {
         await addVesselWatchlist(
           activeCollection.id,
-          item.site_id || 'CTL',
+          item.site_id || siteId || localStorage.getItem('last_vessel_site_id') || 'CTL',
           item.vessel_name,
           item.in_out_voyage || ''
         );
         addToast(`Đã thêm tàu ${item.vessel_name} (${item.in_out_voyage || ''}) vào Watchlist!`, 'success');
         await loadWatchlist();
       }
+    } catch (e: any) {
+      addToast(e.message || t.common.error, 'error');
+    }
+  };
+
+  const handleToggleSelect = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    const pageIds = paginatedSchedules.map((s) => s.id).filter((id): id is number => typeof id === 'number');
+    if (pageIds.length === 0) return;
+    const allPageSelected = pageIds.every((id) => selectedIds.includes(id));
+    if (allPageSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} dòng lịch tàu đã chọn?`)) return;
+    try {
+      await deleteVesselsBatch(selectedIds);
+      addToast(`Đã xóa thành công ${selectedIds.length} dòng lịch tàu!`, 'success');
+      setSchedules((prev) => prev.filter((s) => !selectedIds.includes(s.id)));
+      setSelectedIds([]);
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -188,17 +247,28 @@ export const VesselTab: React.FC = () => {
 
     try {
       setQuerying(true);
+      localStorage.setItem('last_vessel_site_id', siteId);
       const res = await searchVesselsApi(activeCollection.id, siteId, vesselName.trim(), voyage.trim());
       if (res.count > 0) {
-        addToast(`Tìm thấy ${res.count} kết quả lịch tàu!`, 'success');
+        addToast(`Tìm thấy ${res.count} kết quả lịch tàu khớp!`, 'success');
+        await loadData();
       } else {
-        addToast(res.message || 'Không tìm thấy thông tin chuyến tàu trên ePort', 'info');
+        addToast(res.message || 'Không tìm thấy thông tin chuyến tàu khớp trên ePort', 'info');
       }
-      await loadData();
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     } finally {
       setQuerying(false);
+    }
+  };
+
+  const handleCopyRow = async (item: VesselSchedule) => {
+    const text = formatRowForCopy(item, columns);
+    const success = await copyTextToClipboard(text);
+    if (success) {
+      addToast(t.common.copySuccess, 'success');
+    } else {
+      addToast(t.common.error, 'error');
     }
   };
 
@@ -208,6 +278,7 @@ export const VesselTab: React.FC = () => {
       await deleteVessel(id);
       addToast(t.common.success, 'success');
       setSchedules((prev) => prev.filter((s) => s.id !== id));
+      setSelectedIds((prev) => prev.filter((i) => i !== id));
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -220,6 +291,7 @@ export const VesselTab: React.FC = () => {
       await clearVessels(activeCollection.id);
       addToast(t.common.success, 'success');
       setSchedules([]);
+      setSelectedIds([]);
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -230,14 +302,22 @@ export const VesselTab: React.FC = () => {
       {/* Top Searcher Form */}
       <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         <form onSubmit={handleQueryEport} className="flex flex-wrap items-center gap-2.5">
-          <div className="w-40 shrink-0">
+          <div className="w-52 shrink-0">
             <select
               value={siteId}
-              onChange={(e) => setSiteId(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSiteId(val);
+                localStorage.setItem('last_vessel_site_id', val);
+              }}
               className="w-full text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-primary-500"
             >
               <option value="CTL">{t.vessel.siteCTL}</option>
               <option value="GNL">{t.vessel.siteGNL}</option>
+              <option value="THP">{t.vessel.siteTHP}</option>
+              <option value="CMS">{t.vessel.siteCMS}</option>
+              <option value="IST">{t.vessel.siteIST}</option>
+              <option value="TNT">{t.vessel.siteTNT}</option>
             </select>
           </div>
 
@@ -311,6 +391,24 @@ export const VesselTab: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-1.5 mr-2 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 px-2 py-1 rounded-lg animate-in fade-in">
+              <button
+                onClick={handleBatchDelete}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa đã chọn ({selectedIds.length})</span>
+              </button>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline px-1"
+              >
+                Bỏ chọn
+              </button>
+            </div>
+          )}
+
           <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
             <button
               onClick={() => setIsColumnConfigOpen(true)}
@@ -360,6 +458,15 @@ export const VesselTab: React.FC = () => {
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
               <tr>
+                <th className="py-2 px-2 text-center w-8 shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={paginatedSchedules.length > 0 && paginatedSchedules.every((s) => selectedIds.includes(s.id))}
+                    onChange={handleSelectAll}
+                    className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                    title="Chọn tất cả trên trang này / Bỏ chọn"
+                  />
+                </th>
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-10 shrink-0 text-[11px]">
                   {t.common.stt}
                 </th>
@@ -374,16 +481,25 @@ export const VesselTab: React.FC = () => {
                       onResize={startResize}
                     />
                   ))}
-                <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-20 text-[11px]">
+                <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">
                   {t.common.actions}
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-              {schedules.length === 0 ? (
+              {loading ? (
+                <TableSkeleton
+                  columns={columns}
+                  columnWidths={columnWidths}
+                  rowCount={Math.min(pageSize, 8)}
+                  hasCheckbox={true}
+                  hasActions={true}
+                  actionColClass="w-24"
+                />
+              ) : schedules.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={columns.filter((c) => c.visible).length + 2}
+                    colSpan={columns.filter((c) => c.visible).length + 3}
                     className="py-12 text-center text-slate-400 dark:text-slate-500"
                   >
                     <Ship className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
@@ -391,20 +507,33 @@ export const VesselTab: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                schedules.map((item, idx) => {
+                paginatedSchedules.map((item, idx) => {
                   const isRecent = isRecentUpdate(item.queried_at, 45);
                   const watchlistItem = getWatchlistItem(item);
                   const isBookmarked = !!watchlistItem;
+                  const isSelected = selectedIds.includes(item.id);
                   return (
                     <tr
                       key={item.id || idx}
                       onDoubleClick={() => setSelectedSchedule(item)}
                       className={`hover:bg-sky-100/80 dark:hover:bg-sky-950/70 hover:shadow-xs transition-colors group cursor-pointer ${
-                        isRecent ? 'bg-emerald-50/25 dark:bg-emerald-950/20 border-l-[3px] border-l-emerald-500' : ''
+                        isSelected
+                          ? 'bg-sky-50 dark:bg-sky-950/50 ring-1 ring-inset ring-sky-300 dark:ring-sky-800'
+                          : isBookmarked
+                          ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-l-[3px] border-l-emerald-500'
+                          : ''
                       }`}
                     >
+                      <td className="py-1.5 px-2 text-center w-8" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelect(item.id)}
+                          className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                        />
+                      </td>
                       <td className="py-1.5 px-2.5 text-center font-medium text-slate-400 w-10">
-                        {idx + 1}
+                        {(currentPage - 1) * pageSize + idx + 1}
                       </td>
                       {columns
                         .filter((c) => c.visible)
@@ -458,10 +587,10 @@ export const VesselTab: React.FC = () => {
                                 title={String(val)}
                               >
                                 <div className="flex items-center gap-1.5 truncate">
-                                  {isRecent && (
+                                  {isBookmarked && (
                                     <span
-                                      title="Mới cập nhật từ ePort"
-                                      className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"
+                                      title="Đang trong Watchlist theo dõi"
+                                      className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
                                     />
                                   )}
                                   <span className="truncate">{String(val)}</span>
@@ -486,7 +615,7 @@ export const VesselTab: React.FC = () => {
                             </td>
                           );
                         })}
-                    <td className="py-1.5 px-2.5 text-center w-20">
+                    <td className="py-1.5 px-2.5 text-center w-24">
                       <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
                         <Tooltip content="Xem chi tiết đầy đủ lịch tàu">
                           <button
@@ -494,6 +623,14 @@ export const VesselTab: React.FC = () => {
                             className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
                           >
                             <Eye className="w-3.5 h-3.5" />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Sao chép thông tin dòng">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCopyRow(item); }}
+                            className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
                           </button>
                         </Tooltip>
                         <Tooltip
@@ -536,12 +673,18 @@ export const VesselTab: React.FC = () => {
           </table>
         </div>
 
-        <div className="px-3.5 py-1.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
-          <span>
-            {t.common.total}: <strong className="text-slate-800 dark:text-slate-200">{schedules.length}</strong> {t.common.items}
-          </span>
-          <span>Kéo đường viền cột để đổi độ rộng • Double-click để xem chi tiết</span>
-        </div>
+        {/* Pagination Footer */}
+        <Pagination
+          currentPage={currentPage}
+          totalItems={schedules.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            localStorage.setItem('vessel_page_size', String(newSize));
+            setCurrentPage(1);
+          }}
+        />
       </div>
 
       {/* Modals */}

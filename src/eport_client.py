@@ -22,17 +22,71 @@ def parse_eport_date(date_str: str) -> str:
             pass
     return date_str
 
+def normalize_string(s: str) -> str:
+    """Normalize string by removing all non-alphanumeric characters, lowercased."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+def is_voyage_match(query_voy: str, eport_voy: str) -> bool:
+    """
+    So sánh chính xác 2 chuỗi số chuyến (1-1 exact match).
+    Chỉ cập nhật khi số chuyến của ePort trùng khớp hoàn toàn với số chuyến yêu cầu.
+    """
+    if not query_voy or not eport_voy:
+        return False
+    return normalize_string(query_voy) == normalize_string(eport_voy)
+
+def clean_vessel_name_for_eport(vessel_name: str, voyage: str = None) -> str:
+    """
+    Extract only the clean vessel name, removing any voyage codes, slashes, or trailing codes.
+    ePort /ships/Searcher API strictly requires only the vessel name in the request body.
+    """
+    if not vessel_name:
+        return ""
+    v_name = vessel_name.strip()
+    
+    # 1. Remove prefixes like 'TÀU ', 'VESSEL: ', 'SHIP: '
+    v_name = re.sub(r"^(?:tàu|vessel|ship)[:\s]+", "", v_name, flags=re.IGNORECASE).strip()
+    
+    # 2. If separated by slash/backslash/pipe (e.g. 'KOTA NEKAD / 0272S' -> 'KOTA NEKAD')
+    if re.search(r"[/\\|]", v_name):
+        parts = re.split(r"[/\\|]", v_name)
+        v_name = parts[0].strip()
+        
+    # 3. If a specific voyage was provided, remove it from vessel name if present
+    if voyage:
+        voy_clean = voyage.strip()
+        if voy_clean:
+            pattern = re.escape(voy_clean)
+            v_name = re.sub(rf"[-–—\s]*\b{pattern}\b[-–—\s]*", " ", v_name, flags=re.IGNORECASE).strip()
+            
+    # 4. If ends with ' - VOYAGE' or ' - 1752-014S'
+    v_name = re.sub(r"[-–—]\s*[0-9]+[A-Za-z0-9\-\/]*\s*$", "", v_name).strip()
+    
+    # 5. Clean up multiple spaces
+    v_name = re.sub(r"\s+", " ", v_name).strip()
+    return v_name
+
+def is_vessel_name_match(query_vessel: str, model_vessel: str) -> bool:
+    """
+    So sánh tên tàu: khớp chính xác hoặc tên tàu trả về chứa tên tàu tìm kiếm.
+    e.g. 'EVER OMNI' khớp 'EVER OMNI', 'EVER' khớp 'EVER OMNI'.
+    """
+    if not query_vessel or not model_vessel:
+        return False
+    q_clean = clean_vessel_name_for_eport(query_vessel)
+    m_clean = clean_vessel_name_for_eport(model_vessel)
+    q_norm = normalize_string(q_clean)
+    m_norm = normalize_string(m_clean)
+    return q_norm == m_norm or q_norm in m_norm or m_norm in q_norm
+
 def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[dict]:
     """
     Call the internal Saigon Newport ePort API to search for vessel schedule.
-    
-    Args:
-        site_id (str): Port ID, e.g., 'CTL' (Cát Lái) or 'GNL' (Cát Lái Giang Nam)
-        vessel_name (str): Vessel name
-        voyage (str, optional): Voyage number
-        
-    Returns:
-        list[dict]: List of vessel schedule details
+    Body sent to ePort:
+    {
+        "siteId": site_id,
+        "vesselName": clean_vessel_name
+    }
     """
     url = "https://eport.saigonnewport.com.vn/ships/Searcher"
     
@@ -41,7 +95,7 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
     raw_vessel = vessel_name.strip() if vessel_name else ""
     voyage_query = voyage.strip() if voyage else ""
     
-    clean_vessel_name = re.split(r"[/\\|]", raw_vessel)[0].strip() if raw_vessel else ""
+    clean_vessel_name = clean_vessel_name_for_eport(raw_vessel, voyage_query)
     if not clean_vessel_name:
         clean_vessel_name = raw_vessel
         
@@ -80,27 +134,21 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
                         cleaned_item[k] = v.strip()
                     else:
                         cleaned_item[k] = v
+                if not cleaned_item.get("SITE_ID"):
+                    cleaned_item["SITE_ID"] = site_id_query
                 cleaned_models.append(cleaned_item)
                 
+            # 1. Strictly filter by Vessel Name (Must match target vessel name completely)
+            cleaned_models = [m for m in cleaned_models if is_vessel_name_match(clean_vessel_name, m.get("VESSELNAME", ""))]
+
+            # 2. Strictly filter by Voyage (Must match target voyage completely)
             if voyage_query and cleaned_models:
-                clean_voy = voyage_query.lower().strip()
-                voy_tokens = [tok for tok in re.split(r"[\s\-\/\_\,]+", clean_voy) if len(tok) >= 2]
-                
-                def is_voyage_match(m: dict) -> bool:
-                    m_voy = str(m.get("IN_OUT_VOYAGE", "")).lower()
-                    if not m_voy:
-                        return False
-                    if clean_voy in m_voy or m_voy in clean_voy:
-                        return True
-                    if voy_tokens and any(tok in m_voy for tok in voy_tokens):
-                        return True
-                    return False
-                    
-                matched = [m for m in cleaned_models if is_voyage_match(m)]
-                if matched:
-                    return matched
+                matched = [m for m in cleaned_models if is_voyage_match(voyage_query, m.get("IN_OUT_VOYAGE", ""))]
+                return matched
                     
             return cleaned_models
+        elif res_data.get("type") == "error":
+            return []
         else:
             return []
             

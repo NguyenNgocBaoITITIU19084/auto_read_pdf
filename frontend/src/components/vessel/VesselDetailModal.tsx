@@ -4,6 +4,7 @@ import { Modal } from '../common/Modal';
 import { VesselSchedule } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { formatTimeAgo, isRecentUpdate } from '../../utils/formatters';
+import { getPortDisplayName } from '../../utils/ports';
 
 interface VesselDetailModalProps {
   isOpen: boolean;
@@ -16,7 +17,7 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
   onClose,
   schedule,
 }) => {
-  const { t, addToast } = useApp();
+  const { t, language, addToast } = useApp();
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
 
   if (!schedule) return null;
@@ -72,7 +73,7 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Khu vực cảng: <strong>{schedule.site_id === 'CTL' ? 'Cát Lái (CTL)' : 'Giang Nam (GNL)'}</strong> • Đại lý: <strong>{schedule.agent || 'null'}</strong>
+                Khu vực cảng: <strong>{getPortDisplayName(schedule.site_id, language)}</strong> • Đại lý: <strong>{schedule.agent || 'null'}</strong>
               </p>
             </div>
           </div>

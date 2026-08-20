@@ -2,7 +2,7 @@
 
 Ứng dụng Desktop hiện đại chuyên dụng cho Logistics & Xuất nhập khẩu:
 - **Trích xuất thông tin Booking PDF đa hãng tàu** (Dongjin, PIL, ONE, SITC, Cosco,...) với độ chính xác tuyệt đối.
-- **Tra cứu Lịch tàu ePort Saigon Newport** (Cát Lái CTL, Giang Nam GNL), quản lý danh sách theo dõi (Watchlist) và tự động đồng bộ (Auto Sync).
+- **Tra cứu Lịch tàu ePort Saigon Newport** (Cát Lái `CTL`, Giang Nam `GNL`, Tân Cảng Hiệp Phước `THP`, CMS ICD Nhơn Trạch `CMS`, ICD Tân Cảng Sóng Thần `IST`, ICD Tân Cảng Nhơn Trạch `TNT`), quản lý danh sách theo dõi (Watchlist) và tự động đồng bộ (Auto Sync).
 - **Tra cứu thông tin bãi & trạng thái hải quan (HQGS, Phí hạ tầng) của Container**.
 - **Quản lý phân vùng dữ liệu theo Bộ sưu tập (Collections)**.
 - **Xuất dữ liệu ra file Excel chuyên nghiệp (Style chuẩn giao diện bảng biểu)** & Sao lưu/Khôi phục toàn bộ dữ liệu dưới dạng JSON.

@@ -22,7 +22,7 @@ export const VesselWatchlistModal: React.FC<VesselWatchlistModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
-  const [siteId, setSiteId] = useState('CTL');
+  const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_vessel_site_id') || 'CTL');
   const [vesselName, setVesselName] = useState('');
   const [voyage, setVoyage] = useState('');
 
@@ -41,6 +41,7 @@ export const VesselWatchlistModal: React.FC<VesselWatchlistModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setSiteId(localStorage.getItem('last_vessel_site_id') || 'CTL');
       loadWatchlist();
     }
   }, [isOpen, activeCollection]);
@@ -49,6 +50,7 @@ export const VesselWatchlistModal: React.FC<VesselWatchlistModalProps> = ({
     e.preventDefault();
     if (!activeCollection || !vesselName.trim()) return;
     try {
+      localStorage.setItem('last_vessel_site_id', siteId);
       await addVesselWatchlist(activeCollection.id, siteId, vesselName.trim(), voyage.trim());
       addToast(t.common.success, 'success');
       setVesselName('');
@@ -65,6 +67,7 @@ export const VesselWatchlistModal: React.FC<VesselWatchlistModalProps> = ({
       await deleteVesselWatchlist(id);
       addToast(t.common.success, 'success');
       setWatchlist((prev) => prev.filter((w) => w.id !== id));
+      onDataUpdated?.();
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -75,7 +78,12 @@ export const VesselWatchlistModal: React.FC<VesselWatchlistModalProps> = ({
     try {
       setSyncing(true);
       const res = await syncVesselWatchlist(activeCollection.id);
-      addToast(`Đã đồng bộ ${res.updated_count} bản ghi!`, 'success');
+      if (res.updated_count > 0) {
+        addToast(`Đã đồng bộ thành công ${res.updated_count} bản ghi khớp số chuyến!`, 'success');
+      } else {
+        addToast('Không có bản ghi nào khớp số chuyến để cập nhật.', 'info');
+      }
+      await loadWatchlist();
       onDataUpdated?.();
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
@@ -99,11 +107,19 @@ export const VesselWatchlistModal: React.FC<VesselWatchlistModalProps> = ({
               </label>
               <select
                 value={siteId}
-                onChange={(e) => setSiteId(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSiteId(val);
+                  localStorage.setItem('last_vessel_site_id', val);
+                }}
                 className="w-full text-xs font-semibold bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 focus:ring-2 focus:ring-primary-500"
               >
-                <option value="CTL">CTL (Cát Lái)</option>
-                <option value="GNL">GNL (Giang Nam)</option>
+                <option value="CTL">{t.vessel.siteCTL}</option>
+                <option value="GNL">{t.vessel.siteGNL}</option>
+                <option value="THP">{t.vessel.siteTHP}</option>
+                <option value="CMS">{t.vessel.siteCMS}</option>
+                <option value="IST">{t.vessel.siteIST}</option>
+                <option value="TNT">{t.vessel.siteTNT}</option>
               </select>
             </div>
             <div>

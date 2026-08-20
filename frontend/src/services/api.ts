@@ -79,6 +79,10 @@ export const deleteVessel = async (id: number): Promise<void> => {
   await apiClient.delete(`/vessels/${id}`);
 };
 
+export const deleteVesselsBatch = async (ids: number[]): Promise<void> => {
+  await apiClient.post('/vessels/batch-delete', { ids });
+};
+
 export const clearVessels = async (collectionId: number): Promise<void> => {
   await apiClient.delete(`/vessels/clear/${collectionId}`);
 };
@@ -126,6 +130,10 @@ export const searchContainersApi = async (collectionId: number, siteId: string, 
 
 export const deleteContainer = async (id: number): Promise<void> => {
   await apiClient.delete(`/containers/${id}`);
+};
+
+export const deleteContainersBatch = async (ids: number[]): Promise<void> => {
+  await apiClient.post('/containers/batch-delete', { ids });
 };
 
 export const clearContainers = async (collectionId: number): Promise<void> => {

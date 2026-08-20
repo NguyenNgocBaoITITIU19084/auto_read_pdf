@@ -58,3 +58,6 @@ class ExportExcelRequest(BaseModel):
 class AutoSyncToggleRequest(BaseModel):
     enable: bool
     interval_minutes: Optional[int] = 10
+
+class BatchDeleteRequest(BaseModel):
+    ids: List[int]

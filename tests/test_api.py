@@ -163,7 +163,10 @@ def test_backup_and_restore_endpoint():
     assert res_r.status_code == 200
     assert res_r.json()["status"] == "success"
 
-def test_scheduler_endpoints():
+from unittest.mock import patch, AsyncMock
+
+@patch("backend.app.services.background_tasks.run_sync_all", new_callable=AsyncMock)
+def test_scheduler_endpoints(mock_sync):
     res_toggle = client.post("/api/v1/scheduler/toggle", json={"enable": True, "interval_minutes": 15})
     assert res_toggle.status_code == 200
     assert res_toggle.json()["enabled"] is True

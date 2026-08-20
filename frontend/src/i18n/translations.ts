@@ -56,7 +56,23 @@ export const translations = {
       lightMode: "Giao diện sáng",
       language: "Ngôn ngữ",
       success: "Thành công",
-      error: "Đã có lỗi xảy ra"
+      error: "Đã có lỗi xảy ra",
+      // Pagination
+      page: "Trang",
+      pageOf: "trên",
+      showing: "Hiển thị",
+      to: "đến",
+      of: "trong tổng số",
+      perPage: "dòng/trang",
+      rowsPerPage: "Số dòng:",
+      customPageSize: "Tùy chỉnh số dòng",
+      custom: "Tùy chỉnh...",
+      apply: "Áp dụng",
+      firstPage: "Trang đầu",
+      lastPage: "Trang cuối",
+      prevPage: "Trang trước",
+      nextPage: "Trang sau",
+      allRows: "Tất cả"
     },
     booking: {
       dropzoneTitle: "Kéo thả file PDF vào đây hoặc nhấn để chọn file",
@@ -82,9 +98,13 @@ export const translations = {
       }
     },
     vessel: {
-      searchTitle: "Tra cứu lịch tàu ePort Cát Lái / Giang Nam",
+      searchTitle: "Tra cứu lịch tàu ePort Saigon Newport",
       siteCTL: "Cát Lái (CTL)",
       siteGNL: "Cát Lái Giang Nam (GNL)",
+      siteTHP: "Tân Cảng Hiệp Phước (THP)",
+      siteCMS: "CMS ICD Nhơn Trạch (CMS)",
+      siteIST: "ICD Tân Cảng Sóng Thần (IST)",
+      siteTNT: "ICD Tân Cảng Nhơn Trạch (TNT)",
       vesselNamePlaceholder: "Nhập tên tàu (VD: KOTA NEKAD, DONGJIN...)",
       voyagePlaceholder: "Số chuyến (VD: 0272S, 0145N...)",
       queryBtn: "Tra cứu lịch tàu",
@@ -206,7 +226,23 @@ export const translations = {
       lightMode: "Light Mode",
       language: "Language",
       success: "Success",
-      error: "An error occurred"
+      error: "An error occurred",
+      // Pagination
+      page: "Page",
+      pageOf: "of",
+      showing: "Showing",
+      to: "to",
+      of: "of",
+      perPage: "rows/page",
+      rowsPerPage: "Rows per page:",
+      customPageSize: "Custom rows per page",
+      custom: "Custom...",
+      apply: "Apply",
+      firstPage: "First page",
+      lastPage: "Last page",
+      prevPage: "Previous page",
+      nextPage: "Next page",
+      allRows: "All"
     },
     booking: {
       dropzoneTitle: "Drag & drop PDF files here or click to select",
@@ -232,9 +268,13 @@ export const translations = {
       }
     },
     vessel: {
-      searchTitle: "Search Vessel Schedule (Cat Lai / Giang Nam)",
+      searchTitle: "Search Vessel Schedule (Saigon Newport ePort)",
       siteCTL: "Cat Lai (CTL)",
       siteGNL: "Cat Lai Giang Nam (GNL)",
+      siteTHP: "Tan Cang Hiep Phuoc (THP)",
+      siteCMS: "CMS ICD Nhon Trach (CMS)",
+      siteIST: "ICD Tan Cang Song Than (IST)",
+      siteTNT: "ICD Tan Cang Nhon Trach (TNT)",
       vesselNamePlaceholder: "Enter vessel name (e.g., KOTA NEKAD, DONGJIN...)",
       voyagePlaceholder: "Voyage (e.g., 0272S, 0145N...)",
       queryBtn: "Search Schedule",

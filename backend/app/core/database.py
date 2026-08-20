@@ -486,6 +486,14 @@ def delete_vessel_schedule(schedule_id: int):
         conn.execute("DELETE FROM vessel_schedules WHERE id = ?;", (schedule_id,))
         conn.commit()
 
+def delete_vessel_schedules_batch(schedule_ids: list[int]):
+    if not schedule_ids:
+        return
+    with get_connection() as conn:
+        placeholders = ",".join(["?"] * len(schedule_ids))
+        conn.execute(f"DELETE FROM vessel_schedules WHERE id IN ({placeholders});", tuple(schedule_ids))
+        conn.commit()
+
 def clear_vessel_schedules(col_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM vessel_schedules WHERE collection_id = ?;", (col_id,))
@@ -599,6 +607,14 @@ def get_containers(col_id: int, search_query: str = None, search_field: str = No
 def delete_container(cont_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM containers WHERE id = ?;", (cont_id,))
+        conn.commit()
+
+def delete_containers_batch(cont_ids: list[int]):
+    if not cont_ids:
+        return
+    with get_connection() as conn:
+        placeholders = ",".join(["?"] * len(cont_ids))
+        conn.execute(f"DELETE FROM containers WHERE id IN ({placeholders});", tuple(cont_ids))
         conn.commit()
 
 def clear_containers(col_id: int):

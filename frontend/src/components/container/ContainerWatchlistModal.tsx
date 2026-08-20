@@ -22,7 +22,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
-  const [siteId, setSiteId] = useState('CTL');
+  const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_container_site_id') || 'CTL');
   const [containerNo, setContainerNo] = useState('');
 
   const loadWatchlist = async () => {
@@ -40,6 +40,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
 
   useEffect(() => {
     if (isOpen) {
+      setSiteId(localStorage.getItem('last_container_site_id') || 'CTL');
       loadWatchlist();
     }
   }, [isOpen, activeCollection]);
@@ -48,6 +49,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
     e.preventDefault();
     if (!activeCollection || !containerNo.trim()) return;
     try {
+      localStorage.setItem('last_container_site_id', siteId);
       await addContainerWatchlist(activeCollection.id, siteId, containerNo.trim().toUpperCase());
       addToast(t.common.success, 'success');
       setContainerNo('');
@@ -63,6 +65,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
       await deleteContainerWatchlist(id);
       addToast(t.common.success, 'success');
       setWatchlist((prev) => prev.filter((w) => w.id !== id));
+      onDataUpdated?.();
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -74,6 +77,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
       setSyncing(true);
       const res = await syncContainerWatchlist(activeCollection.id);
       addToast(`Đã cập nhật ${res.updated_count} trạng thái container!`, 'success');
+      await loadWatchlist();
       onDataUpdated?.();
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
@@ -97,11 +101,19 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
               </label>
               <select
                 value={siteId}
-                onChange={(e) => setSiteId(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSiteId(val);
+                  localStorage.setItem('last_container_site_id', val);
+                }}
                 className="w-full text-xs font-semibold bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 focus:ring-2 focus:ring-primary-500"
               >
-                <option value="CTL">CTL (Cát Lái)</option>
-                <option value="GNL">GNL (Giang Nam)</option>
+                <option value="CTL">{t.vessel.siteCTL}</option>
+                <option value="GNL">{t.vessel.siteGNL}</option>
+                <option value="THP">{t.vessel.siteTHP}</option>
+                <option value="CMS">{t.vessel.siteCMS}</option>
+                <option value="IST">{t.vessel.siteIST}</option>
+                <option value="TNT">{t.vessel.siteTNT}</option>
               </select>
             </div>
             <div className="col-span-2">

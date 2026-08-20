@@ -3,9 +3,10 @@ import requests
 import urllib3
 import re
 import logging
+import time
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("backend.eport_client")
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def parse_eport_date(date_str: str) -> str:
@@ -24,9 +25,71 @@ def parse_eport_date(date_str: str) -> str:
             pass
     return date_str
 
+def normalize_string(s: str) -> str:
+    """Normalize string by removing all non-alphanumeric characters, lowercased."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+def is_voyage_match(query_voy: str, eport_voy: str) -> bool:
+    """
+    So sánh chính xác 2 chuỗi số chuyến (1-1 exact match).
+    Chỉ cập nhật khi số chuyến của ePort trùng khớp hoàn toàn với số chuyến yêu cầu.
+    """
+    if not query_voy or not eport_voy:
+        return False
+    return normalize_string(query_voy) == normalize_string(eport_voy)
+
+def clean_vessel_name_for_eport(vessel_name: str, voyage: str = None) -> str:
+    """
+    Extract only the clean vessel name, removing any voyage codes, slashes, or trailing codes.
+    ePort /ships/Searcher API strictly requires only the vessel name in the request body.
+    """
+    if not vessel_name:
+        return ""
+    v_name = vessel_name.strip()
+    
+    # 1. Remove prefixes like 'TÀU ', 'VESSEL: ', 'SHIP: '
+    v_name = re.sub(r"^(?:tàu|vessel|ship)[:\s]+", "", v_name, flags=re.IGNORECASE).strip()
+    
+    # 2. If separated by slash/backslash/pipe (e.g. 'KOTA NEKAD / 0272S' -> 'KOTA NEKAD')
+    if re.search(r"[/\\|]", v_name):
+        parts = re.split(r"[/\\|]", v_name)
+        v_name = parts[0].strip()
+        
+    # 3. If a specific voyage was provided, remove it from vessel name if present
+    if voyage:
+        voy_clean = voyage.strip()
+        if voy_clean:
+            pattern = re.escape(voy_clean)
+            v_name = re.sub(rf"[-–—\s]*\b{pattern}\b[-–—\s]*", " ", v_name, flags=re.IGNORECASE).strip()
+            
+    # 4. If ends with ' - VOYAGE' or ' - 1752-014S'
+    v_name = re.sub(r"[-–—]\s*[0-9]+[A-Za-z0-9\-\/]*\s*$", "", v_name).strip()
+    
+    # 5. Clean up multiple spaces
+    v_name = re.sub(r"\s+", " ", v_name).strip()
+    return v_name
+
+def is_vessel_name_match(query_vessel: str, model_vessel: str) -> bool:
+    """
+    So sánh tên tàu: khớp chính xác hoặc tên tàu trả về chứa tên tàu tìm kiếm.
+    e.g. 'EVER OMNI' khớp 'EVER OMNI', 'EVER' khớp 'EVER OMNI'.
+    """
+    if not query_vessel or not model_vessel:
+        return False
+    q_clean = clean_vessel_name_for_eport(query_vessel)
+    m_clean = clean_vessel_name_for_eport(model_vessel)
+    q_norm = normalize_string(q_clean)
+    m_norm = normalize_string(m_clean)
+    return q_norm == m_norm or q_norm in m_norm or m_norm in q_norm
+
 def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[dict]:
     """
     Call the internal Saigon Newport ePort API to search for vessel schedule.
+    Body sent to ePort:
+    {
+        "siteId": site_id,
+        "vesselName": clean_vessel_name
+    }
     """
     url = "https://eport.saigonnewport.com.vn/ships/Searcher"
     
@@ -34,9 +97,8 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
     raw_vessel = vessel_name.strip() if vessel_name else ""
     voyage_query = voyage.strip() if voyage else ""
     
-    # ePort Searcher requires the base vessel name in 'vesselName' without the voyage appended
-    # Strip any slashes/extra text if present (e.g. 'EVER WARM / 1752-014S' -> 'EVER WARM')
-    clean_vessel_name = re.split(r"[/\\|]", raw_vessel)[0].strip() if raw_vessel else ""
+    # Clean vessel name to ensure NO voyage is sent to ePort
+    clean_vessel_name = clean_vessel_name_for_eport(raw_vessel, voyage_query)
     if not clean_vessel_name:
         clean_vessel_name = raw_vessel
         
@@ -55,14 +117,21 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
     }
     
     logger.info(
-        f"\n➡️ [ePort API REQUEST]\n"
+        f"\n=======================================================\n"
+        f"➡️ [ePort API REQUEST: VESSEL SEARCH]\n"
         f"   URL: {url}\n"
-        f"   Payload: {json.dumps(payload, ensure_ascii=False)}\n"
-        f"   Target Voyage: '{voyage_query or 'ALL'}'"
+        f"   Site ID: '{site_id_query}'\n"
+        f"   Raw Vessel Input: '{raw_vessel}'\n"
+        f"   Cleaned Vessel Name (Payload): '{clean_vessel_name}'\n"
+        f"   Target Voyage Filter: '{voyage_query or 'ALL'}'\n"
+        f"   Request Payload: {json.dumps(payload, ensure_ascii=False)}\n"
+        f"======================================================="
     )
     
+    start_time = time.time()
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
+        elapsed_ms = int((time.time() - start_time) * 1000)
         response.raise_for_status()
         
         res_data = response.json()
@@ -71,7 +140,11 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
         models = res_data.get("model", [])
         
         logger.info(
-            f"⬅️ [ePort API RESPONSE] Status: {response.status_code} | Type: {status_type} | Message: '{content_msg}' | Total Models: {len(models) if isinstance(models, list) else 0}"
+            f"⬅️ [ePort API RESPONSE: VESSEL SEARCH] ({elapsed_ms}ms)\n"
+            f"   HTTP Status: {response.status_code}\n"
+            f"   Response Type: '{status_type}'\n"
+            f"   Message: '{content_msg}'\n"
+            f"   Total Schedules Returned by ePort: {len(models) if isinstance(models, list) else 0}"
         )
         
         if status_type == "success" and isinstance(models, list):
@@ -85,37 +158,50 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
                         cleaned_item[k] = v.strip()
                     else:
                         cleaned_item[k] = v
+                # Ensure SITE_ID is stored with ePort site or fallback to query site
+                if not cleaned_item.get("SITE_ID"):
+                    cleaned_item["SITE_ID"] = site_id_query
                 cleaned_models.append(cleaned_item)
                 
-            # If a specific voyage was queried, find matching voyage records
+            # 1. Strictly filter by Vessel Name (Must match target vessel name completely)
+            cleaned_models = [m for m in cleaned_models if is_vessel_name_match(clean_vessel_name, m.get("VESSELNAME", ""))]
+            
+            if cleaned_models:
+                logger.info(f"   📋 Found {len(cleaned_models)} schedule(s) for '{clean_vessel_name}':")
+                for i, m in enumerate(cleaned_models):
+                    logger.info(f"      [{i+1}] Vessel: '{m.get('VESSELNAME')}' | Voyage: '{m.get('IN_OUT_VOYAGE')}' | Berth: '{m.get('ACTUAL_BERTH_TIME')}' | Dep: '{m.get('ACTUAL_DEPATURE_TIME')}' | Closing: '{m.get('CLOSING_TIME')}'")
+            else:
+                logger.warning(f"   ⚠️ Không tìm thấy lịch tàu nào khớp chính xác với tên tàu '{clean_vessel_name}'")
+
+            # 2. Strictly filter by Voyage (Must match target voyage completely)
             if voyage_query and cleaned_models:
-                clean_voy = voyage_query.lower().strip()
-                voy_tokens = [tok for tok in re.split(r"[\s\-\/\_\,]+", clean_voy) if len(tok) >= 2]
-                
-                def is_voyage_match(m: dict) -> bool:
-                    m_voy = str(m.get("IN_OUT_VOYAGE", "")).lower()
-                    if not m_voy:
-                        return False
-                    if clean_voy in m_voy or m_voy in clean_voy:
-                        return True
-                    if voy_tokens and any(tok in m_voy for tok in voy_tokens):
-                        return True
-                    return False
-                    
-                matched = [m for m in cleaned_models if is_voyage_match(m)]
-                logger.info(f"   🔍 Filtered by voyage '{voyage_query}': {len(matched)} / {len(cleaned_models)} matched")
+                matched = [m for m in cleaned_models if is_voyage_match(voyage_query, m.get("IN_OUT_VOYAGE", ""))]
+                logger.info(f"   🔍 Strict Voyage Match '{voyage_query}': {len(matched)} / {len(cleaned_models)} matched")
                 if matched:
                     return matched
+                else:
+                    logger.warning(
+                        f"   ⚠️ Chuyến tàu ePort KHÔNG trùng khớp với số chuyến yêu cầu '{voyage_query}'. "
+                        f"Các chuyến hiện có trên ePort: {[m.get('IN_OUT_VOYAGE') for m in cleaned_models]}. "
+                        f"-> Bỏ qua, KHÔNG cập nhật bừa bãi!"
+                    )
+                    return []
                     
             return cleaned_models
         elif status_type == "error":
-            logger.info(f"   ⚠️ ePort returned error/empty for '{clean_vessel_name}' at '{site_id_query}': {content_msg}")
+            logger.warning(
+                f"   ⚠️ ePort returned error for vessel '{clean_vessel_name}' at site '{site_id_query}': '{content_msg}'"
+            )
             return []
         else:
+            logger.warning(
+                f"   ⚠️ Unexpected ePort response for vessel '{clean_vessel_name}': Type='{status_type}', Content='{content_msg}'"
+            )
             return []
             
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ [ePort API ERROR] Failed to connect: {e}")
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.error(f"❌ [ePort API ERROR] Failed to connect to ePort ({elapsed_ms}ms): {e}")
         raise ConnectionError(f"Không thể kết nối tới máy chủ ePort: {e}")
 
 def search_containers(site_id: str, container_nos: str) -> list[dict]:
@@ -123,9 +209,12 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
     Call the Saigon Newport ePort API to search for container information.
     """
     url = "https://eport.saigonnewport.com.vn/ContainerInformation/FindContInfo"
+    site_query = site_id.strip().upper() if site_id else "CTL"
+    cleaned_conts = container_nos.strip()
+    
     payload = {
-        "SITE_ID": site_id.strip().upper() if site_id else "CTL",
-        "SearchContainerNos": container_nos.strip(),
+        "SITE_ID": site_query,
+        "SearchContainerNos": cleaned_conts,
         "IsSearchByInYard": True,
         "IsSearchByBatch": False
     }
@@ -135,12 +224,37 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
         "Accept": "*/*",
         "Referer": "https://eport.saigonnewport.com.vn/ContainerInformation"
     }
+    
+    logger.info(
+        f"\n=======================================================\n"
+        f"➡️ [ePort API REQUEST: CONTAINER SEARCH]\n"
+        f"   URL: {url}\n"
+        f"   Site ID: '{site_query}'\n"
+        f"   Containers: '{cleaned_conts}'\n"
+        f"   Request Payload: {json.dumps(payload, ensure_ascii=False)}\n"
+        f"======================================================="
+    )
+    
+    start_time = time.time()
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
+        elapsed_ms = int((time.time() - start_time) * 1000)
         response.raise_for_status()
+        
         res_data = response.json()
-        if res_data.get("ContentType") == "success" and "Data" in res_data:
-            data = res_data["Data"]
+        content_type = res_data.get("ContentType", "unknown")
+        msg = res_data.get("Message", "")
+        data = res_data.get("Data", [])
+        
+        logger.info(
+            f"⬅️ [ePort API RESPONSE: CONTAINER SEARCH] ({elapsed_ms}ms)\n"
+            f"   HTTP Status: {response.status_code}\n"
+            f"   ContentType: '{content_type}'\n"
+            f"   Message: '{msg}'\n"
+            f"   Total Records Returned: {len(data) if isinstance(data, list) else 0}"
+        )
+        
+        if content_type == "success" and "Data" in res_data:
             if not isinstance(data, list):
                 return []
             cleaned_data = []
@@ -158,13 +272,19 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
                     else:
                         cleaned_item[k] = v
                 cleaned_data.append(cleaned_item)
+                
+            if cleaned_data:
+                logger.info(f"   📋 Found {len(cleaned_data)} container event(s) for '{cleaned_conts}'")
             return cleaned_data
-        elif res_data.get("ContentType") == "error":
-            msg = res_data.get("Message", "")
+        elif content_type == "error":
+            logger.warning(f"   ⚠️ ePort container search error: '{msg}'")
             if "không tìm thấy" in msg.lower() or not res_data.get("Data"):
                 return []
             raise ValueError(msg or "Không tìm thấy thông tin container")
         else:
+            logger.warning(f"   ⚠️ Unexpected ePort container response: ContentType='{content_type}', Message='{msg}'")
             return []
     except requests.exceptions.RequestException as e:
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.error(f"❌ [ePort API ERROR: CONTAINERS] Failed to connect ({elapsed_ms}ms): {e}")
         raise ConnectionError(f"Không thể kết nối tới máy chủ ePort: {e}")

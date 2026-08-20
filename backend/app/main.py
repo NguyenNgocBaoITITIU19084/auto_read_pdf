@@ -1,7 +1,21 @@
+import logging
+import sys
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Configure root logger with clean formatting and INFO level
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s]: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True
+)
+logger = logging.getLogger("backend.main")
 
 from backend.app.core.config import BACKEND_HOST, BACKEND_PORT
 from backend.app.core.database import init_db, get_collections, create_collection
@@ -51,4 +65,4 @@ app.include_router(containers_router, prefix="/api/v1")
 app.include_router(export_backup_router, prefix="/api/v1")
 
 if __name__ == "__main__":
-    uvicorn.run("backend.app.main:app", host=BACKEND_HOST, port=BACKEND_PORT, reload=False)
+    uvicorn.run("backend.app.main:app", host=BACKEND_HOST, port=BACKEND_PORT, reload=True)

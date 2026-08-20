@@ -1,12 +1,14 @@
+import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from backend.app.core.database import (
-    get_containers, insert_containers, delete_container, clear_containers,
+    get_containers, insert_containers, delete_container, delete_containers_batch, clear_containers,
     get_container_watchlist, add_to_container_watchlist, remove_from_container_watchlist
 )
 from backend.app.services.eport_client import search_containers
-from backend.app.schemas.models import ContainerSearchRequest, ContainerWatchlistAddRequest
+from backend.app.schemas.models import ContainerSearchRequest, ContainerWatchlistAddRequest, BatchDeleteRequest
 
+logger = logging.getLogger("backend.api.containers")
 router = APIRouter(prefix="/containers", tags=["Containers"])
 
 @router.get("")
@@ -19,14 +21,24 @@ def list_containers(
 
 @router.post("/search")
 def query_containers(payload: ContainerSearchRequest):
+    logger.info(f"[API /containers/search] User searching: site='{payload.site_id}', containers='{payload.container_nos}', collection_id={payload.collection_id}")
     try:
         results = search_containers(payload.site_id, payload.container_nos)
         if results:
             insert_containers(payload.collection_id, results)
+            logger.info(f"[API /containers/search] ✅ Found and saved {len(results)} container event(s)")
+        else:
+            logger.warning(f"[API /containers/search] ⚠️ No container info found for '{payload.container_nos}'")
         message = "Không tìm thấy thông tin container trên ePort" if len(results) == 0 else ""
         return {"count": len(results), "items": results, "message": message}
     except Exception as e:
+        logger.error(f"[API /containers/search] ❌ Error querying containers: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/batch-delete")
+def remove_containers_batch(payload: BatchDeleteRequest):
+    delete_containers_batch(payload.ids)
+    return {"status": "success", "deleted_count": len(payload.ids)}
 
 @router.delete("/{cont_id}")
 def remove_container(cont_id: int):
