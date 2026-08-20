@@ -66,5 +66,5 @@ venv.bak/
 *.xls
 *.pdf
 
-
+node_modules/
 booking_data.db

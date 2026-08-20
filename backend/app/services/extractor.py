@@ -9,11 +9,20 @@ MONTH_MAP = {
 }
 
 def parse_date_str(date_str: str) -> str:
+    """
+    Normalizes dates from various formats:
+    - '14Jul26' -> '14/07/2026'
+    - '13Jul26 02:00' -> '13/07/2026 02:00'
+    - '18Jul2617:00' -> '18/07/2026 17:00'
+    - '2026-05-04' -> '2026-05-04'
+    - '2026-05-03 13:00' -> '2026-05-03 13:00'
+    """
     if not date_str:
         return ""
     
     date_str = date_str.strip()
     
+    # Check for DDMonYY HH:MM format, e.g. 13Jul26 02:00 or 13Jul2602:00
     match_dt = re.search(r"^(\d{1,2})([A-Za-z]{3})(\d{2,4})(?:\s*(\d{1,2}:\d{2}))?$", date_str)
     if match_dt:
         day, mon, yr, time_part = match_dt.groups()
@@ -29,6 +38,10 @@ def parse_date_str(date_str: str) -> str:
     return date_str
 
 def parse_etd(eta_etd_str: str) -> str:
+    """
+    Extracts and normalizes the ETD portion (after '/') of an ETA/ETD string.
+    e.g. '13Jul26/14Jul26' -> '14/07/2026' or '2026-05-03/2026-05-04' -> '2026-05-04'
+    """
     if not eta_etd_str:
         return ""
     parts = eta_etd_str.split("/")
@@ -36,6 +49,9 @@ def parse_etd(eta_etd_str: str) -> str:
     return parse_date_str(raw_etd)
 
 def detect_carrier(text: str = "", booking_no: str = "", vessel: str = "", pdf_name: str = "") -> str:
+    """
+    Identifies the carrier / shipping line name from extracted text and booking metadata.
+    """
     upper_text = f"{text} {booking_no} {vessel} {pdf_name}".upper()
     
     if "DONGJIN" in upper_text or "DJSC" in upper_text or booking_no.upper().startswith("DJ"):
@@ -166,6 +182,7 @@ def extract_booking_data(pdf_path: str) -> dict:
             empty_cy_match = re.search(r"Empty\s*Pick\s*UP\s*CY\s*:\s*([\s\S]*?)(?=\s*(?:Empty\s*Pick\s*Up\s*Date|Address|TEL|Yard\s*PIC|Full\s*Return|$))", text, re.IGNORECASE)
             if empty_cy_match:
                 raw_cy = empty_cy_match.group(1).strip()
+                # Clean up multiline CY text
                 cy_cleaned = " ".join([line.strip() for line in raw_cy.splitlines() if line.strip()])
                 result["Empty Pick Up CY"] = cy_cleaned
             

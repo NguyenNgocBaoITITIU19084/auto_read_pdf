@@ -1,9 +1,11 @@
+import json
 import requests
 import urllib3
 import re
+import logging
 from datetime import datetime
 
-# Suppress insecure request warnings if they occur
+logger = logging.getLogger(__name__)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 def parse_eport_date(date_str: str) -> str:
@@ -25,22 +27,15 @@ def parse_eport_date(date_str: str) -> str:
 def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[dict]:
     """
     Call the internal Saigon Newport ePort API to search for vessel schedule.
-    
-    Args:
-        site_id (str): Port ID, e.g., 'CTL' (Cát Lái) or 'GNL' (Cát Lái Giang Nam)
-        vessel_name (str): Vessel name
-        voyage (str, optional): Voyage number
-        
-    Returns:
-        list[dict]: List of vessel schedule details
     """
     url = "https://eport.saigonnewport.com.vn/ships/Searcher"
     
-    # Process inputs
     site_id_query = site_id.strip().upper() if (site_id and site_id.strip()) else "CTL"
     raw_vessel = vessel_name.strip() if vessel_name else ""
     voyage_query = voyage.strip() if voyage else ""
     
+    # ePort Searcher requires the base vessel name in 'vesselName' without the voyage appended
+    # Strip any slashes/extra text if present (e.g. 'EVER WARM / 1752-014S' -> 'EVER WARM')
     clean_vessel_name = re.split(r"[/\\|]", raw_vessel)[0].strip() if raw_vessel else ""
     if not clean_vessel_name:
         clean_vessel_name = raw_vessel
@@ -59,21 +54,31 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
         "Referer": "https://eport.saigonnewport.com.vn/Ships"
     }
     
+    logger.info(
+        f"\n➡️ [ePort API REQUEST]\n"
+        f"   URL: {url}\n"
+        f"   Payload: {json.dumps(payload, ensure_ascii=False)}\n"
+        f"   Target Voyage: '{voyage_query or 'ALL'}'"
+    )
+    
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
         response.raise_for_status()
         
         res_data = response.json()
-        if res_data.get("type") == "success" and "model" in res_data:
-            models = res_data["model"]
-            if not isinstance(models, list):
-                return []
-                
+        status_type = res_data.get("type", "unknown")
+        content_msg = res_data.get("content", "")
+        models = res_data.get("model", [])
+        
+        logger.info(
+            f"⬅️ [ePort API RESPONSE] Status: {response.status_code} | Type: {status_type} | Message: '{content_msg}' | Total Models: {len(models) if isinstance(models, list) else 0}"
+        )
+        
+        if status_type == "success" and isinstance(models, list):
             cleaned_models = []
             for item in models:
                 if not isinstance(item, dict):
                     continue
-                # Clean up trailing spaces from all string fields in the ePort response
                 cleaned_item = {}
                 for k, v in item.items():
                     if isinstance(v, str):
@@ -82,6 +87,7 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
                         cleaned_item[k] = v
                 cleaned_models.append(cleaned_item)
                 
+            # If a specific voyage was queried, find matching voyage records
             if voyage_query and cleaned_models:
                 clean_voy = voyage_query.lower().strip()
                 voy_tokens = [tok for tok in re.split(r"[\s\-\/\_\,]+", clean_voy) if len(tok) >= 2]
@@ -97,26 +103,24 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
                     return False
                     
                 matched = [m for m in cleaned_models if is_voyage_match(m)]
+                logger.info(f"   🔍 Filtered by voyage '{voyage_query}': {len(matched)} / {len(cleaned_models)} matched")
                 if matched:
                     return matched
                     
             return cleaned_models
+        elif status_type == "error":
+            logger.info(f"   ⚠️ ePort returned error/empty for '{clean_vessel_name}' at '{site_id_query}': {content_msg}")
+            return []
         else:
             return []
             
     except requests.exceptions.RequestException as e:
-        raise ConnectionError(f"Network connection failed: {e}")
+        logger.error(f"❌ [ePort API ERROR] Failed to connect: {e}")
+        raise ConnectionError(f"Không thể kết nối tới máy chủ ePort: {e}")
 
 def search_containers(site_id: str, container_nos: str) -> list[dict]:
     """
     Call the Saigon Newport ePort API to search for container information.
-    
-    Args:
-        site_id (str): Port ID, e.g., 'CTL' (Cát Lái) or 'GNL' (Cát Lái Giang Nam)
-        container_nos (str): Comma-separated list of container numbers
-        
-    Returns:
-        list[dict]: List of container details
     """
     url = "https://eport.saigonnewport.com.vn/ContainerInformation/FindContInfo"
     payload = {
@@ -147,7 +151,6 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
                 for k, v in item.items():
                     if isinstance(v, str):
                         val_str = v.strip()
-                        # Auto parse date time fields if they match ePort date format
                         if val_str.startswith("/Date(") and val_str.endswith(")/"):
                             cleaned_item[k] = parse_eport_date(val_str)
                         else:
@@ -156,8 +159,12 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
                         cleaned_item[k] = v
                 cleaned_data.append(cleaned_item)
             return cleaned_data
+        elif res_data.get("ContentType") == "error":
+            msg = res_data.get("Message", "")
+            if "không tìm thấy" in msg.lower() or not res_data.get("Data"):
+                return []
+            raise ValueError(msg or "Không tìm thấy thông tin container")
         else:
-            error_content = res_data.get("Message", "Unknown API error")
-            raise ValueError(error_content or "Failed to search container info")
+            return []
     except requests.exceptions.RequestException as e:
-        raise ConnectionError(f"Network connection failed: {e}")
+        raise ConnectionError(f"Không thể kết nối tới máy chủ ePort: {e}")

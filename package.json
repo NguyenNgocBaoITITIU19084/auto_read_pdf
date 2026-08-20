@@ -1,0 +1,60 @@
+{
+  "name": "auto-read-pdf-pro",
+  "version": "2.0.0",
+  "description": "Auto Read PDF Pro - Modern Desktop Application for PDF Extraction and ePort Vessel/Container Tracking",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": ".venv/bin/python -m backend.app.main",
+    "dev": "cross-env NODE_ENV=development concurrently -k -n \"FRONTEND,BACKEND,ELECTRON\" -c \"blue,green,magenta\" \"cd frontend && npm run dev\" \".venv/bin/python -m backend.app.main\" \"wait-on http://localhost:5173 && wait-on http-get://127.0.0.1:8000/health && electron .\"",
+    "build:frontend": "cd frontend && npm run build",
+    "build:py:mac": ".venv/bin/pyinstaller --noconfirm --onedir --name backend_app --clean backend/app/main.py",
+    "build:py:win": ".venv/Scripts/pyinstaller --noconfirm --onedir --name backend_app --clean backend/app/main.py",
+    "build": "npm run build:frontend && electron-builder",
+    "build:mac": "npm run build:frontend && electron-builder --mac",
+    "build:win": "npm run build:frontend && electron-builder --win",
+    "test:py": ".venv/bin/pytest tests/"
+  },
+  "keywords": [
+    "electron",
+    "react",
+    "fastapi",
+    "pdf-extractor",
+    "eport-snp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.autoreadpdf.pro",
+    "productName": "Auto Read PDF Pro",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/backend_app",
+        "to": "backend_dist",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": ["nsis", "portable"]
+    }
+  }
+}
