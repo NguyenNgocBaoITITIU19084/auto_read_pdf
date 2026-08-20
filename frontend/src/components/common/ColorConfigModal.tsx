@@ -20,9 +20,6 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
     toggleColorRule, resetColorRulesDefault 
   } = useApp();
 
-  // Tab filter: 'all' | 'booking' | 'container' | 'vessel'
-  const [activeTab, setActiveTab] = useState<TargetTable>('all');
-
   // Form editing state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [targetTable, setTargetTable] = useState<TargetTable>('container');
@@ -102,21 +99,10 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
 
   const availableColumns = columnsByTable[targetTable] || [{ key: 'all', label: t.common.allColumns }];
 
-  // Filtered rules for list display (sorted newest first)
-  const filteredRules = useMemo(() => {
-    const list = activeTab === 'all'
-      ? colorRules
-      : colorRules.filter((r) => r.target_table === activeTab || r.target_table === 'all');
-    return [...list].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
-  }, [colorRules, activeTab]);
-
-  const handleTabChange = (tab: TargetTable) => {
-    setActiveTab(tab);
-    if (tab !== 'all') {
-      setTargetTable(tab);
-      setColumnKey('all');
-    }
-  };
+  // Rules list display (sorted newest first)
+  const sortedRules = useMemo(() => {
+    return [...colorRules].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+  }, [colorRules]);
 
   const handleStartEdit = (rule: ColorRule) => {
     setEditingId(rule.id || null);
@@ -205,38 +191,9 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
     ? activePreset.badgeClass
     : '';
 
-  const getTableLabel = (tabKey: TargetTable) => {
-    if (tabKey === 'booking') return 'Booking';
-    if (tabKey === 'container') return 'Container';
-    if (tabKey === 'vessel') return 'Lịch tàu';
-    return t.common.all;
-  };
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t.common.colorConfig} maxWidth="max-w-4xl">
       <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-        {/* Filter Tabs */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
-          <div className="flex items-center gap-1.5">
-            {(['all', 'container', 'booking', 'vessel'] as TargetTable[]).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => handleTabChange(tab)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
-                  activeTab === tab
-                    ? 'bg-primary-600 text-white shadow-xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                {getTableLabel(tab)}
-              </button>
-            ))}
-          </div>
-          <span className="text-xs text-slate-500 font-medium">
-            {filteredRules.length} {t.common.colorRules.toLowerCase()}
-          </span>
-        </div>
-
         {/* Rule Form (Add / Edit) */}
         <form onSubmit={handleSubmit} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 space-y-3.5 shadow-2xs">
           <div className="flex items-center justify-between">
@@ -473,7 +430,12 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
         {/* Existing Rules List */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-            <span>{t.common.colorRules}</span>
+            <div className="flex items-center gap-2">
+              <span>{t.common.colorRules}</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 font-semibold">
+                {sortedRules.length}
+              </span>
+            </div>
             <button
               type="button"
               onClick={resetColorRulesDefault}
@@ -484,13 +446,13 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
             </button>
           </div>
 
-          {filteredRules.length === 0 ? (
+          {sortedRules.length === 0 ? (
             <div className="text-center py-8 text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
               {t.common.noRulesFound}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
-              {filteredRules.map((rule) => {
+              {sortedRules.map((rule) => {
                 const preset = getColorPreset(rule.preset_id);
                 const badgeStyle = rule.custom_bg
                   ? {
