@@ -64,3 +64,38 @@ class AutoSyncToggleRequest(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     ids: List[int]
+
+class ColorRuleCreate(BaseModel):
+    target_table: Optional[str] = "all"
+    column_key: Optional[str] = "all"
+    match_value: str
+    match_type: Optional[str] = "exact"
+    preset_id: Optional[str] = None
+    custom_bg: Optional[str] = None
+    custom_border: Optional[str] = None
+    custom_text: Optional[str] = None
+    is_enabled: Optional[bool] = True
+
+class ColorRuleUpdate(BaseModel):
+    target_table: Optional[str] = None
+    column_key: Optional[str] = None
+    match_value: Optional[str] = None
+    match_type: Optional[str] = None
+    preset_id: Optional[str] = None
+    custom_bg: Optional[str] = None
+    custom_border: Optional[str] = None
+    custom_text: Optional[str] = None
+    is_enabled: Optional[bool] = None
+
+class ColorRuleResponse(BaseModel):
+    id: int
+    target_table: str
+    column_key: str
+    match_value: str
+    match_type: str
+    preset_id: Optional[str] = None
+    custom_bg: Optional[str] = None
+    custom_border: Optional[str] = None
+    custom_text: Optional[str] = None
+    is_enabled: bool
+    created_at: str

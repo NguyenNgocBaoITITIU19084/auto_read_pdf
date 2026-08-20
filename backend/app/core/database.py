@@ -8,6 +8,23 @@ def get_connection():
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
+DEFAULT_COLOR_RULES = [
+    {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Chưa duyệt (N)", "match_type": "exact", "preset_id": "rose", "is_enabled": 1},
+    {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "N", "match_type": "exact", "preset_id": "rose", "is_enabled": 1},
+    {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Đã duyệt (Y)", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
+    {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Y", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
+    {"target_table": "container", "column_key": "infras_fee_status", "match_value": "Chưa đóng (3)", "match_type": "exact", "preset_id": "amber", "is_enabled": 1},
+    {"target_table": "container", "column_key": "infras_fee_status", "match_value": "3", "match_type": "exact", "preset_id": "amber", "is_enabled": 1},
+    {"target_table": "container", "column_key": "fel", "match_value": "F", "match_type": "exact", "preset_id": "blue", "is_enabled": 1},
+    {"target_table": "container", "column_key": "fel", "match_value": "E", "match_type": "exact", "preset_id": "slate", "is_enabled": 1},
+    {"target_table": "container", "column_key": "vgm", "match_value": "Y", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
+    {"target_table": "container", "column_key": "event_type", "match_value": "UNLOAD", "match_type": "contains", "preset_id": "sky", "is_enabled": 1},
+    {"target_table": "container", "column_key": "event_type", "match_value": "INGATE", "match_type": "contains", "preset_id": "emerald", "is_enabled": 1},
+    {"target_table": "container", "column_key": "event_type", "match_value": "OUTGATE", "match_type": "contains", "preset_id": "amber", "is_enabled": 1},
+    {"target_table": "container", "column_key": "event_type", "match_value": "STACK", "match_type": "contains", "preset_id": "purple", "is_enabled": 1},
+    {"target_table": "container", "column_key": "event_type", "match_value": "LOAD", "match_type": "contains", "preset_id": "teal", "is_enabled": 1},
+]
+
 def init_db():
     with get_connection() as conn:
         # Create collections table
@@ -197,12 +214,47 @@ def init_db():
             ("certified_weight", "REAL"),
             ("item_key", "INTEGER"),
         ]
-        for col_name, col_type in new_container_cols:
-            try:
-                conn.execute(f"ALTER TABLE containers ADD COLUMN {col_name} {col_type};")
-            except sqlite3.OperationalError:
-                pass
-            
+        # Create color_rules table
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS color_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_table TEXT NOT NULL DEFAULT 'all',
+                column_key TEXT NOT NULL DEFAULT 'all',
+                match_value TEXT NOT NULL,
+                match_type TEXT NOT NULL DEFAULT 'exact',
+                preset_id TEXT,
+                custom_bg TEXT,
+                custom_border TEXT,
+                custom_text TEXT,
+                is_enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+        """)
+
+        # Seed default color rules if empty
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM color_rules;")
+        if cursor.fetchone()[0] == 0:
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for r in DEFAULT_COLOR_RULES:
+                cursor.execute("""
+                    INSERT INTO color_rules (
+                        target_table, column_key, match_value, match_type,
+                        preset_id, custom_bg, custom_border, custom_text, is_enabled, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """, (
+                    r.get("target_table", "all"),
+                    r.get("column_key", "all"),
+                    r.get("match_value", ""),
+                    r.get("match_type", "exact"),
+                    r.get("preset_id"),
+                    r.get("custom_bg"),
+                    r.get("custom_border"),
+                    r.get("custom_text"),
+                    r.get("is_enabled", 1),
+                    now_str
+                ))
+
         conn.commit()
 
 def create_collection(name: str) -> int:
@@ -395,7 +447,15 @@ def export_backup_data() -> dict:
             "container_watchlists": c_watchlists
         })
         
-    return {"collections": backup_data}
+    color_rules = get_color_rules()
+    for cr in color_rules:
+        if "id" in cr:
+            del cr["id"]
+
+    return {
+        "collections": backup_data,
+        "color_rules": color_rules
+    }
 
 def import_backup_data(backup_data: dict):
     if not isinstance(backup_data, dict) or "collections" not in backup_data:
@@ -458,6 +518,10 @@ def import_backup_data(backup_data: dict):
         if c_watchlists:
             for cw in c_watchlists:
                 add_to_container_watchlist(col_id, cw.get("site_id", ""), cw.get("container_no", ""))
+
+    if "color_rules" in backup_data and isinstance(backup_data["color_rules"], list):
+        for cr in backup_data["color_rules"]:
+            create_color_rule(cr)
 
 def insert_vessel_schedules(col_id: int, schedules: list[dict]) -> list[int]:
     queried_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -742,3 +806,100 @@ def remove_from_container_watchlist(watchlist_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM container_watchlists WHERE id = ?;", (watchlist_id,))
         conn.commit()
+
+def get_color_rules(target_table: str = None) -> list[dict]:
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        if target_table and target_table != "all":
+            cursor.execute("SELECT * FROM color_rules WHERE target_table = ? OR target_table = 'all' ORDER BY id ASC;", (target_table,))
+        else:
+            cursor.execute("SELECT * FROM color_rules ORDER BY id ASC;")
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["is_enabled"] = bool(d.get("is_enabled", 1))
+            result.append(d)
+        return result
+
+def create_color_rule(data: dict) -> int:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    is_enabled_val = 1 if data.get("is_enabled", True) else 0
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO color_rules (
+                target_table, column_key, match_value, match_type,
+                preset_id, custom_bg, custom_border, custom_text, is_enabled, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (
+            data.get("target_table", "all") or "all",
+            data.get("column_key", "all") or "all",
+            str(data.get("match_value", "")).strip(),
+            data.get("match_type", "exact") or "exact",
+            data.get("preset_id"),
+            data.get("custom_bg"),
+            data.get("custom_border"),
+            data.get("custom_text"),
+            is_enabled_val,
+            now_str
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+def update_color_rule(rule_id: int, data: dict) -> bool:
+    fields = []
+    params = []
+    
+    for k in ["target_table", "column_key", "match_value", "match_type", "preset_id", "custom_bg", "custom_border", "custom_text"]:
+        if k in data and data[k] is not None:
+            fields.append(f"{k} = ?")
+            params.append(data[k])
+            
+    if "is_enabled" in data and data["is_enabled"] is not None:
+        fields.append("is_enabled = ?")
+        params.append(1 if data["is_enabled"] else 0)
+        
+    if not fields:
+        return False
+        
+    params.append(rule_id)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE color_rules SET {', '.join(fields)} WHERE id = ?;", tuple(params))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def delete_color_rule(rule_id: int) -> bool:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM color_rules WHERE id = ?;", (rule_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def reset_color_rules_to_default() -> list[dict]:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM color_rules;")
+        for r in DEFAULT_COLOR_RULES:
+            cursor.execute("""
+                INSERT INTO color_rules (
+                    target_table, column_key, match_value, match_type,
+                    preset_id, custom_bg, custom_border, custom_text, is_enabled, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (
+                r.get("target_table", "all"),
+                r.get("column_key", "all"),
+                r.get("match_value", ""),
+                r.get("match_type", "exact"),
+                r.get("preset_id"),
+                r.get("custom_bg"),
+                r.get("custom_border"),
+                r.get("custom_text"),
+                r.get("is_enabled", 1),
+                now_str
+            ))
+        conn.commit()
+    return get_color_rules()
