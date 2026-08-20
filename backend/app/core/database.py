@@ -9,6 +9,14 @@ def get_connection():
     return conn
 
 DEFAULT_COLOR_RULES = [
+    # Port codes (Mã cảng)
+    {"target_table": "all", "column_key": "site_id", "match_value": "CTL", "match_type": "exact", "preset_id": "blue", "is_enabled": 1},
+    {"target_table": "all", "column_key": "site_id", "match_value": "TNT", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
+    {"target_table": "all", "column_key": "site_id", "match_value": "THP", "match_type": "exact", "preset_id": "amber", "is_enabled": 1},
+    {"target_table": "all", "column_key": "site_id", "match_value": "GNL", "match_type": "exact", "preset_id": "purple", "is_enabled": 1},
+    {"target_table": "all", "column_key": "site_id", "match_value": "CMS", "match_type": "exact", "preset_id": "teal", "is_enabled": 1},
+    {"target_table": "all", "column_key": "site_id", "match_value": "IST", "match_type": "exact", "preset_id": "orange", "is_enabled": 1},
+    # Status & Logistics codes
     {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Chưa duyệt (N)", "match_type": "exact", "preset_id": "rose", "is_enabled": 1},
     {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "N", "match_type": "exact", "preset_id": "rose", "is_enabled": 1},
     {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Đã duyệt (Y)", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
@@ -231,12 +239,19 @@ def init_db():
             );
         """)
 
-        # Seed default color rules if empty
+        # Seed default color rules if missing
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM color_rules;")
-        if cursor.fetchone()[0] == 0:
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            for r in DEFAULT_COLOR_RULES:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for r in DEFAULT_COLOR_RULES:
+            cursor.execute("""
+                SELECT id FROM color_rules 
+                WHERE target_table = ? AND column_key = ? AND match_value = ?;
+            """, (
+                r.get("target_table", "all"),
+                r.get("column_key", "all"),
+                r.get("match_value", "")
+            ))
+            if not cursor.fetchone():
                 cursor.execute("""
                     INSERT INTO color_rules (
                         target_table, column_key, match_value, match_type,
