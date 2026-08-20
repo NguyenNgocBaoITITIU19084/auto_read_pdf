@@ -19,6 +19,7 @@ import { Tooltip } from '../common/Tooltip';
 import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
+import { ValueBadge } from '../common/ValueBadge';
 
 export const ContainerTab: React.FC = () => {
   const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
@@ -809,154 +810,12 @@ export const ContainerTab: React.FC = () => {
                             );
                           }
 
-                          if (col.key === 'event_type') {
-                            const eType = String(val).toUpperCase();
-                            let badgeColor = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
-                            if (eType.includes('UNLOAD')) {
-                              badgeColor = 'bg-sky-100 text-sky-800 dark:bg-sky-950/80 dark:text-sky-300 border-sky-200 dark:border-sky-800';
-                            } else if (eType.includes('INGATE')) {
-                              badgeColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
-                            } else if (eType.includes('OUTGATE')) {
-                              badgeColor = 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border-amber-200 dark:border-amber-800';
-                            } else if (eType.includes('STACK')) {
-                              badgeColor = 'bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 border-purple-200 dark:border-purple-800';
-                            } else if (eType.includes('LOAD')) {
-                              badgeColor = 'bg-teal-100 text-teal-800 dark:bg-teal-950/80 dark:text-teal-300 border-teal-200 dark:border-teal-800';
-                            }
-
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`Tác nghiệp: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
-                                ) : (
-                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border shadow-2xs ${badgeColor}`}>
-                                    {String(val)}
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          }
-
+                          let displayVal = val;
                           if (col.key === 'custom_clearance_status') {
-                            const isCleared = String(val).toUpperCase() === 'Y';
-                            const isNotCleared = String(val).toUpperCase() === 'N';
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`Trạng thái HQ: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
-                                ) : isCleared ? (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                                    Đã duyệt (Y)
-                                  </span>
-                                ) : isNotCleared ? (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-                                    Chưa duyệt (N)
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-800 dark:text-slate-200 font-medium">{String(val)}</span>
-                                )}
-                              </td>
-                            );
-                          }
-
-                          if (col.key === 'infras_fee_status') {
-                            const isUnpaid = String(val) === '3';
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`Phí hạ tầng: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
-                                ) : isUnpaid ? (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                                    Chưa đóng ({String(val)})
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                                    {String(val)}
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          }
-
-                          if (col.key === 'fel') {
-                            const isFull = String(val).toUpperCase() === 'F';
-                            const isEmpty = String(val).toUpperCase() === 'E';
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`F/E: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
-                                ) : isFull ? (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                                    F
-                                  </span>
-                                ) : isEmpty ? (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                                    E
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-800 dark:text-slate-200 font-medium">{String(val)}</span>
-                                )}
-                              </td>
-                            );
-                          }
-
-                          if (col.key === 'vgm') {
-                            const hasVgm = String(val).toUpperCase() === 'Y';
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`VGM: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
-                                ) : hasVgm ? (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                                    Y
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                    {String(val)}
-                                  </span>
-                                )}
-                              </td>
-                            );
+                            if (String(val).toUpperCase() === 'Y') displayVal = 'Đã duyệt (Y)';
+                            else if (String(val).toUpperCase() === 'N') displayVal = 'Chưa duyệt (N)';
+                          } else if (col.key === 'infras_fee_status') {
+                            if (String(val) === '3') displayVal = 'Chưa đóng (3)';
                           }
 
                           return (
@@ -966,12 +825,15 @@ export const ContainerTab: React.FC = () => {
                                 width: w ? `${w}px` : undefined,
                                 maxWidth: w ? `${w}px` : undefined,
                               }}
-                              className={`py-1.5 px-2.5 truncate ${
-                                isNull ? 'text-slate-400 dark:text-slate-500 italic' : 'text-slate-800 dark:text-slate-200 font-medium'
-                              }`}
-                              title={String(val)}
+                              className="py-1.5 px-2.5 truncate"
+                              title={`${col.label}: ${String(displayVal ?? '')}`}
                             >
-                              {String(val)}
+                              <ValueBadge
+                                table="container"
+                                columnKey={col.key}
+                                value={displayVal}
+                                fallbackText="-"
+                              />
                             </td>
                           );
                         })}

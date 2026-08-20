@@ -19,6 +19,7 @@ import { Tooltip } from '../common/Tooltip';
 import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
+import { ValueBadge } from '../common/ValueBadge';
 
 export const VesselTab: React.FC = () => {
   const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
@@ -606,12 +607,15 @@ export const VesselTab: React.FC = () => {
                                 width: w ? `${w}px` : undefined,
                                 maxWidth: w ? `${w}px` : undefined,
                               }}
-                              className={`py-1.5 px-2.5 truncate ${
-                                isNull ? 'text-slate-400 dark:text-slate-500 italic' : 'text-slate-800 dark:text-slate-200 font-medium'
-                              }`}
-                              title={String(val)}
+                              className="py-1.5 px-2.5 truncate"
+                              title={`${col.label}: ${String(val || '')}`}
                             >
-                              {String(val)}
+                              <ValueBadge
+                                table="vessel"
+                                columnKey={col.key}
+                                value={val}
+                                fallbackText="null"
+                              />
                             </td>
                           );
                         })}

@@ -15,6 +15,7 @@ import { Tooltip } from '../common/Tooltip';
 import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
+import { ValueBadge } from '../common/ValueBadge';
 
 export const BookingTab: React.FC = () => {
   const { t, activeCollection, addToast } = useApp();
@@ -356,8 +357,7 @@ export const BookingTab: React.FC = () => {
                     {columns
                       .filter((c) => c.visible)
                       .map((col) => {
-                        const val = booking[col.key] || 'null';
-                        const isNull = val === 'null' || !val;
+                        const val = booking[col.key];
                         const w = columnWidths[col.key];
                         return (
                           <td
@@ -366,12 +366,15 @@ export const BookingTab: React.FC = () => {
                               width: w ? `${w}px` : undefined,
                               maxWidth: w ? `${w}px` : undefined,
                             }}
-                            className={`py-1.5 px-2.5 truncate ${
-                              isNull ? 'text-slate-400 dark:text-slate-500 italic' : 'text-slate-800 dark:text-slate-200 font-medium'
-                            }`}
-                            title={String(val)}
+                            className="py-1.5 px-2.5 truncate"
+                            title={String(val || '')}
                           >
-                            {String(val)}
+                            <ValueBadge
+                              table="booking"
+                              columnKey={col.key}
+                              value={val}
+                              fallbackText="null"
+                            />
                           </td>
                         );
                       })}
