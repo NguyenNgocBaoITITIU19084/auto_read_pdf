@@ -115,3 +115,34 @@ export interface ColumnSetting {
   order: number;
   customName?: string;
 }
+
+export type MatchType = 'exact' | 'contains';
+export type TargetTable = 'all' | 'booking' | 'container' | 'vessel';
+
+export interface ColorPreset {
+  id: string;
+  name: string;
+  nameVi: string;
+  bgClass: string;
+  darkBgClass: string;
+  borderClass: string;
+  darkBorderClass: string;
+  textClass: string;
+  darkTextClass: string;
+  hexPreview: string;
+  badgeClass: string;
+}
+
+export interface ColorRule {
+  id?: number;
+  target_table: TargetTable;
+  column_key: string;
+  match_value: string;
+  match_type: MatchType;
+  preset_id?: string;
+  custom_bg?: string;
+  custom_border?: string;
+  custom_text?: string;
+  is_enabled: boolean;
+  created_at?: string;
+}

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist } from '../types';
+import { Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule } from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
 
@@ -197,5 +197,32 @@ export const getAutoSyncStatus = async (): Promise<{ enabled: boolean; interval_
 
 export const toggleAutoSyncApi = async (enable: boolean, intervalMinutes: number = 10): Promise<any> => {
   const res = await apiClient.post('/scheduler/toggle', { enable, interval_minutes: intervalMinutes });
+  return res.data;
+};
+
+// Color Rules
+export const getColorRulesApi = async (targetTable?: string): Promise<ColorRule[]> => {
+  const params: any = {};
+  if (targetTable && targetTable !== 'all') params.target_table = targetTable;
+  const res = await apiClient.get<ColorRule[]>('/color-rules', { params });
+  return res.data;
+};
+
+export const createColorRuleApi = async (rule: Partial<ColorRule>): Promise<ColorRule> => {
+  const res = await apiClient.post<ColorRule>('/color-rules', rule);
+  return res.data;
+};
+
+export const updateColorRuleApi = async (id: number, rule: Partial<ColorRule>): Promise<ColorRule> => {
+  const res = await apiClient.put<ColorRule>(`/color-rules/${id}`, rule);
+  return res.data;
+};
+
+export const deleteColorRuleApi = async (id: number): Promise<void> => {
+  await apiClient.delete(`/color-rules/${id}`);
+};
+
+export const resetColorRulesApi = async (): Promise<ColorRule[]> => {
+  const res = await apiClient.post<ColorRule[]>('/color-rules/reset');
   return res.data;
 };
