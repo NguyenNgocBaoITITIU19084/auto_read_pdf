@@ -25,6 +25,7 @@ from backend.app.api.bookings import router as bookings_router
 from backend.app.api.vessels import router as vessels_router
 from backend.app.api.containers import router as containers_router
 from backend.app.api.export_backup import router as export_backup_router
+from backend.app.api.color_rules import router as color_rules_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -63,6 +64,7 @@ app.include_router(bookings_router, prefix="/api/v1")
 app.include_router(vessels_router, prefix="/api/v1")
 app.include_router(containers_router, prefix="/api/v1")
 app.include_router(export_backup_router, prefix="/api/v1")
+app.include_router(color_rules_router, prefix="/api/v1")
 
 if __name__ == "__main__":
     uvicorn.run("backend.app.main:app", host=BACKEND_HOST, port=BACKEND_PORT, reload=True)
