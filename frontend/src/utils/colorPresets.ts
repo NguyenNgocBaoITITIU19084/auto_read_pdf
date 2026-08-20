@@ -165,7 +165,17 @@ export function getColorPreset(presetId?: string): ColorPreset | undefined {
 }
 
 /**
- * Finds the first matching active ColorRule for a given cell value and table/column.
+ * Finds the highest priority matching active ColorRule for a given cell value and table/column.
+ * Priority:
+ * 1. Specific table & specific column & exact match
+ * 2. Specific table & specific column & contains match
+ * 3. Specific table & all columns & exact match
+ * 4. Specific table & all columns & contains match
+ * 5. All tables & specific column & exact match
+ * 6. All tables & specific column & contains match
+ * 7. All tables & all columns & exact match
+ * 8. All tables & all columns & contains match
+ * Within the same tier, the newest rule (higher id or later index) wins.
  */
 export function findMatchingColorRule(
   rules: ColorRule[],
@@ -184,35 +194,61 @@ export function findMatchingColorRule(
 
   const upperVal = strVal.toUpperCase();
 
-  for (const rule of rules) {
-    if (!rule.is_enabled) continue;
+  const matchingCandidates: { rule: ColorRule; priority: number; idOrIndex: number }[] = [];
 
-    // Check table match
-    if (rule.target_table !== 'all' && rule.target_table !== table) {
-      continue;
-    }
+  rules.forEach((rule, idx) => {
+    if (!rule.is_enabled) return;
 
-    // Check column match
-    if (rule.column_key !== 'all' && rule.column_key !== columnKey) {
-      continue;
-    }
+    const isSpecificTable = rule.target_table === table;
+    const isAllTable = rule.target_table === 'all';
+    if (!isSpecificTable && !isAllTable) return;
+
+    const isSpecificCol = rule.column_key === columnKey;
+    const isAllCol = rule.column_key === 'all';
+    if (!isSpecificCol && !isAllCol) return;
 
     const ruleMatchVal = (rule.match_value || '').trim();
-    if (!ruleMatchVal) continue;
+    if (!ruleMatchVal) return;
 
     const ruleUpper = ruleMatchVal.toUpperCase();
+    let isMatch = false;
+    let isExact = false;
 
     if (rule.match_type === 'contains') {
       if (upperVal.includes(ruleUpper)) {
-        return rule;
+        isMatch = true;
+        isExact = upperVal === ruleUpper;
       }
     } else {
-      // exact match (case-insensitive)
       if (upperVal === ruleUpper) {
-        return rule;
+        isMatch = true;
+        isExact = true;
       }
     }
+
+    if (!isMatch) return;
+
+    // Calculate priority score (higher is better)
+    let score = 0;
+    if (isSpecificTable) score += 100;
+    if (isSpecificCol) score += 50;
+    if (isExact) score += 20;
+
+    const orderVal = typeof rule.id === 'number' ? rule.id : idx;
+    matchingCandidates.push({ rule, priority: score, idOrIndex: orderVal });
+  });
+
+  if (matchingCandidates.length === 0) {
+    return null;
   }
 
-  return null;
+  // Sort by priority descending, then by id/index descending (newest rule wins)
+  matchingCandidates.sort((a, b) => {
+    if (b.priority !== a.priority) {
+      return b.priority - a.priority;
+    }
+    return b.idOrIndex - a.idOrIndex;
+  });
+
+  return matchingCandidates[0].rule;
 }

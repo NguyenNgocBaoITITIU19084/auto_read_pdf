@@ -794,7 +794,7 @@ export const ContainerTab: React.FC = () => {
                                   width: w ? `${w}px` : undefined,
                                   maxWidth: w ? `${w}px` : undefined,
                                 }}
-                                className="py-1.5 px-2.5 truncate font-mono font-bold text-slate-900 dark:text-slate-100"
+                                className="py-1.5 px-2.5 truncate font-mono font-bold"
                                 title={String(val)}
                               >
                                 <div className="flex items-center gap-1.5 truncate">
@@ -804,7 +804,13 @@ export const ContainerTab: React.FC = () => {
                                       className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
                                     />
                                   )}
-                                  <span className="truncate">{String(val)}</span>
+                                  <ValueBadge
+                                    table="container"
+                                    columnKey={col.key}
+                                    value={val}
+                                    className="font-mono font-bold text-slate-900 dark:text-slate-100"
+                                    fallbackText="-"
+                                  />
                                 </div>
                               </td>
                             );

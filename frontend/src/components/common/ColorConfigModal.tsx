@@ -44,40 +44,79 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
       { key: 'all', label: t.common.allColumns },
       { key: 'Carrier', label: t.booking.columns['Carrier'] || 'Hãng tàu' },
       { key: 'Equipment Type', label: t.booking.columns['Equipment Type'] || 'Loại cont' },
+      { key: 'Booking No', label: t.booking.columns['Booking No'] || 'Số Booking' },
+      { key: 'Vessel', label: t.booking.columns['Vessel'] || 'Tên tàu' },
+      { key: 'ETD', label: t.booking.columns['ETD'] || 'Ngày tàu chạy' },
       { key: 'Port of Discharging', label: t.booking.columns['Port of Discharging'] || 'Cảng đích' },
       { key: 'Place of Delivery', label: t.booking.columns['Place of Delivery'] || 'Điểm giao' },
-      { key: 'Vessel', label: t.booking.columns['Vessel'] || 'Tên tàu' },
+      { key: 'T/S Port', label: t.booking.columns['T/S Port'] || 'Cảng chuyển tải' },
+      { key: 'Block', label: t.booking.columns['Block'] || 'Block' },
+      { key: 'Q\'ty', label: t.booking.columns['Q\'ty'] || 'Số lượng' },
       { key: 'Empty Pick Up CY', label: t.booking.columns['Empty Pick Up CY'] || 'Bãi cấp rỗng' },
       { key: 'Full return CY', label: t.booking.columns['Full return CY'] || 'Nơi hạ bãi' },
+      { key: 'Port Cargo Cut-off', label: t.booking.columns['Port Cargo Cut-off'] || 'Thời gian cắt máng' },
+      { key: 'Tên file PDF', label: t.booking.columns['Tên file PDF'] || 'Tên file PDF' },
     ],
     container: [
       { key: 'all', label: t.common.allColumns },
       { key: 'custom_clearance_status', label: t.container.columns['custom_clearance_status'] || 'Trạng thái HQ' },
       { key: 'infras_fee_status', label: t.container.columns['infras_fee_status'] || 'Phí hạ tầng' },
       { key: 'event_type', label: t.container.columns['event_type'] || 'Tác nghiệp' },
+      { key: 'site_id', label: t.container.columns['site_id'] || 'Cảng' },
+      { key: 'containerno', label: t.container.columns['containerno'] || 'Số Container' },
       { key: 'fel', label: t.container.columns['fel'] || 'F/E' },
       { key: 'vgm', label: t.container.columns['vgm'] || 'VGM' },
       { key: 'line_oper', label: t.container.columns['line_oper'] || 'Hãng tàu' },
-      { key: 'site_id', label: t.container.columns['site_id'] || 'Cảng' },
       { key: 'location', label: t.container.columns['location'] || 'Vị trí bãi' },
       { key: 'im_exp', label: t.container.columns['im_exp'] || 'Nhập/Xuất' },
+      { key: 'category', label: t.container.columns['category'] || 'Phân loại' },
+      { key: 'cust', label: t.container.columns['cust'] || 'Khách hàng' },
+      { key: 'stack', label: t.container.columns['stack'] || 'Stack' },
+      { key: 'temp', label: t.container.columns['temp'] || 'Nhiệt độ' },
+      { key: 'haz', label: t.container.columns['haz'] || 'Hàng nguy hiểm' },
+      { key: 'load_to_vessel', label: t.container.columns['load_to_vessel'] || 'Tàu xếp' },
+      { key: 'pod_destination', label: t.container.columns['pod_destination'] || 'Cảng đến' },
+      { key: 'truck_vessel', label: t.container.columns['truck_vessel'] || 'Xe/Tàu' },
+      { key: 'bill_book', label: t.container.columns['bill_book'] || 'Số Bill/Booking' },
+      { key: 'item_seal_no', label: t.container.columns['item_seal_no'] || 'Số Seal' },
+      { key: 'note', label: t.container.columns['note'] || 'Ghi chú' },
     ],
     vessel: [
       { key: 'all', label: t.common.allColumns },
       { key: 'site_id', label: t.vessel.columns['site_id'] || 'Cảng' },
-      { key: 'agent', label: t.vessel.columns['agent'] || 'Đại lý' },
-      { key: 'in_gate', label: t.vessel.columns['in_gate'] || 'Hạ bãi' },
       { key: 'vessel_name', label: t.vessel.columns['vessel_name'] || 'Tên tàu' },
+      { key: 'agent', label: t.vessel.columns['agent'] || 'Đại lý' },
+      { key: 'in_out_voyage', label: t.vessel.columns['in_out_voyage'] || 'Số chuyến' },
+      { key: 'actual_berth_time', label: t.vessel.columns['actual_berth_time'] || 'Cập bến' },
+      { key: 'actual_departure_time', label: t.vessel.columns['actual_departure_time'] || 'Rời bến' },
+      { key: 'closing_time', label: t.vessel.columns['closing_time'] || 'Closing time' },
+      { key: 'closing_time_icd', label: t.vessel.columns['closing_time_icd'] || 'Closing time ICD' },
+      { key: 'in_gate', label: t.vessel.columns['in_gate'] || 'Hạ bãi' },
+      { key: 'open_ts', label: t.vessel.columns['open_ts'] || 'Mở bãi' },
+      { key: 'reefer_open_ts', label: t.vessel.columns['reefer_open_ts'] || 'Mở bãi cont lạnh' },
+      { key: 'oog_open_ts', label: t.vessel.columns['oog_open_ts'] || 'Mở bãi OOG' },
+      { key: 'haz_open_ts', label: t.vessel.columns['haz_open_ts'] || 'Mở bãi HAZ' },
+      { key: 'remarks', label: t.vessel.columns['remarks'] || 'Ghi chú' },
     ],
   }), [t]);
 
   const availableColumns = columnsByTable[targetTable] || [{ key: 'all', label: t.common.allColumns }];
 
-  // Filtered rules for list display
+  // Filtered rules for list display (sorted newest first)
   const filteredRules = useMemo(() => {
-    if (activeTab === 'all') return colorRules;
-    return colorRules.filter((r) => r.target_table === activeTab || r.target_table === 'all');
+    const list = activeTab === 'all'
+      ? colorRules
+      : colorRules.filter((r) => r.target_table === activeTab || r.target_table === 'all');
+    return [...list].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   }, [colorRules, activeTab]);
+
+  const handleTabChange = (tab: TargetTable) => {
+    setActiveTab(tab);
+    if (tab !== 'all') {
+      setTargetTable(tab);
+      setColumnKey('all');
+    }
+  };
 
   const handleStartEdit = (rule: ColorRule) => {
     setEditingId(rule.id || null);
@@ -108,16 +147,32 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
     e.preventDefault();
     if (!matchValue.trim()) return;
 
+    const trimmedMatchValue = matchValue.trim();
+
+    // Check if an existing rule with exact target_table, column_key, and match_value exists
+    let targetRuleId = editingId;
+    if (!targetRuleId) {
+      const existing = colorRules.find(
+        (r) =>
+          r.target_table === targetTable &&
+          r.column_key === columnKey &&
+          r.match_value.trim().toUpperCase() === trimmedMatchValue.toUpperCase()
+      );
+      if (existing && existing.id) {
+        targetRuleId = existing.id;
+      }
+    }
+
     const payload: Partial<ColorRule> = {
       target_table: targetTable,
       column_key: columnKey,
-      match_value: matchValue.trim(),
+      match_value: trimmedMatchValue,
       match_type: matchType,
       is_enabled: true,
     };
 
-    if (editingId) {
-      payload.id = editingId;
+    if (targetRuleId) {
+      payload.id = targetRuleId;
     }
 
     if (isCustomColor) {
@@ -166,7 +221,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
             {(['all', 'container', 'booking', 'vessel'] as TargetTable[]).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => handleTabChange(tab)}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
                   activeTab === tab
                     ? 'bg-primary-600 text-white shadow-xs'
