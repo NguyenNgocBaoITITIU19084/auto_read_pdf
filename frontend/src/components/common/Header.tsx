@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { 
   FolderPlus, Trash2, Moon, Sun, Database, 
-  RefreshCw, Layers, ShieldCheck, Settings2
+  RefreshCw, Layers, ShieldCheck, Settings2, Palette
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Modal } from './Modal';
 import { BackupModal } from './BackupModal';
 import { CollectionManagerModal } from './CollectionManagerModal';
+import { ColorConfigModal } from './ColorConfigModal';
 import { Tooltip } from './Tooltip';
 
 export const Header: React.FC = () => {
@@ -21,6 +22,7 @@ export const Header: React.FC = () => {
   const [newColName, setNewColName] = useState('');
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isCollectionManagerOpen, setIsCollectionManagerOpen] = useState(false);
+  const [isColorConfigOpen, setIsColorConfigOpen] = useState(false);
 
   const submitCreateCollection = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,6 +120,17 @@ export const Header: React.FC = () => {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'animate-spin text-emerald-600' : ''}`} />
             <span>{t.common.autoSync}: {autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
+          </button>
+        </Tooltip>
+
+        {/* Color Rules Configuration */}
+        <Tooltip content={t.common.colorConfig} position="bottom">
+          <button
+            onClick={() => setIsColorConfigOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
+          >
+            <Palette className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
+            <span>{t.common.colorConfig}</span>
           </button>
         </Tooltip>
 
@@ -219,6 +232,12 @@ export const Header: React.FC = () => {
       <CollectionManagerModal
         isOpen={isCollectionManagerOpen}
         onClose={() => setIsCollectionManagerOpen(false)}
+      />
+
+      {/* Color Config Modal */}
+      <ColorConfigModal
+        isOpen={isColorConfigOpen}
+        onClose={() => setIsColorConfigOpen(false)}
       />
     </header>
   );

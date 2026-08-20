@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Collection } from '../types';
+import { Collection, ColorRule } from '../types';
 import { Language, translations } from '../i18n/translations';
 import { 
   getCollections, createCollection, deleteCollection,
-  getAutoSyncStatus, toggleAutoSyncApi 
+  getAutoSyncStatus, toggleAutoSyncApi,
+  getColorRulesApi, createColorRuleApi, updateColorRuleApi, deleteColorRuleApi, resetColorRulesApi
 } from '../services/api';
 
 interface ToastMessage {
@@ -32,6 +33,13 @@ interface AppContextType {
   syncInterval: number;
   toggleAutoSync: (enable?: boolean, interval?: number) => Promise<void>;
   updateSyncInterval: (newInterval: number) => Promise<void>;
+  // Color Rules State & Actions
+  colorRules: ColorRule[];
+  refreshColorRules: () => Promise<void>;
+  saveColorRule: (rule: Partial<ColorRule>) => Promise<void>;
+  deleteColorRuleById: (id: number) => Promise<void>;
+  toggleColorRule: (id: number, enabled: boolean) => Promise<void>;
+  resetColorRulesDefault: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -184,8 +192,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Color Rules state & handlers
+  const [colorRules, setColorRules] = useState<ColorRule[]>([]);
+
+  const refreshColorRules = async () => {
+    try {
+      const rules = await getColorRulesApi();
+      setColorRules(rules);
+    } catch (e) {
+      console.error('Failed to load color rules:', e);
+    }
+  };
+
+  const saveColorRule = async (rule: Partial<ColorRule>) => {
+    try {
+      if (rule.id) {
+        await updateColorRuleApi(rule.id, rule);
+      } else {
+        await createColorRuleApi(rule);
+      }
+      await refreshColorRules();
+      addToast(t.common.success, 'success');
+    } catch (e: any) {
+      addToast(e.message || t.common.error, 'error');
+    }
+  };
+
+  const deleteColorRuleById = async (id: number) => {
+    try {
+      await deleteColorRuleApi(id);
+      await refreshColorRules();
+      addToast(t.common.success, 'success');
+    } catch (e: any) {
+      addToast(e.message || t.common.error, 'error');
+    }
+  };
+
+  const toggleColorRule = async (id: number, enabled: boolean) => {
+    try {
+      await updateColorRuleApi(id, { is_enabled: enabled });
+      setColorRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, is_enabled: enabled } : r))
+      );
+    } catch (e: any) {
+      addToast(e.message || t.common.error, 'error');
+    }
+  };
+
+  const resetColorRulesDefault = async () => {
+    try {
+      const reset = await resetColorRulesApi();
+      setColorRules(reset);
+      addToast(t.common.success, 'success');
+    } catch (e: any) {
+      addToast(e.message || t.common.error, 'error');
+    }
+  };
+
   useEffect(() => {
     refreshCollections();
+    refreshColorRules();
   }, []);
 
   return (
@@ -209,6 +275,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncInterval,
         toggleAutoSync,
         updateSyncInterval,
+        colorRules,
+        refreshColorRules,
+        saveColorRule,
+        deleteColorRuleById,
+        toggleColorRule,
+        resetColorRulesDefault,
       }}
     >
       {children}
