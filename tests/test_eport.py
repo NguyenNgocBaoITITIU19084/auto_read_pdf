@@ -1,6 +1,7 @@
 import pytest
 import sqlite3
 import os
+from datetime import datetime
 from unittest.mock import patch, MagicMock
 from src.eport_client import search_vessels, search_containers
 from src.database import (
@@ -411,4 +412,5 @@ def test_search_containers_client(mock_post):
     assert len(results) == 1
     assert results[0]["CONTAINERNO"] == "EMCU9914560"
     # Verify date is formatted properly
-    assert results[0]["EVENT_TIME"] == "2026-06-30 04:41:51"
+    expected_time = datetime.fromtimestamp(1782769311000 / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
+    assert results[0]["EVENT_TIME"] == expected_time
