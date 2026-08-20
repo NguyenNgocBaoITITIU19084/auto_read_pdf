@@ -116,17 +116,30 @@ def init_db():
                 containerno TEXT NOT NULL,
                 event_time TEXT,
                 event_type TEXT,
+                in_yard TEXT,
                 fel TEXT,
                 iso TEXT,
                 gross REAL,
+                container_gross REAL,
+                tare_wt REAL,
+                manifest_wt REAL,
+                gate_wt REAL,
+                gate_gross_wt REAL,
+                certified_weight REAL,
                 vgm TEXT,
                 category TEXT,
                 cust TEXT,
                 location TEXT,
+                stack TEXT,
+                temp TEXT,
+                haz TEXT,
+                load_to_vessel TEXT,
+                pod_destination TEXT,
                 truck_vessel TEXT,
                 trans_in TEXT,
                 trans_out TEXT,
-                gate_wt REAL,
+                cont_in_ts TEXT,
+                cont_out_ts TEXT,
                 line_oper TEXT,
                 im_exp TEXT,
                 bill_book TEXT,
@@ -135,6 +148,7 @@ def init_db():
                 item_seal_no TEXT,
                 custom_clearance_status TEXT,
                 infras_fee_status TEXT,
+                item_key INTEGER,
                 queried_at TEXT,
                 FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE,
                 UNIQUE(collection_id, containerno, event_time, event_type) ON CONFLICT REPLACE
@@ -148,8 +162,9 @@ def init_db():
                 collection_id INTEGER NOT NULL,
                 site_id TEXT NOT NULL,
                 container_no TEXT NOT NULL,
+                event_type TEXT DEFAULT '',
                 FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE,
-                UNIQUE(collection_id, site_id, container_no) ON CONFLICT IGNORE
+                UNIQUE(collection_id, site_id, container_no, event_type) ON CONFLICT IGNORE
             );
         """)
         
@@ -158,6 +173,35 @@ def init_db():
             conn.execute("ALTER TABLE bookings ADD COLUMN port_of_discharging TEXT;")
         except sqlite3.OperationalError:
             pass
+
+        # Database migration: add event_type to container_watchlists
+        try:
+            conn.execute("ALTER TABLE container_watchlists ADD COLUMN event_type TEXT DEFAULT '';")
+        except sqlite3.OperationalError:
+            pass
+
+        # Database migration for containers table columns
+        new_container_cols = [
+            ("in_yard", "TEXT"),
+            ("stack", "TEXT"),
+            ("temp", "TEXT"),
+            ("haz", "TEXT"),
+            ("load_to_vessel", "TEXT"),
+            ("pod_destination", "TEXT"),
+            ("cont_in_ts", "TEXT"),
+            ("cont_out_ts", "TEXT"),
+            ("gate_gross_wt", "REAL"),
+            ("container_gross", "REAL"),
+            ("manifest_wt", "REAL"),
+            ("tare_wt", "REAL"),
+            ("certified_weight", "REAL"),
+            ("item_key", "INTEGER"),
+        ]
+        for col_name, col_type in new_container_cols:
+            try:
+                conn.execute(f"ALTER TABLE containers ADD COLUMN {col_name} {col_type};")
+            except sqlite3.OperationalError:
+                pass
             
         conn.commit()
 
@@ -528,43 +572,85 @@ def remove_from_watchlist(watchlist_id: int):
         conn.commit()
 
 def insert_containers(col_id: int, containers: list[dict]) -> list[int]:
+    def _s(val, default=""):
+        if val is None:
+            return default
+        return str(val).strip()
+
+    def _f(val, default=0.0):
+        if val is None or val == "" or val == "null":
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
+    def _i(val, default=None):
+        if val is None or val == "" or val == "null":
+            return default
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return default
+
     queried_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     inserted_ids = []
     with get_connection() as conn:
         cursor = conn.cursor()
         for c in containers:
+            site_val = _s(c.get("SITE", c.get("site_id", ""))).upper()
+            cont_val = _s(c.get("CONTAINERNO", c.get("containerno", ""))).upper()
+            if not cont_val:
+                continue
+
             cursor.execute("""
                 INSERT OR REPLACE INTO containers (
-                    collection_id, site_id, containerno, event_time, event_type, fel, iso,
-                    gross, vgm, category, cust, location, truck_vessel, trans_in, trans_out,
-                    gate_wt, line_oper, im_exp, bill_book, cust_approval_date, note, item_seal_no,
-                    custom_clearance_status, infras_fee_status, queried_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    collection_id, site_id, containerno, event_time, event_type, in_yard, fel, iso,
+                    gross, container_gross, tare_wt, manifest_wt, gate_wt, gate_gross_wt, certified_weight,
+                    vgm, category, cust, location, stack, temp, haz, load_to_vessel, pod_destination,
+                    truck_vessel, trans_in, trans_out, cont_in_ts, cont_out_ts, line_oper, im_exp,
+                    bill_book, cust_approval_date, note, item_seal_no, custom_clearance_status,
+                    infras_fee_status, item_key, queried_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """, (
                 col_id,
-                c.get("SITE", c.get("site_id", "")),
-                c.get("CONTAINERNO", c.get("containerno", "")),
-                c.get("EVENT_TIME", c.get("event_time", "")),
-                c.get("EVENT_TYPE", c.get("event_type", "")),
-                c.get("FEL", c.get("fel", "")),
-                c.get("ISO", c.get("iso", "")),
-                c.get("GROSS", c.get("gross", 0.0)),
-                c.get("VGM", c.get("vgm", "")),
-                c.get("CATEGORY", c.get("category", "")),
-                c.get("CUST", c.get("cust", "")),
-                c.get("LOCATION", c.get("location", "")),
-                c.get("TRUCK_VESSEL", c.get("truck_vessel", "")),
-                c.get("TRANS_IN", c.get("trans_in", "")),
-                c.get("TRANS_OUT", c.get("trans_out", "")),
-                c.get("GATE_WT", c.get("gate_wt", 0.0)),
-                c.get("LINE_OPER", c.get("line_oper", "")),
-                c.get("IM_EXP", c.get("im_exp", "")),
-                c.get("BILL_BOOK", c.get("bill_book", "")),
-                c.get("CUST_APPROVAL_DATE", c.get("cust_approval_date", "")),
-                c.get("NOTE", c.get("note", "")),
-                c.get("ITEM_SEAL_NO", c.get("item_seal_no", "")),
-                c.get("CUSTOM_CLEARANCE_STATUS", c.get("custom_clearance_status", "")),
-                c.get("INFRAS_FEE_STATUS", c.get("infras_fee_status", "")),
+                site_val,
+                cont_val,
+                _s(c.get("EVENT_TIME", c.get("event_time", ""))),
+                _s(c.get("EVENT_TYPE", c.get("event_type", ""))),
+                _s(c.get("IN_YARD", c.get("in_yard", ""))),
+                _s(c.get("FEL", c.get("fel", ""))),
+                _s(c.get("ISO", c.get("iso", ""))),
+                _f(c.get("GROSS", c.get("gross", 0.0))),
+                _f(c.get("CONTAINER_GROSS", c.get("container_gross", 0.0))),
+                _f(c.get("TARE_WT", c.get("tare_wt", 0.0))),
+                _f(c.get("MANIFEST_WT", c.get("manifest_wt", 0.0))),
+                _f(c.get("GATE_WT", c.get("gate_wt", 0.0))),
+                _f(c.get("GATE_GROSS_WT", c.get("gate_gross_wt", 0.0))),
+                _f(c.get("CERTIFIED_WEIGHT", c.get("certified_weight", 0.0))),
+                _s(c.get("VGM", c.get("vgm", ""))),
+                _s(c.get("CATEGORY", c.get("category", ""))),
+                _s(c.get("CUST", c.get("cust", ""))),
+                _s(c.get("LOCATION", c.get("location", ""))),
+                _s(c.get("STACK", c.get("stack", ""))),
+                _s(c.get("TEMP", c.get("temp", ""))),
+                _s(c.get("HAZ", c.get("haz", ""))),
+                _s(c.get("LOAD_TO_VESSEL", c.get("load_to_vessel", ""))),
+                _s(c.get("POD_DESTINATION", c.get("pod_destination", ""))),
+                _s(c.get("TRUCK_VESSEL", c.get("truck_vessel", ""))),
+                _s(c.get("TRANS_IN", c.get("trans_in", ""))),
+                _s(c.get("TRANS_OUT", c.get("trans_out", ""))),
+                _s(c.get("CONT_IN_TS", c.get("cont_in_ts", ""))),
+                _s(c.get("CONT_OUT_TS", c.get("cont_out_ts", ""))),
+                _s(c.get("LINE_OPER", c.get("line_oper", ""))),
+                _s(c.get("IM_EXP", c.get("im_exp", ""))),
+                _s(c.get("BILL_BOOK", c.get("bill_book", ""))),
+                _s(c.get("CUST_APPROVAL_DATE", c.get("cust_approval_date", ""))),
+                _s(c.get("NOTE", c.get("note", ""))),
+                _s(c.get("ITEM_SEAL_NO", c.get("item_seal_no", ""))),
+                _s(c.get("CUSTOM_CLEARANCE_STATUS", c.get("custom_clearance_status", ""))),
+                _s(c.get("INFRAS_FEE_STATUS", c.get("infras_fee_status", ""))),
+                _i(c.get("ITEM_KEY", c.get("item_key", None))),
                 queried_at
             ))
             if cursor.lastrowid:
@@ -580,10 +666,12 @@ def get_containers(col_id: int, search_query: str = None, search_field: str = No
             q = f"%{search_query}%"
             if search_field and search_field != "all":
                 allowed_columns = {
-                    "site_id", "containerno", "event_time", "event_type", "fel", "iso", "gross",
-                    "vgm", "category", "cust", "location", "truck_vessel", "trans_in", "trans_out",
-                    "gate_wt", "line_oper", "im_exp", "bill_book", "cust_approval_date", "note",
-                    "item_seal_no", "custom_clearance_status", "infras_fee_status", "queried_at"
+                    "site_id", "containerno", "event_time", "event_type", "in_yard", "fel", "iso", "gross",
+                    "container_gross", "tare_wt", "manifest_wt", "gate_wt", "gate_gross_wt", "certified_weight",
+                    "vgm", "category", "cust", "location", "stack", "temp", "haz", "load_to_vessel", "pod_destination",
+                    "truck_vessel", "trans_in", "trans_out", "cont_in_ts", "cont_out_ts", "line_oper", "im_exp",
+                    "bill_book", "cust_approval_date", "note", "item_seal_no", "custom_clearance_status",
+                    "infras_fee_status", "item_key", "queried_at"
                 }
                 if search_field in allowed_columns:
                     query_str = f"SELECT * FROM containers WHERE collection_id = ? AND {search_field} LIKE ? ORDER BY queried_at DESC, id ASC;"
@@ -597,9 +685,10 @@ def get_containers(col_id: int, search_query: str = None, search_field: str = No
                     WHERE collection_id = ? AND (
                         site_id LIKE ? OR containerno LIKE ? OR event_type LIKE ? OR
                         location LIKE ? OR truck_vessel LIKE ? OR line_oper LIKE ? OR
-                        im_exp LIKE ? OR bill_book LIKE ? OR note LIKE ? OR item_seal_no LIKE ?
+                        im_exp LIKE ? OR bill_book LIKE ? OR note LIKE ? OR item_seal_no LIKE ? OR
+                        custom_clearance_status LIKE ? OR infras_fee_status LIKE ? OR pod_destination LIKE ?
                     ) ORDER BY queried_at DESC, id ASC;
-                """, (col_id, q, q, q, q, q, q, q, q, q, q))
+                """, (col_id, q, q, q, q, q, q, q, q, q, q, q, q, q))
         else:
             cursor.execute("SELECT * FROM containers WHERE collection_id = ? ORDER BY queried_at DESC, id ASC;", (col_id,))
         return [dict(row) for row in cursor.fetchall()]
@@ -636,12 +725,17 @@ def get_all_container_watchlists() -> list[dict]:
         cursor.execute("SELECT * FROM container_watchlists ORDER BY id ASC;")
         return [dict(row) for row in cursor.fetchall()]
 
-def add_to_container_watchlist(col_id: int, site_id: str, container_no: str):
+def add_to_container_watchlist(col_id: int, site_id: str, container_no: str, event_type: str = ""):
     with get_connection() as conn:
         conn.execute("""
-            INSERT OR IGNORE INTO container_watchlists (collection_id, site_id, container_no)
-            VALUES (?, ?, ?);
-        """, (col_id, site_id.strip(), container_no.strip().upper()))
+            INSERT OR IGNORE INTO container_watchlists (collection_id, site_id, container_no, event_type)
+            VALUES (?, ?, ?, ?);
+        """, (
+            col_id,
+            (site_id or "").strip().upper(),
+            (container_no or "").strip().upper(),
+            (event_type or "").strip().upper()
+        ))
         conn.commit()
 
 def remove_from_container_watchlist(watchlist_id: int):

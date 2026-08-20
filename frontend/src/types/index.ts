@@ -64,17 +64,30 @@ export interface ContainerInfo {
   containerno: string;
   event_time: string;
   event_type: string;
+  in_yard?: string;
   fel: string;
   iso: string;
   gross: number;
+  container_gross?: number;
+  tare_wt?: number;
+  manifest_wt?: number;
+  gate_wt?: number;
+  gate_gross_wt?: number;
+  certified_weight?: number;
   vgm: string;
   category: string;
   cust: string;
   location: string;
+  stack?: string;
+  temp?: string;
+  haz?: string;
+  load_to_vessel?: string;
+  pod_destination?: string;
   truck_vessel: string;
   trans_in: string;
   trans_out: string;
-  gate_wt: number;
+  cont_in_ts?: string;
+  cont_out_ts?: string;
   line_oper: string;
   im_exp: string;
   bill_book: string;
@@ -83,6 +96,7 @@ export interface ContainerInfo {
   item_seal_no: string;
   custom_clearance_status: string;
   infras_fee_status: string;
+  item_key?: number;
   queried_at: string;
   [key: string]: any;
 }
@@ -92,6 +106,7 @@ export interface ContainerWatchlist {
   collection_id: number;
   site_id: string;
   container_no: string;
+  event_type?: string;
 }
 
 export interface ColumnSetting {

@@ -57,20 +57,40 @@ async def sync_container_watchlists():
             key = (cw["collection_id"], cw["site_id"])
             if key not in by_col_and_site:
                 by_col_and_site[key] = []
-            by_col_and_site[key].append(cw["container_no"])
+            by_col_and_site[key].append(cw)
             
-        for (col_id, site_id), cont_list in by_col_and_site.items():
-            cont_str = ",".join(cont_list)
-            logger.info(f"[Auto-Sync Containers] Syncing {len(cont_list)} container(s) for Collection {col_id} at site '{site_id}': {cont_str}")
+        for (col_id, site_id), items in by_col_and_site.items():
+            unique_cont_nos = list(set([it["container_no"].strip().upper() for it in items if it.get("container_no")]))
+            if not unique_cont_nos:
+                continue
+            cont_str = ",".join(unique_cont_nos)
+            logger.info(f"[Auto-Sync Containers] Syncing {len(unique_cont_nos)} container(s) for Collection {col_id} at site '{site_id}': {cont_str}")
             try:
                 results = await asyncio.to_thread(search_containers, site_id, cont_str)
                 if results:
-                    await asyncio.to_thread(insert_containers, col_id, results)
-                    logger.info(f"[Auto-Sync Containers] ✅ Updated {len(results)} container event(s) for {cont_str}")
+                    # Filter results: Only keep results strictly matching watched container_no AND event_type (if specified)
+                    filtered_results = []
+                    for r in results:
+                        r_cont = str(r.get("CONTAINERNO", r.get("containerno", ""))).strip().upper()
+                        r_event = str(r.get("EVENT_TYPE", r.get("event_type", ""))).strip().upper()
+                        
+                        matches = any(
+                            it["container_no"].strip().upper() == r_cont and 
+                            (not it.get("event_type") or it["event_type"].strip().upper() == "ALL" or it["event_type"].strip().upper() == r_event)
+                            for it in items
+                        )
+                        if matches:
+                            filtered_results.append(r)
+
+                    if filtered_results:
+                        await asyncio.to_thread(insert_containers, col_id, filtered_results)
+                        logger.info(f"[Auto-Sync Containers] ✅ Updated {len(filtered_results)} container event(s) for {cont_str}")
+                    else:
+                        logger.info(f"[Auto-Sync Containers] ℹ️ No matching events found for watched event_types for {cont_str}")
                 else:
                     logger.warning(f"[Auto-Sync Containers] ⚠️ No container info found for {cont_str} at site '{site_id}'")
             except Exception as e:
-                logger.error(f"[Auto-Sync Containers] ❌ Error syncing containers {cont_list}: {e}")
+                logger.error(f"[Auto-Sync Containers] ❌ Error syncing containers {unique_cont_nos}: {e}")
         logger.info("[Auto-Sync Containers] 🎉 Completed syncing all container watchlists.")
     except Exception as e:
         logger.error(f"[Auto-Sync Containers] ❌ Fatal error in sync_container_watchlists: {e}")

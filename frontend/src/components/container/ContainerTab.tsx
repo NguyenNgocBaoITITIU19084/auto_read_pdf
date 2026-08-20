@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Box, Search, RefreshCw, Trash2, FileSpreadsheet, 
-  SlidersHorizontal, Eye, BookmarkPlus, BookmarkCheck, Copy
+  SlidersHorizontal, Eye, BookmarkPlus, BookmarkCheck, Copy, Filter
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ContainerInfo, ContainerWatchlist } from '../../types';
@@ -27,6 +27,9 @@ export const ContainerTab: React.FC = () => {
   const [querying, setQuerying] = useState(false);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
+  // Filter by event type
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>('ALL');
+
   // Pagination state
   const [pageSize, setPageSize] = useState<number>(() => {
     const saved = localStorage.getItem('container_page_size');
@@ -39,6 +42,8 @@ export const ContainerTab: React.FC = () => {
 
   const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_container_site_id') || 'CTL');
   const [containerNosInput, setContainerNosInput] = useState('');
+  const [isSearchByInYard, setIsSearchByInYard] = useState<boolean>(() => localStorage.getItem('last_container_is_in_yard') === 'true');
+  const [isSearchByBatch, setIsSearchByBatch] = useState<boolean>(() => localStorage.getItem('last_container_is_batch') === 'true');
 
   const [selectedContainer, setSelectedContainer] = useState<ContainerInfo | null>(null);
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
@@ -51,19 +56,39 @@ export const ContainerTab: React.FC = () => {
     { key: "containerno", label: t.container.columns["containerno"], visible: true },
     { key: "event_type", label: t.container.columns["event_type"], visible: true },
     { key: "event_time", label: t.container.columns["event_time"], visible: true },
+    { key: "in_yard", label: t.container.columns["in_yard"], visible: false },
     { key: "fel", label: t.container.columns["fel"], visible: true },
     { key: "iso", label: t.container.columns["iso"], visible: true },
-    { key: "category", label: t.container.columns["category"], visible: false },
     { key: "gross", label: t.container.columns["gross"], visible: true },
+    { key: "container_gross", label: t.container.columns["container_gross"], visible: false },
+    { key: "tare_wt", label: t.container.columns["tare_wt"], visible: false },
+    { key: "manifest_wt", label: t.container.columns["manifest_wt"], visible: false },
+    { key: "gate_wt", label: t.container.columns["gate_wt"], visible: false },
+    { key: "gate_gross_wt", label: t.container.columns["gate_gross_wt"], visible: false },
+    { key: "certified_weight", label: t.container.columns["certified_weight"], visible: false },
     { key: "vgm", label: t.container.columns["vgm"], visible: true },
+    { key: "category", label: t.container.columns["category"], visible: false },
+    { key: "cust", label: t.container.columns["cust"], visible: false },
     { key: "location", label: t.container.columns["location"], visible: true },
+    { key: "stack", label: t.container.columns["stack"], visible: false },
+    { key: "temp", label: t.container.columns["temp"], visible: false },
+    { key: "haz", label: t.container.columns["haz"], visible: false },
+    { key: "load_to_vessel", label: t.container.columns["load_to_vessel"], visible: false },
+    { key: "pod_destination", label: t.container.columns["pod_destination"], visible: false },
     { key: "truck_vessel", label: t.container.columns["truck_vessel"], visible: true },
+    { key: "trans_in", label: t.container.columns["trans_in"], visible: false },
+    { key: "trans_out", label: t.container.columns["trans_out"], visible: false },
+    { key: "cont_in_ts", label: t.container.columns["cont_in_ts"], visible: false },
+    { key: "cont_out_ts", label: t.container.columns["cont_out_ts"], visible: false },
+    { key: "line_oper", label: t.container.columns["line_oper"], visible: true },
     { key: "im_exp", label: t.container.columns["im_exp"], visible: true },
     { key: "bill_book", label: t.container.columns["bill_book"], visible: true },
+    { key: "cust_approval_date", label: t.container.columns["cust_approval_date"], visible: false },
     { key: "custom_clearance_status", label: t.container.columns["custom_clearance_status"], visible: true },
     { key: "infras_fee_status", label: t.container.columns["infras_fee_status"], visible: true },
-    { key: "note", label: t.container.columns["note"], visible: false },
-    { key: "item_seal_no", label: t.container.columns["item_seal_no"], visible: false },
+    { key: "item_seal_no", label: t.container.columns["item_seal_no"], visible: true },
+    { key: "note", label: t.container.columns["note"], visible: true },
+    { key: "item_key", label: t.container.columns["item_key"], visible: false },
     { key: "queried_at", label: t.container.columns["queried_at"], visible: true },
   ], [t]);
 
@@ -72,19 +97,39 @@ export const ContainerTab: React.FC = () => {
     "containerno": 130,
     "event_type": 130,
     "event_time": 140,
-    "fel": 60,
-    "iso": 70,
-    "category": 90,
-    "gross": 80,
-    "vgm": 80,
-    "location": 90,
-    "truck_vessel": 130,
-    "im_exp": 70,
-    "bill_book": 120,
-    "custom_clearance_status": 110,
-    "infras_fee_status": 110,
-    "note": 120,
-    "item_seal_no": 110,
+    "in_yard": 75,
+    "fel": 65,
+    "iso": 75,
+    "gross": 85,
+    "container_gross": 95,
+    "tare_wt": 80,
+    "manifest_wt": 85,
+    "gate_wt": 80,
+    "gate_gross_wt": 95,
+    "certified_weight": 90,
+    "vgm": 75,
+    "category": 85,
+    "cust": 75,
+    "location": 95,
+    "stack": 75,
+    "temp": 75,
+    "haz": 75,
+    "load_to_vessel": 90,
+    "pod_destination": 95,
+    "truck_vessel": 140,
+    "trans_in": 140,
+    "trans_out": 140,
+    "cont_in_ts": 140,
+    "cont_out_ts": 140,
+    "line_oper": 80,
+    "im_exp": 80,
+    "bill_book": 125,
+    "cust_approval_date": 140,
+    "custom_clearance_status": 120,
+    "infras_fee_status": 115,
+    "item_seal_no": 105,
+    "note": 180,
+    "item_key": 95,
     "queried_at": 140,
   }), []);
 
@@ -145,11 +190,42 @@ export const ContainerTab: React.FC = () => {
     loadWatchlist();
   }, [activeCollection, searchQuery, searchField]);
 
+  // Compute event counts across all containers in current collection
+  const eventCounts = useMemo(() => {
+    const counts: Record<string, number> = { ALL: containers.length };
+    containers.forEach((c) => {
+      const type = (c.event_type || '').trim().toUpperCase();
+      if (type) {
+        counts[type] = (counts[type] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [containers]);
+
+  // List of distinct event types found in data
+  const availableEventTypes = useMemo(() => {
+    const list = Object.keys(eventCounts).filter((k) => k !== 'ALL');
+    const preferred = ['UNLOAD', 'INGATE', 'OUTGATE', 'STACKING', 'LOAD'];
+    const sorted = [
+      ...preferred.filter((p) => list.includes(p)),
+      ...list.filter((l) => !preferred.includes(l))
+    ];
+    return sorted;
+  }, [eventCounts]);
+
+  // Filter containers by selected event type
+  const filteredContainers = useMemo(() => {
+    if (eventTypeFilter === 'ALL') return containers;
+    return containers.filter(
+      (c) => (c.event_type || '').trim().toUpperCase() === eventTypeFilter.toUpperCase()
+    );
+  }, [containers, eventTypeFilter]);
+
   const paginatedContainers = useMemo(() => {
-    if (pageSize >= containers.length || pageSize <= 0) return containers;
+    if (pageSize >= filteredContainers.length || pageSize <= 0) return filteredContainers;
     const start = (currentPage - 1) * pageSize;
-    return containers.slice(start, start + pageSize);
-  }, [containers, currentPage, pageSize]);
+    return filteredContainers.slice(start, start + pageSize);
+  }, [filteredContainers, currentPage, pageSize]);
 
   // Periodic polling when auto-sync is active to automatically reflect new container statuses
   useEffect(() => {
@@ -162,34 +238,54 @@ export const ContainerTab: React.FC = () => {
     return () => clearInterval(timer);
   }, [autoSyncEnabled, activeCollection, searchQuery, searchField]);
 
-  // Match a container item with watchlist
+  // Match a container item with watchlist strictly (by container_no, site_id, and event_type)
   const getWatchlistItem = (item: ContainerInfo): ContainerWatchlist | undefined => {
+    if (!item) return undefined;
     const itemNo = (item.containerno || '').trim().toUpperCase();
+    if (!itemNo) return undefined;
+
     const itemSite = (item.site_id || '').trim().toUpperCase();
+    const itemEvent = (item.event_type || '').trim().toUpperCase();
 
     return watchlist.find((w) => {
+      const wNo = (w.container_no || '').trim().toUpperCase();
+      if (!wNo || wNo !== itemNo) return false;
+
       const wSite = (w.site_id || '').trim().toUpperCase();
       if (wSite && itemSite && wSite !== itemSite) return false;
-      return (w.container_no || '').trim().toUpperCase() === itemNo;
+
+      const wEvent = (w.event_type || '').trim().toUpperCase();
+      if (wEvent && itemEvent && wEvent !== itemEvent) return false;
+
+      return true;
     });
   };
 
   // Toggle add/remove container from watchlist
   const handleToggleWatchlist = async (item: ContainerInfo) => {
     if (!activeCollection) return;
+    const cleanItemNo = (item.containerno || '').trim().toUpperCase();
+    if (!cleanItemNo) {
+      addToast('Không tìm thấy số Container hợp lệ', 'error');
+      return;
+    }
+    const cleanSite = (item.site_id || siteId || localStorage.getItem('last_container_site_id') || 'CTL').trim().toUpperCase();
+    const cleanEvent = (item.event_type || '').trim().toUpperCase();
+
     const matched = getWatchlistItem(item);
     try {
       if (matched) {
         await deleteContainerWatchlist(matched.id);
         setWatchlist((prev) => prev.filter((w) => w.id !== matched.id));
-        addToast(`Đã xóa container ${item.containerno} khỏi Watchlist!`, 'success');
+        addToast(`Đã xóa container ${cleanItemNo}${cleanEvent ? ` (${cleanEvent})` : ''} khỏi Watchlist!`, 'success');
       } else {
         await addContainerWatchlist(
           activeCollection.id,
-          item.site_id || siteId || localStorage.getItem('last_container_site_id') || 'CTL',
-          item.containerno
+          cleanSite,
+          cleanItemNo,
+          cleanEvent
         );
-        addToast(`Đã thêm container ${item.containerno} vào Watchlist!`, 'success');
+        addToast(`Đã thêm container ${cleanItemNo}${cleanEvent ? ` (${cleanEvent})` : ''} vào Watchlist!`, 'success');
         await loadWatchlist();
       }
     } catch (e: any) {
@@ -244,7 +340,13 @@ export const ContainerTab: React.FC = () => {
         .filter(Boolean)
         .join(',');
 
-      const res = await searchContainersApi(activeCollection.id, siteId, cleaned);
+      const res = await searchContainersApi(
+        activeCollection.id,
+        siteId,
+        cleaned,
+        isSearchByInYard,
+        isSearchByBatch
+      );
       if (res.count > 0) {
         addToast(`Tìm thấy ${res.count} kết quả tra cứu container!`, 'success');
       } else {
@@ -297,60 +399,91 @@ export const ContainerTab: React.FC = () => {
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Searcher Form */}
       <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
-        <form onSubmit={handleQueryEport} className="flex flex-wrap items-center gap-2.5">
-          <div className="w-52 shrink-0">
-            <select
-              value={siteId}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSiteId(val);
-                localStorage.setItem('last_container_site_id', val);
-              }}
-              className="w-full text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-primary-500"
+        <form onSubmit={handleQueryEport} className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="w-52 shrink-0">
+              <select
+                value={siteId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSiteId(val);
+                  localStorage.setItem('last_container_site_id', val);
+                }}
+                className="w-full text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="CTL">{t.vessel.siteCTL}</option>
+                <option value="GNL">{t.vessel.siteGNL}</option>
+                <option value="THP">{t.vessel.siteTHP}</option>
+                <option value="CMS">{t.vessel.siteCMS}</option>
+                <option value="IST">{t.vessel.siteIST}</option>
+                <option value="TNT">{t.vessel.siteTNT}</option>
+              </select>
+            </div>
+
+            <div className="flex-1 min-w-[240px]">
+              <input
+                type="text"
+                required
+                value={containerNosInput}
+                onChange={(e) => setContainerNosInput(e.target.value.toUpperCase())}
+                placeholder="Nhập danh sách số container (VD: TEMU1234567, TCLU7654321)..."
+                className="w-full text-xs font-medium uppercase bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={querying}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm transition-all shrink-0"
             >
-              <option value="CTL">{t.vessel.siteCTL}</option>
-              <option value="GNL">{t.vessel.siteGNL}</option>
-              <option value="THP">{t.vessel.siteTHP}</option>
-              <option value="CMS">{t.vessel.siteCMS}</option>
-              <option value="IST">{t.vessel.siteIST}</option>
-              <option value="TNT">{t.vessel.siteTNT}</option>
-            </select>
+              <Search className={`w-3.5 h-3.5 ${querying ? 'animate-spin' : ''}`} />
+              <span>{querying ? t.common.loading : t.container.queryBtn}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsWatchlistOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 dark:bg-primary-950/50 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 transition-colors ml-auto shrink-0"
+            >
+              <BookmarkPlus className="w-3.5 h-3.5" />
+              <span>{t.container.watchlistTitle}</span>
+            </button>
           </div>
 
-          <div className="flex-1 min-w-[240px]">
-            <input
-              type="text"
-              required
-              value={containerNosInput}
-              onChange={(e) => setContainerNosInput(e.target.value.toUpperCase())}
-              placeholder="Nhập danh sách số container (VD: TEMU1234567, TCLU7654321)..."
-              className="w-full text-xs font-medium uppercase bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-primary-500"
-            />
+          {/* Options: IsSearchByInYard & IsSearchByBatch */}
+          <div className="flex flex-wrap items-center gap-4 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-xs">
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-slate-700 dark:text-slate-300 font-medium">
+              <input
+                type="checkbox"
+                checked={isSearchByInYard}
+                onChange={(e) => {
+                  setIsSearchByInYard(e.target.checked);
+                  localStorage.setItem('last_container_is_in_yard', String(e.target.checked));
+                }}
+                className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 w-3.5 h-3.5 cursor-pointer"
+              />
+              <span title={t.container.searchByInYardTooltip}>{t.container.searchByInYard}</span>
+            </label>
+
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none text-slate-700 dark:text-slate-300 font-medium">
+              <input
+                type="checkbox"
+                checked={isSearchByBatch}
+                onChange={(e) => {
+                  setIsSearchByBatch(e.target.checked);
+                  localStorage.setItem('last_container_is_batch', String(e.target.checked));
+                }}
+                className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 w-3.5 h-3.5 cursor-pointer"
+              />
+              <span title={t.container.searchByBatchTooltip}>{t.container.searchByBatch}</span>
+            </label>
           </div>
-
-          <button
-            type="submit"
-            disabled={querying}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm transition-all shrink-0"
-          >
-            <Search className={`w-3.5 h-3.5 ${querying ? 'animate-spin' : ''}`} />
-            <span>{querying ? t.common.loading : t.container.queryBtn}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsWatchlistOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-50 dark:bg-primary-950/50 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 transition-colors ml-auto shrink-0"
-          >
-            <BookmarkPlus className="w-3.5 h-3.5" />
-            <span>{t.container.watchlistTitle}</span>
-          </button>
         </form>
       </div>
 
       {/* Controls: Filter & Table actions */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
-        <div className="flex items-center gap-2 flex-1 max-w-md">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
           <select
             value={searchField}
             onChange={(e) => setSearchField(e.target.value)}
@@ -358,13 +491,19 @@ export const ContainerTab: React.FC = () => {
           >
             <option value="all">{t.common.all}</option>
             <option value="containerno">{getColLabel("containerno", t.container.columns["containerno"])}</option>
+            <option value="event_type">{getColLabel("event_type", t.container.columns["event_type"])}</option>
             <option value="location">{getColLabel("location", t.container.columns["location"])}</option>
-            <option value="item_seal_no">{getColLabel("item_seal_no", t.container.columns["item_seal_no"])}</option>
+            <option value="truck_vessel">{getColLabel("truck_vessel", t.container.columns["truck_vessel"])}</option>
             <option value="line_oper">{getColLabel("line_oper", t.container.columns["line_oper"])}</option>
             <option value="bill_book">{getColLabel("bill_book", t.container.columns["bill_book"])}</option>
+            <option value="item_seal_no">{getColLabel("item_seal_no", t.container.columns["item_seal_no"])}</option>
+            <option value="custom_clearance_status">{getColLabel("custom_clearance_status", t.container.columns["custom_clearance_status"])}</option>
+            <option value="infras_fee_status">{getColLabel("infras_fee_status", t.container.columns["infras_fee_status"])}</option>
+            <option value="pod_destination">{getColLabel("pod_destination", t.container.columns["pod_destination"])}</option>
+            <option value="note">{getColLabel("note", t.container.columns["note"])}</option>
           </select>
 
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-[180px]">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -373,6 +512,31 @@ export const ContainerTab: React.FC = () => {
               placeholder={t.common.search}
               className="w-full pl-8 pr-3 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500"
             />
+          </div>
+
+          {/* Event Type Filter Dropdown */}
+          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 shrink-0">
+            <Filter className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400 shrink-0" />
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+              {t.container.filterByEvent || 'Tác nghiệp'}:
+            </span>
+            <select
+              value={eventTypeFilter}
+              onChange={(e) => {
+                setEventTypeFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="text-xs font-bold bg-transparent text-slate-800 dark:text-slate-100 border-none outline-none cursor-pointer pr-1"
+            >
+              <option value="ALL" className="bg-white dark:bg-slate-800">
+                {t.container.allEvents || 'Tất cả'} ({containers.length})
+              </option>
+              {availableEventTypes.map((type) => (
+                <option key={type} value={type} className="bg-white dark:bg-slate-800">
+                  {type} ({eventCounts[type] || 0})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -437,6 +601,66 @@ export const ContainerTab: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Quick Event Filter Pills */}
+      {containers.length > 0 && availableEventTypes.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 text-xs shrink-0 shadow-2xs">
+          <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1">
+            <Filter className="w-3 h-3 text-primary-500" />
+            <span>Lọc nhanh sự kiện:</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => { setEventTypeFilter('ALL'); setCurrentPage(1); }}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              eventTypeFilter === 'ALL'
+                ? 'bg-primary-600 text-white shadow-xs'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            <span>Tất cả</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+              eventTypeFilter === 'ALL'
+                ? 'bg-white/20 text-white'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 font-semibold'
+            }`}>
+              {containers.length}
+            </span>
+          </button>
+          {availableEventTypes.map((type) => {
+            const count = eventCounts[type] || 0;
+            const isActive = eventTypeFilter === type;
+            let pillColor = 'hover:bg-slate-100 dark:hover:bg-slate-700';
+            if (type.includes('UNLOAD')) pillColor = isActive ? 'bg-sky-600 text-white' : 'hover:bg-sky-50 dark:hover:bg-sky-950/40 text-sky-700 dark:text-sky-300';
+            else if (type.includes('INGATE')) pillColor = isActive ? 'bg-emerald-600 text-white' : 'hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300';
+            else if (type.includes('OUTGATE')) pillColor = isActive ? 'bg-amber-600 text-white' : 'hover:bg-amber-50 dark:hover:bg-amber-950/40 text-amber-700 dark:text-amber-300';
+            else if (type.includes('STACK')) pillColor = isActive ? 'bg-purple-600 text-white' : 'hover:bg-purple-50 dark:hover:bg-purple-950/40 text-purple-700 dark:text-purple-300';
+            else if (type.includes('LOAD')) pillColor = isActive ? 'bg-teal-600 text-white' : 'hover:bg-teal-50 dark:hover:bg-teal-950/40 text-teal-700 dark:text-teal-300';
+
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => { setEventTypeFilter(type); setCurrentPage(1); }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                  isActive
+                    ? `${pillColor} shadow-xs border-transparent`
+                    : `bg-white dark:bg-slate-800 ${pillColor} border-slate-200 dark:border-slate-700`
+                }`}
+              >
+                <span>{type}</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                  isActive
+                    ? 'bg-white/20 text-white'
+                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 font-semibold'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Container Table */}
       <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
@@ -585,6 +809,156 @@ export const ContainerTab: React.FC = () => {
                             );
                           }
 
+                          if (col.key === 'event_type') {
+                            const eType = String(val).toUpperCase();
+                            let badgeColor = 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+                            if (eType.includes('UNLOAD')) {
+                              badgeColor = 'bg-sky-100 text-sky-800 dark:bg-sky-950/80 dark:text-sky-300 border-sky-200 dark:border-sky-800';
+                            } else if (eType.includes('INGATE')) {
+                              badgeColor = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+                            } else if (eType.includes('OUTGATE')) {
+                              badgeColor = 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+                            } else if (eType.includes('STACK')) {
+                              badgeColor = 'bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 border-purple-200 dark:border-purple-800';
+                            } else if (eType.includes('LOAD')) {
+                              badgeColor = 'bg-teal-100 text-teal-800 dark:bg-teal-950/80 dark:text-teal-300 border-teal-200 dark:border-teal-800';
+                            }
+
+                            return (
+                              <td
+                                key={col.key}
+                                style={{
+                                  width: w ? `${w}px` : undefined,
+                                  maxWidth: w ? `${w}px` : undefined,
+                                }}
+                                className="py-1.5 px-2.5 truncate"
+                                title={`Tác nghiệp: ${String(val)}`}
+                              >
+                                {isNull ? (
+                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
+                                ) : (
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold border shadow-2xs ${badgeColor}`}>
+                                    {String(val)}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          }
+
+                          if (col.key === 'custom_clearance_status') {
+                            const isCleared = String(val).toUpperCase() === 'Y';
+                            const isNotCleared = String(val).toUpperCase() === 'N';
+                            return (
+                              <td
+                                key={col.key}
+                                style={{
+                                  width: w ? `${w}px` : undefined,
+                                  maxWidth: w ? `${w}px` : undefined,
+                                }}
+                                className="py-1.5 px-2.5 truncate"
+                                title={`Trạng thái HQ: ${String(val)}`}
+                              >
+                                {isNull ? (
+                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
+                                ) : isCleared ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                    Đã duyệt (Y)
+                                  </span>
+                                ) : isNotCleared ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                                    Chưa duyệt (N)
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-800 dark:text-slate-200 font-medium">{String(val)}</span>
+                                )}
+                              </td>
+                            );
+                          }
+
+                          if (col.key === 'infras_fee_status') {
+                            const isUnpaid = String(val) === '3';
+                            return (
+                              <td
+                                key={col.key}
+                                style={{
+                                  width: w ? `${w}px` : undefined,
+                                  maxWidth: w ? `${w}px` : undefined,
+                                }}
+                                className="py-1.5 px-2.5 truncate"
+                                title={`Phí hạ tầng: ${String(val)}`}
+                              >
+                                {isNull ? (
+                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
+                                ) : isUnpaid ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                    Chưa đóng ({String(val)})
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                    {String(val)}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          }
+
+                          if (col.key === 'fel') {
+                            const isFull = String(val).toUpperCase() === 'F';
+                            const isEmpty = String(val).toUpperCase() === 'E';
+                            return (
+                              <td
+                                key={col.key}
+                                style={{
+                                  width: w ? `${w}px` : undefined,
+                                  maxWidth: w ? `${w}px` : undefined,
+                                }}
+                                className="py-1.5 px-2.5 truncate"
+                                title={`F/E: ${String(val)}`}
+                              >
+                                {isNull ? (
+                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
+                                ) : isFull ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                    F
+                                  </span>
+                                ) : isEmpty ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                                    E
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-800 dark:text-slate-200 font-medium">{String(val)}</span>
+                                )}
+                              </td>
+                            );
+                          }
+
+                          if (col.key === 'vgm') {
+                            const hasVgm = String(val).toUpperCase() === 'Y';
+                            return (
+                              <td
+                                key={col.key}
+                                style={{
+                                  width: w ? `${w}px` : undefined,
+                                  maxWidth: w ? `${w}px` : undefined,
+                                }}
+                                className="py-1.5 px-2.5 truncate"
+                                title={`VGM: ${String(val)}`}
+                              >
+                                {isNull ? (
+                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">-</span>
+                                ) : hasVgm ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                                    Y
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                    {String(val)}
+                                  </span>
+                                )}
+                              </td>
+                            );
+                          }
+
                           return (
                             <td
                               key={col.key}
@@ -662,7 +1036,7 @@ export const ContainerTab: React.FC = () => {
         {/* Pagination Footer */}
         <Pagination
           currentPage={currentPage}
-          totalItems={containers.length}
+          totalItems={filteredContainers.length}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
           onPageSizeChange={(newSize) => {
@@ -689,7 +1063,7 @@ export const ContainerTab: React.FC = () => {
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
-        data={containers}
+        data={filteredContainers}
         allColumns={[
           { key: "STT", label: t.container.columns["STT"] },
           ...columns.map((c) => ({ key: c.key, label: c.label })),

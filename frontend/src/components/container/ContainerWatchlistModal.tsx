@@ -24,6 +24,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
 
   const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_container_site_id') || 'CTL');
   const [containerNo, setContainerNo] = useState('');
+  const [eventType, setEventType] = useState<string>('UNLOAD');
 
   const loadWatchlist = async () => {
     if (!activeCollection) return;
@@ -50,7 +51,12 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
     if (!activeCollection || !containerNo.trim()) return;
     try {
       localStorage.setItem('last_container_site_id', siteId);
-      await addContainerWatchlist(activeCollection.id, siteId, containerNo.trim().toUpperCase());
+      await addContainerWatchlist(
+        activeCollection.id,
+        siteId.trim().toUpperCase(),
+        containerNo.trim().toUpperCase(),
+        eventType.trim().toUpperCase()
+      );
       addToast(t.common.success, 'success');
       setContainerNo('');
       await loadWatchlist();
@@ -94,7 +100,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
 
         {/* Form Add */}
         <form onSubmit={handleAdd} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-3">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 uppercase mb-1">
                 {t.common.site}
@@ -116,7 +122,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
                 <option value="TNT">{t.vessel.siteTNT}</option>
               </select>
             </div>
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <label className="block text-[11px] font-semibold text-slate-500 uppercase mb-1">
                 Số Container
               </label>
@@ -128,6 +134,23 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
                 placeholder="VD: TEMU1234567"
                 className="w-full text-xs uppercase font-semibold bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 focus:ring-2 focus:ring-primary-500"
               />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 uppercase mb-1">
+                Tác nghiệp
+              </label>
+              <select
+                value={eventType}
+                onChange={(e) => setEventType(e.target.value)}
+                className="w-full text-xs font-semibold bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-2 focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="UNLOAD">UNLOAD</option>
+                <option value="INGATE">INGATE</option>
+                <option value="OUTGATE">OUTGATE</option>
+                <option value="STACKING">STACKING</option>
+                <option value="LOAD">LOAD</option>
+                <option value="ALL">Tất cả</option>
+              </select>
             </div>
           </div>
           <button
@@ -165,13 +188,18 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
                   key={item.id}
                   className="flex items-center justify-between px-3.5 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5">
                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                       {item.site_id}
                     </span>
                     <span className="text-xs font-mono font-bold text-slate-900 dark:text-slate-100">
                       {item.container_no}
                     </span>
+                    {item.event_type && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-800">
+                        {item.event_type}
+                      </span>
+                    )}
                   </div>
                   <button
                     type="button"

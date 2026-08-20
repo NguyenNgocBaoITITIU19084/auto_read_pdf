@@ -21,9 +21,17 @@ def list_containers(
 
 @router.post("/search")
 def query_containers(payload: ContainerSearchRequest):
-    logger.info(f"[API /containers/search] User searching: site='{payload.site_id}', containers='{payload.container_nos}', collection_id={payload.collection_id}")
+    logger.info(
+        f"[API /containers/search] User searching: site='{payload.site_id}', containers='{payload.container_nos}', "
+        f"is_in_yard={payload.is_search_by_in_yard}, is_batch={payload.is_search_by_batch}, collection_id={payload.collection_id}"
+    )
     try:
-        results = search_containers(payload.site_id, payload.container_nos)
+        results = search_containers(
+            payload.site_id,
+            payload.container_nos,
+            is_search_by_in_yard=bool(payload.is_search_by_in_yard),
+            is_search_by_batch=bool(payload.is_search_by_batch)
+        )
         if results:
             insert_containers(payload.collection_id, results)
             logger.info(f"[API /containers/search] ✅ Found and saved {len(results)} container event(s)")
@@ -56,7 +64,12 @@ def list_container_watchlist(collection_id: int = Query(...)):
 
 @router.post("/watchlist")
 def add_container_watchlist_item(payload: ContainerWatchlistAddRequest):
-    add_to_container_watchlist(payload.collection_id, payload.site_id, payload.container_no)
+    add_to_container_watchlist(
+        payload.collection_id,
+        payload.site_id,
+        payload.container_no,
+        payload.event_type or ""
+    )
     return {"status": "success"}
 
 @router.delete("/watchlist/{watchlist_id}")
@@ -75,16 +88,34 @@ def sync_collection_container_watchlist(collection_id: int = Query(...)):
         site = item["site_id"]
         if site not in by_site:
             by_site[site] = []
-        by_site[site].append(item["container_no"])
+        by_site[site].append(item)
         
     updated_count = 0
     errors = []
-    for site, cont_nos in by_site.items():
+    for site, items in by_site.items():
+        unique_cont_nos = list(set([it["container_no"].strip().upper() for it in items if it.get("container_no")]))
+        if not unique_cont_nos:
+            continue
         try:
-            res = search_containers(site, ",".join(cont_nos))
+            res = search_containers(site, ",".join(unique_cont_nos))
             if res:
-                insert_containers(collection_id, res)
-                updated_count += len(res)
+                # Filter results to strictly match watched container_no AND event_type (if specified)
+                filtered_res = []
+                for r in res:
+                    r_cont = str(r.get("CONTAINERNO", r.get("containerno", ""))).strip().upper()
+                    r_event = str(r.get("EVENT_TYPE", r.get("event_type", ""))).strip().upper()
+                    
+                    matches = any(
+                        it["container_no"].strip().upper() == r_cont and 
+                        (not it.get("event_type") or it["event_type"].strip().upper() == "ALL" or it["event_type"].strip().upper() == r_event)
+                        for it in items
+                    )
+                    if matches:
+                        filtered_res.append(r)
+                
+                if filtered_res:
+                    insert_containers(collection_id, filtered_res)
+                    updated_count += len(filtered_res)
         except Exception as e:
             errors.append(f"Site {site}: {e}")
             

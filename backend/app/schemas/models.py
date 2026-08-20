@@ -45,11 +45,14 @@ class ContainerSearchRequest(BaseModel):
     collection_id: int
     site_id: str
     container_nos: str
+    is_search_by_in_yard: Optional[bool] = False
+    is_search_by_batch: Optional[bool] = False
 
 class ContainerWatchlistAddRequest(BaseModel):
     collection_id: int
     site_id: str
     container_no: str
+    event_type: Optional[str] = ""
 
 class ExportExcelRequest(BaseModel):
     data: List[dict]

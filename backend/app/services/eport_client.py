@@ -204,7 +204,12 @@ def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[d
         logger.error(f"❌ [ePort API ERROR] Failed to connect to ePort ({elapsed_ms}ms): {e}")
         raise ConnectionError(f"Không thể kết nối tới máy chủ ePort: {e}")
 
-def search_containers(site_id: str, container_nos: str) -> list[dict]:
+def search_containers(
+    site_id: str,
+    container_nos: str,
+    is_search_by_in_yard: bool = False,
+    is_search_by_batch: bool = False
+) -> list[dict]:
     """
     Call the Saigon Newport ePort API to search for container information.
     """
@@ -215,13 +220,15 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
     payload = {
         "SITE_ID": site_query,
         "SearchContainerNos": cleaned_conts,
-        "IsSearchByInYard": True,
-        "IsSearchByBatch": False
+        "IsSearchByInYard": bool(is_search_by_in_yard),
+        "IsSearchByBatch": bool(is_search_by_batch)
     }
     headers = {
         "Content-Type": "application/json; charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
         "Accept": "*/*",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://eport.saigonnewport.com.vn",
         "Referer": "https://eport.saigonnewport.com.vn/ContainerInformation"
     }
     
@@ -231,6 +238,8 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
         f"   URL: {url}\n"
         f"   Site ID: '{site_query}'\n"
         f"   Containers: '{cleaned_conts}'\n"
+        f"   IsSearchByInYard: {is_search_by_in_yard}\n"
+        f"   IsSearchByBatch: {is_search_by_batch}\n"
         f"   Request Payload: {json.dumps(payload, ensure_ascii=False)}\n"
         f"======================================================="
     )
@@ -265,12 +274,18 @@ def search_containers(site_id: str, container_nos: str) -> list[dict]:
                 for k, v in item.items():
                     if isinstance(v, str):
                         val_str = v.strip()
-                        if val_str.startswith("/Date(") and val_str.endswith(")/"):
+                        if "/Date(" in val_str:
                             cleaned_item[k] = parse_eport_date(val_str)
                         else:
                             cleaned_item[k] = val_str
                     else:
                         cleaned_item[k] = v
+                        
+                # Clean HTML tags in NOTE if present (e.g. </br>, <br/>, <br>)
+                if "NOTE" in cleaned_item and isinstance(cleaned_item["NOTE"], str):
+                    cleaned_note = re.sub(r"<\s*/?\s*br\s*/?\s*>", "\n", cleaned_item["NOTE"], flags=re.IGNORECASE)
+                    cleaned_item["NOTE"] = cleaned_note.strip()
+
                 cleaned_data.append(cleaned_item)
                 
             if cleaned_data:

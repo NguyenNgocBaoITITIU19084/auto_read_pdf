@@ -119,11 +119,19 @@ export const getContainers = async (collectionId: number, query?: string, field?
   return res.data;
 };
 
-export const searchContainersApi = async (collectionId: number, siteId: string, containerNos: string): Promise<any> => {
+export const searchContainersApi = async (
+  collectionId: number,
+  siteId: string,
+  containerNos: string,
+  isSearchByInYard: boolean = false,
+  isSearchByBatch: boolean = false
+): Promise<any> => {
   const res = await apiClient.post('/containers/search', {
     collection_id: collectionId,
     site_id: siteId,
     container_nos: containerNos,
+    is_search_by_in_yard: isSearchByInYard,
+    is_search_by_batch: isSearchByBatch,
   });
   return res.data;
 };
@@ -145,11 +153,12 @@ export const getContainerWatchlist = async (collectionId: number): Promise<Conta
   return res.data;
 };
 
-export const addContainerWatchlist = async (collectionId: number, siteId: string, containerNo: string): Promise<void> => {
+export const addContainerWatchlist = async (collectionId: number, siteId: string, containerNo: string, eventType?: string): Promise<void> => {
   await apiClient.post('/containers/watchlist', {
     collection_id: collectionId,
     site_id: siteId,
     container_no: containerNo,
+    event_type: eventType || '',
   });
 };
 
