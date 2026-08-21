@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 const { startPythonBackend, stopPythonBackend, waitForBackend } = require('./py_manager');
 
@@ -27,6 +27,13 @@ async function createWindow() {
   const backendReady = await waitForBackend();
   if (!backendReady) {
     console.error('Failed to connect to Python backend server');
+    if (!isDev) {
+      dialog.showErrorBox(
+        'Backend Initialization Error',
+        'Không thể khởi động dịch vụ xử lý dữ liệu (FastAPI Backend).\nVui lòng kiểm tra file log tại:\n' +
+        path.join(app.getPath('userData'), 'backend.log')
+      );
+    }
   }
 
   if (isDev) {

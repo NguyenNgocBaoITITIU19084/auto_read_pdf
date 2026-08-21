@@ -78,48 +78,65 @@ async function startPythonBackend() {
   const rootDir = path.join(__dirname, '..');
   const isPackaged = app ? app.isPackaged : false;
   const userDataDir = app ? app.getPath('userData') : rootDir;
-  
+  if (!fs.existsSync(userDataDir)) {
+    try {
+      fs.mkdirSync(userDataDir, { recursive: true });
+    } catch (e) {
+      console.error('[Python Manager] Failed to create userData directory:', e);
+    }
+  }
+
   // Ensure fresh, writable user database path (no pre-packaged sample DB)
   const dbPath = process.env.DB_PATH || (isPackaged 
     ? path.join(userDataDir, 'booking_data.db') 
     : path.join(rootDir, 'backend', 'booking_data.db'));
 
+  const logFilePath = path.join(userDataDir, 'backend.log');
+  const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+
   console.log(`[Python Manager] Starting Python backend using: ${pythonPath}`);
   console.log(`[Python Manager] Target SQLite DB Path: ${dbPath}`);
+  console.log(`[Python Manager] Backend Log Path: ${logFilePath}`);
+
+  const spawnOptions = {
+    cwd: pythonPath.includes('backend_dist') ? path.dirname(pythonPath) : rootDir,
+    windowsHide: true,
+    env: { 
+      ...process.env, 
+      PORT: String(BACKEND_PORT), 
+      PYTHONPATH: rootDir,
+      DB_PATH: dbPath,
+    },
+  };
 
   // If using packaged binary directly
   if (pythonPath.includes('backend_dist')) {
-    pyProcess = spawn(pythonPath, [], {
-      cwd: path.dirname(pythonPath),
-      env: { 
-        ...process.env, 
-        PORT: String(BACKEND_PORT),
-        DB_PATH: dbPath,
-      },
-    });
+    pyProcess = spawn(pythonPath, [], spawnOptions);
   } else {
     // Run module backend.app.main
-    pyProcess = spawn(pythonPath, ['-m', 'backend.app.main'], {
-      cwd: rootDir,
-      env: { 
-        ...process.env, 
-        PORT: String(BACKEND_PORT), 
-        PYTHONPATH: rootDir,
-        DB_PATH: dbPath,
-      },
-    });
+    pyProcess = spawn(pythonPath, ['-m', 'backend.app.main'], spawnOptions);
   }
 
+  pyProcess.on('error', (err) => {
+    console.error(`[Python Backend Spawn Error]: ${err.message}`);
+    logStream.write(`\n[Spawn Error ${new Date().toISOString()}]: ${err.stack || err.message}\n`);
+  });
+
   pyProcess.stdout.on('data', (data) => {
-    console.log(`[Python Backend]: ${data.toString().trim()}`);
+    const text = data.toString();
+    console.log(`[Python Backend]: ${text.trim()}`);
+    logStream.write(`[STDOUT ${new Date().toISOString()}]: ${text}`);
   });
 
   pyProcess.stderr.on('data', (data) => {
-    console.error(`[Python Backend Error]: ${data.toString().trim()}`);
+    const text = data.toString();
+    console.error(`[Python Backend Error]: ${text.trim()}`);
+    logStream.write(`[STDERR ${new Date().toISOString()}]: ${text}`);
   });
 
   pyProcess.on('close', (code) => {
     console.log(`[Python Backend] Exited with code ${code}`);
+    logStream.write(`[EXIT ${new Date().toISOString()}]: Exited with code ${code}\n`);
     pyProcess = null;
   });
 
@@ -131,7 +148,7 @@ function stopPythonBackend() {
     console.log('[Python Manager] Terminating Python backend process...');
     try {
       if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', pyProcess.pid, '/f', '/t']);
+        spawn('taskkill', ['/pid', String(pyProcess.pid), '/f', '/t'], { windowsHide: true });
       } else {
         pyProcess.kill('SIGTERM');
       }

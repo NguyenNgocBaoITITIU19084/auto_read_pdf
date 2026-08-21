@@ -15,7 +15,13 @@ logging.basicConfig(
     ],
     force=True
 )
-logger = logging.getLogger("backend.main")
+import os
+from pathlib import Path
+
+# Ensure project root is in sys.path (needed for standalone PyInstaller builds and direct module execution)
+project_root = Path(__file__).resolve().parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from backend.app.core.config import BACKEND_HOST, BACKEND_PORT
 from backend.app.core.database import init_db, get_collections, create_collection
@@ -71,4 +77,11 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 
 if __name__ == "__main__":
-    uvicorn.run("backend.app.main:app", host=BACKEND_HOST, port=BACKEND_PORT, reload=True)
+    import multiprocessing
+    multiprocessing.freeze_support()
+    
+    is_frozen = getattr(sys, "frozen", False)
+    logger.info(f"Starting backend server (frozen={is_frozen}) on {BACKEND_HOST}:{BACKEND_PORT}")
+    
+    uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT, reload=False, log_level="info")
+

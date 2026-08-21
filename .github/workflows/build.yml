@@ -55,14 +55,7 @@ jobs:
       - name: 🐍 Build Standalone Python Backend Executable
         run: |
           export PYINSTALLER_CONFIG_DIR="$(pwd)/.pyinstaller_cache"
-          pyinstaller --noconfirm --onedir --name backend_app --clean \
-            --hidden-import=uvicorn.logging \
-            --hidden-import=uvicorn.loops \
-            --hidden-import=uvicorn.loops.auto \
-            --hidden-import=uvicorn.protocols \
-            --hidden-import=uvicorn.protocols.http \
-            --hidden-import=uvicorn.protocols.http.auto \
-            backend/app/main.py
+          pyinstaller backend_app.spec --noconfirm --clean
 
       - name: ⚡ Package macOS App with Electron Builder
         run: npx electron-builder --mac
@@ -118,14 +111,7 @@ jobs:
 
       - name: 🐍 Build Standalone Python Backend Executable
         run: |
-          pyinstaller --noconfirm --onedir --name backend_app --clean `
-            --hidden-import=uvicorn.logging `
-            --hidden-import=uvicorn.loops `
-            --hidden-import=uvicorn.loops.auto `
-            --hidden-import=uvicorn.protocols `
-            --hidden-import=uvicorn.protocols.http `
-            --hidden-import=uvicorn.protocols.http.auto `
-            backend/app/main.py
+          pyinstaller backend_app.spec --noconfirm --clean
 
       - name: ⚡ Package Windows App with Electron Builder
         run: npx electron-builder --win --x64
@@ -141,12 +127,12 @@ jobs:
           if-no-files-found: error
 
   # ==========================================================
-  # 3. Automatic GitHub Release on Tag (v*)
+  # 3. Automatic GitHub Release / Pre-Release Download
   # ==========================================================
   release:
-    name: Publish GitHub Release
+    name: Publish GitHub Release & Direct Download Links
     needs: [build-macos, build-windows]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -163,10 +149,14 @@ jobs:
           name: AutoReadPDF-Windows
           path: release_assets/
 
-      - name: 🚀 Create GitHub Release
+      - name: 🚀 Publish Direct Download Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release_assets/*
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v2.0.0-latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Auto Read PDF Pro v2.0 (Latest Build)' }}
+          files: release_assets/**/*
           draft: false
-          prerelease: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
