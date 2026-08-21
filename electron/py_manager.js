@@ -41,19 +41,24 @@ function getPythonPath() {
 
 function checkHealth() {
   return new Promise((resolve) => {
-    http.get(HEALTH_URL, (res) => {
+    const req = http.get(HEALTH_URL, (res) => {
       if (res.statusCode === 200) {
         resolve(true);
       } else {
         resolve(false);
       }
-    }).on('error', () => {
+    });
+    req.on('error', () => {
+      resolve(false);
+    });
+    req.setTimeout(800, () => {
+      req.destroy();
       resolve(false);
     });
   });
 }
 
-async function waitForBackend(maxRetries = 40, delayMs = 500) {
+async function waitForBackend(maxRetries = 40, delayMs = 1000) {
   for (let i = 0; i < maxRetries; i++) {
     const isHealthy = await checkHealth();
     if (isHealthy) {

@@ -28,10 +28,21 @@ async function createWindow() {
   if (!backendReady) {
     console.error('Failed to connect to Python backend server');
     if (!isDev) {
+      const fs = require('fs');
+      const logPath = path.join(app.getPath('userData'), 'backend.log');
+      let logSnippet = '';
+      try {
+        if (fs.existsSync(logPath)) {
+          const raw = fs.readFileSync(logPath, 'utf8');
+          logSnippet = raw.slice(-1200).trim();
+        }
+      } catch (e) {}
+
       dialog.showErrorBox(
         'Backend Initialization Error',
-        'Không thể khởi động dịch vụ xử lý dữ liệu (FastAPI Backend).\nVui lòng kiểm tra file log tại:\n' +
-        path.join(app.getPath('userData'), 'backend.log')
+        'Không thể khởi động dịch vụ xử lý dữ liệu (FastAPI Backend).\n\n' +
+        (logSnippet ? 'Chi tiết lỗi:\n' + logSnippet + '\n\n' : '') +
+        'File log đầy đủ tại:\n' + logPath
       );
     }
   }

@@ -15,6 +15,8 @@ logging.basicConfig(
     ],
     force=True
 )
+logger = logging.getLogger("backend.main")
+
 import os
 from pathlib import Path
 
