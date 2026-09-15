@@ -16,6 +16,7 @@ import { BookingDetailModal } from './BookingDetailModal';
 import { BookingFormModal } from './BookingFormModal';
 import { ImageBookingModal } from './ImageBookingModal';
 import { QuickVesselSearch } from './QuickVesselSearch';
+import { BulkVesselLookupModal, BulkVesselLookupMode } from './BulkVesselLookupModal';
 import { ResizableTh } from '../common/ResizableTh';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -217,6 +218,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
   const [quickVesselBooking, setQuickVesselBooking] = useState<Booking | null>(null);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
+  const [isBulkVesselLookupOpen, setIsBulkVesselLookupOpen] = useState(false);
   const [bookingForm, setBookingForm] = useState<{ mode: 'create' | 'edit'; booking: Booking | null } | null>(null);
 
   // Bulk action state
@@ -537,7 +539,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     );
   };
 
-  const handleBulkVesselLookup = async () => {
+  const handleBulkVesselLookup = async (mode: BulkVesselLookupMode = 'auto') => {
     if (!activeCollection || vesselLookupProgress) return;
     const collectionId = activeCollection.id;
     let fallbackSite = 'CTL';
@@ -545,6 +547,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       fallbackSite = localStorage.getItem('last_vessel_site_id') || 'CTL';
     } catch {
       /* ignore */
+    }
+
+    if (mode !== 'auto' && mode.site) {
+      try {
+        localStorage.setItem('last_vessel_site_id', mode.site);
+      } catch {
+        /* ignore */
+      }
     }
 
     const rows = await resolveSelectedRows();
@@ -557,7 +567,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         skipped += 1;
         return;
       }
-      const site = guessSiteFromDepot(b["Full return CY"]) || fallbackSite;
+      const site = mode === 'auto' ? (guessSiteFromDepot(b["Full return CY"]) || fallbackSite) : mode.site;
       const key = vesselLookupKey(site, name, voyage);
       if (!targets.has(key)) targets.set(key, { site, name, voyage });
     });
@@ -614,7 +624,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         ? tf(t.booking.bulkActions.lookupProgress, vesselLookupProgress)
         : t.booking.bulkActions.lookupVessels,
       icon: Ship,
-      onClick: handleBulkVesselLookup,
+      onClick: () => setIsBulkVesselLookupOpen(true),
       loading: !!vesselLookupProgress,
     },
     {
@@ -950,6 +960,13 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           selection.clear();
           if (!result.copy) loadData('refresh');
         }}
+      />
+
+      <BulkVesselLookupModal
+        isOpen={isBulkVesselLookupOpen}
+        onClose={() => setIsBulkVesselLookupOpen(false)}
+        selectedCount={selection.count}
+        onStart={(mode) => handleBulkVesselLookup(mode)}
       />
 
       <ColumnConfigModal

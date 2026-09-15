@@ -408,6 +408,17 @@ export const translations = {
         lookupSummary: "Tra tàu xong {total} tàu/chuyến: {found} tìm thấy, {notFound} không có trên ePort, {errors} lỗi",
         lookupSkipped: "{count} booking không có tên tàu đã bỏ qua"
       },
+      bulkVesselLookup: {
+        title: "Tra tàu hàng loạt",
+        selectedCount: "{count} booking đã chọn",
+        modeAuto: "Tự động theo bãi trả rỗng",
+        modeAutoDesc: "Đoán cảng theo \"Full return CY\" của từng dòng, dùng cảng đã chọn lần trước hoặc CTL nếu không đoán được.",
+        modeSite: "Chọn 1 cảng cho tất cả",
+        modeSiteDesc: "Dùng đúng 1 cảng này để tra cứu cho toàn bộ booking đã chọn, bỏ qua việc đoán theo bãi trả rỗng.",
+        siteLabel: "Cảng:",
+        start: "Bắt đầu tra cứu",
+        cancel: "Huỷ"
+      },
       quickVessel: {
         button: "Tra tàu",
         rowTooltip: "Tra lịch tàu nhanh trên ePort",
@@ -1155,6 +1166,17 @@ export const translations = {
         lookupNoVessel: "The selected bookings have no vessel name to look up",
         lookupSummary: "Looked up {total} vessel/voyage(s): {found} found, {notFound} not on ePort, {errors} error(s)",
         lookupSkipped: "Skipped {count} booking(s) without a vessel name"
+      },
+      bulkVesselLookup: {
+        title: "Bulk vessel lookup",
+        selectedCount: "{count} booking(s) selected",
+        modeAuto: "Automatic by empty return depot",
+        modeAutoDesc: "Guess the port from each row's \"Full return CY\", falling back to the last used port or CTL if it can't be guessed.",
+        modeSite: "Pick one port for all",
+        modeSiteDesc: "Use this exact port to look up every selected booking, ignoring the depot guess.",
+        siteLabel: "Port:",
+        start: "Start lookup",
+        cancel: "Cancel"
       },
       quickVessel: {
         button: "Look up vessel",
