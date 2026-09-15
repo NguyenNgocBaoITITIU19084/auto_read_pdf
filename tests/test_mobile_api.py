@@ -80,6 +80,62 @@ class TestIndexPage:
         assert resp.headers["x-content-type-options"] == "nosniff"
 
 
+class TestIndexPageStructure:
+    """Pin the HTML structure of the real capture page (Task 5) so a future
+    edit can't silently drop the camera input or break the JS wiring. These
+    tests can't execute the page's JS (no browser in pytest) -- they only
+    check the served markup/script text.
+    """
+
+    def test_camera_input_uses_capture_environment(self, client):
+        html = client.get("/").text
+        assert 'capture="environment"' in html
+        assert 'accept="image/*"' in html
+
+    def test_secondary_picker_input_allows_multiple_no_capture(self, client):
+        html = client.get("/").text
+        assert 'id="pickInput"' in html
+        pick_input_start = html.index('id="pickInput"')
+        # Scan back to the start of this <input ...> tag to check its
+        # attributes without also matching the capture input above it.
+        tag_start = html.rindex("<input", 0, pick_input_start)
+        tag_end = html.index(">", tag_start)
+        tag = html[tag_start:tag_end]
+        assert "multiple" in tag
+        assert "capture=" not in tag
+
+    def test_capture_and_pick_buttons_present(self, client):
+        html = client.get("/").text
+        assert 'id="captureBtn"' in html
+        assert 'id="pickBtn"' in html
+        assert 'id="captureInput"' in html
+
+    def test_script_references_api_routes(self, client):
+        html = client.get("/").text
+        assert "<script>" in html
+        assert "/api/pair" in html
+        assert "/api/photos" in html
+        assert "/api/status" in html
+
+    def test_script_reads_and_strips_location_hash(self, client):
+        html = client.get("/").text
+        assert "location.hash" in html
+        assert "history.replaceState" in html
+
+    def test_script_uses_session_storage_for_device_token(self, client):
+        html = client.get("/").text
+        assert "sessionStorage" in html
+        assert "device_token" in html
+
+    def test_bilingual_strings_present(self, client):
+        html = client.get("/").text
+        # Spot-check one Vietnamese and one English string from the i18n
+        # table, plus the navigator.language selection logic.
+        assert "navigator.language" in html
+        assert "vi:" in html
+        assert "en:" in html
+
+
 # ---------------------------------------------------------------------------
 # POST /api/pair
 # ---------------------------------------------------------------------------
