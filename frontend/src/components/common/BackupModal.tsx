@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Download, Upload, Database } from 'lucide-react';
+import { Download, Upload, Database, ScrollText, FileArchive, FolderOpen } from 'lucide-react';
 import { Modal } from './Modal';
 import { useApp } from '../../context/AppContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
 import { AISettingsCard } from './AISettingsCard';
-import { getBackupDb, restoreBackupDb, RestoreMode } from '../../services/api';
+import { LogViewerModal } from './LogViewerModal';
+import { getBackupDb, restoreBackupDb, RestoreMode, downloadLogsZipApi } from '../../services/api';
+import { errorMessage } from '../vessel/tableHelpers';
 
 interface BackupModalProps {
   isOpen: boolean;
@@ -20,6 +22,25 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [restoreMode, setRestoreMode] = useState<RestoreMode>('merge');
+  const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
+
+  const handleExportLogs = async () => {
+    try {
+      setLoading(true);
+      const { blob, filename } = await downloadLogsZipApi();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      addToast(t.logs.exportSuccess, 'success');
+    } catch (e: any) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleExportBackup = async () => {
     try {
@@ -165,6 +186,33 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             />
           </label>
         </div>
+
+        {/* System logs */}
+        <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg">
+              <ScrollText className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t.logs.cardTitle}</h4>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{t.logs.cardDesc}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setIsLogViewerOpen(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">
+              <ScrollText className="w-4 h-4" />{t.logs.view}
+            </button>
+            <button type="button" disabled={loading} onClick={handleExportLogs} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50">
+              <FileArchive className="w-4 h-4" />{t.logs.export}
+            </button>
+            {window.electronAPI?.openLogFolder && (
+              <button type="button" onClick={() => window.electronAPI?.openLogFolder?.()} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">
+                <FolderOpen className="w-4 h-4" />{t.logs.openFolder}
+              </button>
+            )}
+          </div>
+        </div>
+        <LogViewerModal isOpen={isLogViewerOpen} onClose={() => setIsLogViewerOpen(false)} />
       </div>
     </Modal>
   );

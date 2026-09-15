@@ -144,6 +144,9 @@ export function rowsToTSV<T extends Record<string, any>>(
 }
 
 export const errorMessage = (e: any, fallback: string): string => {
-  const detail = e?.response?.data?.detail;
-  return (typeof detail === 'string' && detail) || e?.message || fallback;
+  const data = e?.response?.data;
+  const detail = typeof data?.detail === 'string' ? data.detail : '';
+  const rid = data?.request_id || e?.response?.headers?.['x-request-id'];
+  const base = detail || e?.message || fallback;
+  return rid && e?.response?.status >= 500 && !base.includes(rid) ? `${base} (mã: ${rid})` : base;
 };

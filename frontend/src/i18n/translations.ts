@@ -213,6 +213,23 @@ export const translations = {
       entityVessels: "lịch tàu",
       entityContainers: "container"
     },
+    logs: {
+      cardTitle: "Nhật ký hệ thống",
+      cardDesc: "Xem lỗi phát sinh khi sử dụng, xuất file gửi bộ phận hỗ trợ.",
+      view: "Xem nhật ký",
+      export: "Xuất file log (.zip)",
+      openFolder: "Mở thư mục log",
+      modalTitle: "Nhật ký hệ thống",
+      sourceApp: "Tất cả hoạt động",
+      sourceErrors: "Chỉ cảnh báo & lỗi",
+      levelAll: "Mọi mức",
+      searchPlaceholder: "Tìm theo nội dung hoặc mã tra cứu...",
+      refresh: "Tải lại",
+      empty: "Không có dòng nhật ký phù hợp",
+      copied: "Đã sao chép dòng nhật ký",
+      exportSuccess: "Đã xuất file nhật ký",
+      location: "Thư mục: {path}"
+    },
     autoSync: {
       title: "Tự động đồng bộ (Auto Sync)",
       description: "Tự động truy vấn ePort làm mới toàn bộ danh sách theo dõi.",
@@ -893,6 +910,23 @@ export const translations = {
       entityBookings: "bookings",
       entityVessels: "vessel schedules",
       entityContainers: "containers"
+    },
+    logs: {
+      cardTitle: "System logs",
+      cardDesc: "See errors that happened while using the app and export a file for support.",
+      view: "View logs",
+      export: "Export logs (.zip)",
+      openFolder: "Open log folder",
+      modalTitle: "System logs",
+      sourceApp: "All activity",
+      sourceErrors: "Warnings & errors only",
+      levelAll: "All levels",
+      searchPlaceholder: "Search message or lookup code...",
+      refresh: "Refresh",
+      empty: "No matching log entries",
+      copied: "Log entry copied",
+      exportSuccess: "Log file exported",
+      location: "Folder: {path}"
     },
     autoSync: {
       title: "Auto Sync",

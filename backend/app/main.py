@@ -57,7 +57,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
+    expose_headers=["X-Request-ID", "Content-Disposition"],
 )
 
 # Per-request log line, X-Request-ID header, and JSON lookup code on unhandled 500s.

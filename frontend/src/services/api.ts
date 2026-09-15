@@ -19,6 +19,42 @@ export const apiClient = axios.create({
   timeout: 60000,
 });
 
+import { reportClientLog, setClientLogTransport, ClientLogPayload } from './clientLogger';
+
+export interface LogEntry { time: string; level: string; logger: string; request_id: string; message: string }
+
+export const sendClientLogApi = async (payload: ClientLogPayload): Promise<void> => {
+  await apiClient.post('/logs/client', payload, { timeout: 10000 });
+};
+setClientLogTransport(sendClientLogApi);
+
+apiClient.interceptors.response.use(
+  (res) => res,
+  (error) => {
+    const cfg = error?.config || {};
+    const target = `${String(cfg.method || 'get').toUpperCase()} ${cfg.url || ''}`;
+    if (!String(cfg.url || '').includes('/logs/client')) {
+      if (!error?.response) {
+        reportClientLog('warning', `Network error: ${target}`, { context: { code: error?.code } });
+      } else if (error.response.status >= 500) {
+        reportClientLog('error', `HTTP ${error.response.status}: ${target}`, {
+          context: { request_id: error.response.headers?.['x-request-id'], detail: error.response.data?.detail },
+        });
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+export const getLogsApi = async (params: { source?: 'app' | 'errors'; level?: string; q?: string; limit?: number }) =>
+  (await apiClient.get<{ entries: LogEntry[]; log_dir: string }>('/logs', { params })).data;
+
+export const downloadLogsZipApi = async (): Promise<{ blob: Blob; filename: string }> => {
+  const res = await apiClient.get('/logs/export', { responseType: 'blob', timeout: LONG_TIMEOUT });
+  const match = /filename="?([^"]+)"?/.exec(res.headers['content-disposition'] || '');
+  return { blob: res.data, filename: match?.[1] || 'auto-read-pdf-logs.zip' };
+};
+
 const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, number> = {}) => {
   const params: Record<string, string | number> = { collection_id: collectionId, ...extra };
   if (q.search_query) params.search_query = q.search_query;
