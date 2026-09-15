@@ -13,6 +13,14 @@ _RE_DMONY = re.compile(r"^(\d{1,2})\s*([A-Za-z]{3})\s*(\d{4}|\d{2})(?:\s*(\d{1,2
 _RE_ISO = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
 _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 
+# Finds a date-shaped token anywhere in a string (not anchored like the formats above), used to
+# reject non-date text (e.g. an address) that a loose label regex swept up on scrambled OCR text.
+_DATE_TOKEN_RE = re.compile(
+    r"\d{1,2}\s*[A-Za-z]{3}\s*\d{2,4}(?:\s*\d{1,2}:\d{2})?"
+    r"|\d{4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?"
+    r"|\d{1,2}[/.]\d{1,2}[/.]\d{4}(?:\s+\d{1,2}:\d{2})?"
+)
+
 
 def _fmt_date(day: str, month: str, year: str, time_part: Optional[str]) -> Optional[str]:
     """DD/MM/YYYY[ HH:MM], or None when the date/time does not exist (e.g. 30/02, 25:00)."""
@@ -337,7 +345,14 @@ def extract_booking_from_text(text: str, filename: str = "") -> dict:
         if not cutoff_match:
             cutoff_match = re.search(r"(?:Cargo|CY)\s*Cut[- ]*off\s*:\s*(.*?)(?=\n|$)", text, re.IGNORECASE)
         if cutoff_match:
-            result["Port Cargo Cut-off"] = parse_date_str(cutoff_match.group(1).strip())
+            cutoff_raw = cutoff_match.group(1).strip()
+            date_token = _DATE_TOKEN_RE.search(cutoff_raw)
+            # Scrambled OCR text (columns reordered) can make the label regex sweep up unrelated
+            # text (e.g. a street address) instead of the real date, which is now on a disconnected
+            # line. Only accept the match if it actually contains a date-shaped token; otherwise
+            # leave the field unset rather than store clearly wrong data.
+            if date_token:
+                result["Port Cargo Cut-off"] = parse_date_str(date_token.group(0))
 
         # Pre Carrier & Trunk Vessel and their ETDs
         pre_carrier = ""

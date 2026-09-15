@@ -208,3 +208,34 @@ def test_parse_etd_with_invalid_etd_keeps_raw():
     from backend.app.services.extractor import parse_etd
     assert parse_etd("13Jul26/31Jun26") == "31Jun26"
 
+
+
+def test_port_cargo_cutoff_rejects_scrambled_ocr_address_line():
+    """Regression: macOS Vision OCR on a two-column form can reorder lines so the
+    'Port Cargo Cut-off' label ends up adjacent to an unrelated address instead of its
+    real value (which is now several lines away, disconnected). The field must be left
+    unset ('null') rather than show the address as if it were a date."""
+    text = (
+        "Booking No : SGN601175800\n"
+        "Pre Carrier : KOTA NEKAD 0272S  ETA/ETD : 13Jul26/14Jul26\n"
+        "Doc Cut-off\n"
+        "Port Cargo Cut-off\n"
+        ": 938A13 Nguyen Thi Dinh, Phuong Thanh My Loi, Quan 2, TP Ho Chi Minh\n"
+        ": 38976519\n"
+        "Yard PIC\n"
+        ": Thanh Chau (Ms.)\n"
+        ": CATLAI TERMINAL\n"
+        "Full Return Date\n"
+        "13Jul26 02:00\n"
+    )
+    result = _run(text, "pil_scrambled.pdf")
+    assert result["Port Cargo Cut-off"] == "null"
+
+
+def test_port_cargo_cutoff_extracts_date_token_ignoring_trailing_junk():
+    text = (
+        "Booking No : SGN601021000\n"
+        "Port Cargo Cut-off : 21Jun26 02:00 some trailing OCR noise\n"
+    )
+    result = _run(text, "pil_noisy.pdf")
+    assert result["Port Cargo Cut-off"] == "21/06/2026 02:00"
