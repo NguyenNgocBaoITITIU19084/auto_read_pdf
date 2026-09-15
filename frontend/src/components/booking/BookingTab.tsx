@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
-  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers
+  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -13,6 +13,7 @@ import {
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BookingDetailModal } from './BookingDetailModal';
+import { BookingFormModal } from './BookingFormModal';
 import { ImageBookingModal } from './ImageBookingModal';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { ResizableTh } from '../common/ResizableTh';
@@ -71,7 +72,9 @@ interface BookingRowProps {
   onCopy: (booking: Booking) => void;
   onDelete: (id: number) => void;
   onQuickVessel: (booking: Booking) => void;
+  onEdit: (booking: Booking) => void;
   vesselTooltip: string;
+  editLabel: string;
 }
 
 const BookingRow = React.memo(function BookingRow({
@@ -85,7 +88,9 @@ const BookingRow = React.memo(function BookingRow({
   onCopy,
   onDelete,
   onQuickVessel,
+  onEdit,
   vesselTooltip,
+  editLabel,
 }: BookingRowProps) {
   return (
     <tr
@@ -131,8 +136,17 @@ const BookingRow = React.memo(function BookingRow({
           </td>
         );
       })}
-      <td className="py-1.5 px-2.5 text-center w-24">
+      <td className="py-1.5 px-2.5 text-center w-28" onDoubleClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+          <Tooltip content={editLabel}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(booking); }}
+              aria-label={editLabel}
+              className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          </Tooltip>
           <Tooltip content={vesselTooltip}>
             <button
               onClick={(e) => { e.stopPropagation(); onQuickVessel(booking); }}
@@ -203,6 +217,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
   const [quickVesselBooking, setQuickVesselBooking] = useState<Booking | null>(null);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
+  const [bookingForm, setBookingForm] = useState<{ mode: 'create' | 'edit'; booking: Booking | null } | null>(null);
 
   // Bulk action state
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -474,6 +489,18 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const closeQuickVessel = useCallback(() => setQuickVesselBooking(null), []);
   const closeDetail = useCallback(() => setSelectedBooking(null), []);
 
+  const openCreateBooking = useCallback(() => setBookingForm({ mode: 'create', booking: null }), []);
+  const openEditBooking = useStableCallback((booking: Booking) => setBookingForm({ mode: 'edit', booking }));
+
+  const handleBookingSaved = useStableCallback(async (item: Booking, mode: 'create' | 'edit') => {
+    if (mode === 'create') {
+      // new rows are appended (ORDER BY id ASC) -> jump to the last page so the user sees it
+      setCurrentPage(Math.max(1, Math.ceil((total + 1) / pageSize)));
+    }
+    if (selectedBooking?.id === item.id) setSelectedBooking(item);
+    await loadData('refresh');
+  });
+
   // ---------------------------------------------------------------------------
   // Bulk actions
   // ---------------------------------------------------------------------------
@@ -695,6 +722,18 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <Tooltip content={t.booking.form.addTooltip}>
+            <button
+              type="button"
+              onClick={openCreateBooking}
+              disabled={!activeCollection}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white shadow-sm transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t.booking.form.addButton}</span>
+            </button>
+          </Tooltip>
+
           <div data-tour="booking-ai-ocr">
             <Tooltip content={t.booking.scanImageTooltip}>
               <button
@@ -787,7 +826,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                     onResize={startResize}
                   />
                 ))}
-                <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">
+                <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-28 text-[11px]">
                   {t.common.actions}
                 </th>
               </tr>
@@ -800,7 +839,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                   rowCount={Math.min(pageSize, 8)}
                   hasCheckbox={true}
                   hasActions={true}
-                  actionColClass="w-24"
+                  actionColClass="w-28"
                 />
               ) : pageRows.length === 0 ? (
                 <tr>
@@ -834,7 +873,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         onCopy={copyRow}
                         onDelete={handleDelete}
                         onQuickVessel={openQuickVessel}
+                        onEdit={openEditBooking}
                         vesselTooltip={t.booking.quickVessel.rowTooltip}
+                        editLabel={t.booking.form.editTooltip}
                       />
                     );
                   })}
@@ -882,6 +923,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         onClose={closeDetail}
         booking={selectedBooking}
         onNavigateTab={onNavigateTab}
+        onEdit={openEditBooking}
       />
 
       <QuickVesselSearch
@@ -924,6 +966,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         initialFile={activeImageFile}
         onSavedSuccess={() => loadData('refresh')}
         onPdfFiles={(files) => void uploadFiles(files)}
+      />
+
+      <BookingFormModal
+        isOpen={!!bookingForm}
+        mode={bookingForm?.mode ?? 'create'}
+        booking={bookingForm?.booking}
+        onClose={() => setBookingForm(null)}
+        onSaved={handleBookingSaved}
       />
     </div>
   );

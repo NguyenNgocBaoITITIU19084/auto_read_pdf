@@ -1,5 +1,5 @@
 import React from 'react';
-import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor, Search } from 'lucide-react';
+import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor, Search, Pencil } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Booking } from '../../types';
 import { useApp } from '../../context/AppContext';
@@ -14,6 +14,7 @@ interface BookingDetailModalProps {
   booking: Booking | null;
   /** Enables "Open Vessels tab" in the quick vessel lookup */
   onNavigateTab?: (tab: TabId, query?: string) => void;
+  onEdit?: (booking: Booking) => void;
 }
 
 export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
@@ -21,6 +22,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   onClose,
   booking,
   onNavigateTab,
+  onEdit,
 }) => {
   const { t, addToast } = useApp();
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
@@ -103,16 +105,28 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[180px] hidden sm:block">
               {booking["Vessel"] || 'null'}
             </span>
-            <button
-              type="button"
-              onClick={() => setQuickVesselOpen(true)}
-              disabled={!hasVessel}
-              title={t.booking.quickVessel.rowTooltip}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-primary-600 hover:bg-primary-700 text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <Search className="w-3 h-3" />
-              {t.booking.quickVessel.button}
-            </button>
+            <div className="flex items-center gap-1.5">
+              {onEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(booking)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  {t.booking.form.editButton}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setQuickVesselOpen(true)}
+                disabled={!hasVessel}
+                title={t.booking.quickVessel.rowTooltip}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-primary-600 hover:bg-primary-700 text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Search className="w-3 h-3" />
+                {t.booking.quickVessel.button}
+              </button>
+            </div>
           </div>
         </div>
 
