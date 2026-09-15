@@ -5,24 +5,25 @@ import { useApp } from '../../context/AppContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
 import { AISettingsCard } from './AISettingsCard';
-import { LogViewerModal } from './LogViewerModal';
 import { getBackupDb, restoreBackupDb, RestoreMode, downloadLogsZipApi } from '../../services/api';
 import { errorMessage } from '../vessel/tableHelpers';
 
 interface BackupModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Navigate to the standalone Logs tab (closes this modal too). Falls back to no-op button behavior if omitted. */
+  onNavigateToLogs?: () => void;
 }
 
-export const BackupModal: React.FC<BackupModalProps> = ({ 
-  isOpen, 
+export const BackupModal: React.FC<BackupModalProps> = ({
+  isOpen,
   onClose,
+  onNavigateToLogs,
 }) => {
   const { t, addToast, refreshCollections } = useApp();
   const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [restoreMode, setRestoreMode] = useState<RestoreMode>('merge');
-  const [isLogViewerOpen, setIsLogViewerOpen] = useState(false);
 
   const handleExportLogs = async () => {
     try {
@@ -199,7 +200,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setIsLogViewerOpen(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">
+            <button type="button" onClick={onNavigateToLogs} disabled={!onNavigateToLogs} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50">
               <ScrollText className="w-4 h-4" />{t.logs.view}
             </button>
             <button type="button" disabled={loading} onClick={handleExportLogs} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50">
@@ -212,7 +213,6 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             )}
           </div>
         </div>
-        <LogViewerModal isOpen={isLogViewerOpen} onClose={() => setIsLogViewerOpen(false)} />
       </div>
     </Modal>
   );

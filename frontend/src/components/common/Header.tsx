@@ -236,6 +236,10 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
           <BackupModal
             isOpen={isBackupOpen}
             onClose={() => setIsBackupOpen(false)}
+            onNavigateToLogs={onNavigateTab ? () => {
+              setIsBackupOpen(false);
+              onNavigateTab('logs');
+            } : undefined}
           />
         </Suspense>
       )}

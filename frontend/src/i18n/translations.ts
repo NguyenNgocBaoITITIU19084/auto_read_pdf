@@ -7,7 +7,8 @@ export const translations = {
       dashboard: "Tổng quan",
       booking: "Danh sách Booking (PDF)",
       vessel: "ePort SNP (Lịch tàu)",
-      container: "ePort SNP (Tra cứu Cont)"
+      container: "ePort SNP (Tra cứu Cont)",
+      logs: "Nhật ký"
     },
     dashboard: {
       title: "Bảng Điều Hành Logistics Tổng Quan",
@@ -754,7 +755,8 @@ export const translations = {
       dashboard: "Overview",
       booking: "Booking List (PDF)",
       vessel: "ePort SNP (Vessel Schedule)",
-      container: "ePort SNP (Container Tracking)"
+      container: "ePort SNP (Container Tracking)",
+      logs: "Logs"
     },
     dashboard: {
       title: "Logistics Operations Dashboard",
