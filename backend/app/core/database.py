@@ -6,6 +6,7 @@ import sqlite3
 import threading
 from datetime import datetime
 from backend.app.core import config
+from backend.app.core.timezone import VN_TZ, now_vn_str
 
 logger = logging.getLogger("backend.database")
 
@@ -15,7 +16,7 @@ def get_db_path() -> str:
 
 
 def _now_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_vn_str()
 
 
 class ManagedConnection(sqlite3.Connection):
@@ -702,7 +703,7 @@ def _insert_collection_unique(cursor: sqlite3.Cursor, name: str, created_at: str
     candidate = base_name
     exists = cursor.execute("SELECT 1 FROM collections WHERE name = ?;", (candidate,)).fetchone()
     if exists:
-        suffix = datetime.now().strftime("%Y%m%d%H%M%S")
+        suffix = datetime.now(VN_TZ).strftime("%Y%m%d%H%M%S")
         candidate = f"{base_name}_imported_{suffix}"
         n = 2
         while cursor.execute("SELECT 1 FROM collections WHERE name = ?;", (candidate,)).fetchone():

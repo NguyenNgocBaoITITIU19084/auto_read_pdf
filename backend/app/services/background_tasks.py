@@ -3,7 +3,6 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.base import BaseScheduler
@@ -12,6 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from backend.app.core.timezone import VN_TZ, DATETIME_FMT, now_vn_str
 from backend.app.core.database import (
     get_all_watchlists, get_all_container_watchlists,
     insert_vessel_schedules, insert_containers,
@@ -20,9 +20,6 @@ from backend.app.core.database import (
 from backend.app.services.eport_client import search_vessels_detailed, search_containers
 
 logger = logging.getLogger("backend.background_tasks")
-
-VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-DATETIME_FMT = "%Y-%m-%d %H:%M:%S"
 
 AUTO_SYNC_JOB_ID = "auto_sync_job"
 AUTO_SYNC_KICK_JOB_ID = "auto_sync_kick"
@@ -56,7 +53,7 @@ _state = {
 
 
 def _now_str() -> str:
-    return datetime.now(VN_TZ).strftime(DATETIME_FMT)
+    return now_vn_str()
 
 
 def _empty_result() -> dict:

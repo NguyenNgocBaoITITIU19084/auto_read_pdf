@@ -1,4 +1,5 @@
 import type { Booking } from '../types';
+import { vnParts } from './vnTime';
 
 export interface VesselVoyage {
   name: string;
@@ -144,12 +145,12 @@ export function formatEportDate(value?: string | null): string {
   if (isBlank(value)) return '';
   const s = String(value).trim();
   const pad = (x: number) => String(x).padStart(2, '0');
-  const fmt = (d: Date) =>
-    `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const ms = s.match(/Date\((-?\d+)\)/);
   if (ms) {
     const d = new Date(Number(ms[1]));
-    return isNaN(d.getTime()) ? s : fmt(d);
+    if (isNaN(d.getTime())) return s;
+    const p = vnParts(d);
+    return `${pad(p.day)}/${pad(p.month)}/${p.year} ${pad(p.hour)}:${pad(p.minute)}`;
   }
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
   if (iso) {

@@ -7,12 +7,14 @@ export const tf = (template: string, vars: Record<string, string | number> = {})
     Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : match
   );
 
-/** Formats backend local-time strings ("YYYY-MM-DD HH:MM:SS" or ISO) as "HH:MM dd/MM/yyyy". */
+import { parseVnDateTime, vnParts } from '../utils/vnTime';
+
+/** Formats backend VN-time strings ("YYYY-MM-DD HH:MM:SS" or ISO) as "HH:MM dd/MM/yyyy" in Vietnam time. */
 export const formatDateTimeShort = (value?: string | null): string => {
   if (!value) return '';
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(value) ? value.replace(' ', 'T') : value;
-  const d = new Date(normalized);
-  if (isNaN(d.getTime())) return value;
+  const d = parseVnDateTime(value);
+  if (!d) return value;
+  const p = vnParts(d);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return `${pad(p.hour)}:${pad(p.minute)} ${pad(p.day)}/${pad(p.month)}/${p.year}`;
 };
