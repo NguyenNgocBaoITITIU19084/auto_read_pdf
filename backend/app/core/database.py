@@ -513,6 +513,35 @@ def get_collections() -> list[dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def get_collections_with_counts() -> list[dict]:
+    with get_connection() as conn:
+        return _select_dicts(conn, """
+            SELECT c.*,
+                (SELECT COUNT(*) FROM bookings b WHERE b.collection_id = c.id) AS booking_count,
+                (SELECT COUNT(*) FROM vessel_schedules v WHERE v.collection_id = c.id) AS vessel_count,
+                (SELECT COUNT(*) FROM containers t WHERE t.collection_id = c.id) AS container_count,
+                (SELECT COUNT(*) FROM vessel_watchlists w WHERE w.collection_id = c.id)
+                  + (SELECT COUNT(*) FROM container_watchlists cw WHERE cw.collection_id = c.id) AS watchlist_count
+            FROM collections c ORDER BY c.name ASC;
+        """)
+
+
+def collection_name_taken(name: str, exclude_id: int | None = None) -> bool:
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT 1 FROM collections WHERE LOWER(name) = LOWER(?) AND id != ? LIMIT 1;",
+            (name, exclude_id if exclude_id is not None else -1)).fetchone() is not None
+
+
+def rename_collection(col_id: int, name: str) -> bool:
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Collection name cannot be empty")
+    with get_connection() as conn:
+        cur = conn.execute("UPDATE collections SET name = ? WHERE id = ?;", (name, col_id))
+        return cur.rowcount > 0
+
+
 def delete_collection(col_id: int):
     with get_connection() as conn:
         conn.execute("DELETE FROM collections WHERE id = ?;", (col_id,))

@@ -7,11 +7,18 @@ class CollectionCreate(BaseModel):
 class CollectionUpdateSettings(BaseModel):
     settings: str
 
+class CollectionRename(BaseModel):
+    name: str
+
 class CollectionResponse(BaseModel):
     id: int
     name: str
     created_at: str
     settings: Optional[str] = None
+    booking_count: Optional[int] = None
+    vessel_count: Optional[int] = None
+    container_count: Optional[int] = None
+    watchlist_count: Optional[int] = None
 
 class BookingItem(BaseModel):
     id: Optional[int] = None
