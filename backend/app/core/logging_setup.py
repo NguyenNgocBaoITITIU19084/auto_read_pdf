@@ -24,6 +24,10 @@ _SENSITIVE_NAMED_KV_RE = re.compile(r"(?i)\b((?:gemini_)?api_key)\s*=\s*[^&\s\"'
 _SENSITIVE_URL_KEY_RE = re.compile(r"(?i)([?&])key=[^&\s\"'}]+")
 # Dict/JSON-ish style with either quote char: "api_key": "...", 'key': '...'
 _SENSITIVE_QUOTED_RE = re.compile(r"""(?i)(['"](?:gemini_)?(?:api_)?key['"]\s*:\s*['"])[^'"]*(['"])""")
+# A bare Google API key token (Gemini keys look like `AIzaSy...`), wherever it appears —
+# e.g. inside an exception message or a third-party library's repr() — regardless of whether
+# it's introduced by a recognizable `key=`/`api_key=` prefix the patterns above catch.
+_SENSITIVE_GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_-]{16,}")
 
 
 def _mask_sensitive(text: str) -> str:
@@ -32,6 +36,7 @@ def _mask_sensitive(text: str) -> str:
     text = _SENSITIVE_NAMED_KV_RE.sub(lambda m: f"{m.group(1)}={MASK}", text)
     text = _SENSITIVE_URL_KEY_RE.sub(lambda m: f"{m.group(1)}key={MASK}", text)
     text = _SENSITIVE_QUOTED_RE.sub(lambda m: f"{m.group(1)}{MASK}{m.group(2)}", text)
+    text = _SENSITIVE_GOOGLE_KEY_RE.sub(MASK, text)
     return text
 
 

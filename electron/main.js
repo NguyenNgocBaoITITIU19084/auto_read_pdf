@@ -354,6 +354,13 @@ function registerIpc() {
     if (fs.existsSync(logPath)) shell.showItemInFolder(logPath);
     else shell.openPath(path.dirname(logPath));
   });
+
+  ipcMain.on('open-log-folder', (event) => {
+    if (!isFromMainWindow(event)) return;
+    const dir = backend.logDir;
+    fs.mkdirSync(dir, { recursive: true });
+    shell.openPath(dir);
+  });
 }
 
 // ---------------------------------------------------------------------------

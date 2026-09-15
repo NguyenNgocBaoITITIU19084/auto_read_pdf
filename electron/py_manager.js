@@ -218,6 +218,12 @@ class BackendManager extends EventEmitter {
     return path.join(dir, 'backend.log');
   }
 
+  /** Folder holding app.log / errors.log (written by the Python backend). */
+  get logDir() {
+    const dir = app ? app.getPath('userData') : path.join(__dirname, '..');
+    return path.join(dir, 'logs');
+  }
+
   get log() {
     if (!this._log) this._log = new RotatingLog(this.logPath);
     return this._log;
@@ -359,6 +365,8 @@ class BackendManager extends EventEmitter {
         PORT: String(BACKEND_PORT),
         PYTHONPATH: rootDir,
         DB_PATH: dbPath,
+        LOG_DIR: this.logDir,
+        ELECTRON_BACKEND_LOG: this.logPath,
         PYTHONUNBUFFERED: '1',
         PYTHONIOENCODING: 'utf-8', // avoid UnicodeEncodeError on Windows cp1252 pipes (Vietnamese log lines)
       },

@@ -329,6 +329,8 @@ export interface ElectronAPI {
   readClipboardImage?: () => Promise<string | null>;
   /** Tells main process whether to hide-to-tray on close */
   setAutoSyncActive?: (active: boolean) => void;
+  /** Open the folder containing app.log / errors.log. */
+  openLogFolder?: () => void;
 }
 
 declare global {

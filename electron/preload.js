@@ -36,4 +36,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Used by the splash/error screen. */
   retryBackend: () => ipcRenderer.send('backend-retry'),
   showBackendLog: () => ipcRenderer.send('backend-show-log'),
+  /** Open the folder containing app.log / errors.log. */
+  openLogFolder: () => ipcRenderer.send('open-log-folder'),
 });

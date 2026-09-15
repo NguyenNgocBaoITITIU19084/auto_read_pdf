@@ -19,6 +19,7 @@ logger = logging.getLogger("backend.main")
 from backend.app.core.request_logging import RequestLoggingMiddleware
 from backend.app.core.config import BACKEND_HOST, BACKEND_PORT
 from backend.app.core.database import init_db, get_collections, create_collection
+from backend.app.core.version import APP_VERSION
 from backend.app.services.background_tasks import restore_auto_sync, shutdown_scheduler
 from backend.app.api.collections import router as collections_router
 from backend.app.api.bookings import router as bookings_router
@@ -28,6 +29,7 @@ from backend.app.api.export_backup import router as export_backup_router
 from backend.app.api.color_rules import router as color_rules_router
 from backend.app.api.dashboard import router as dashboard_router
 from backend.app.api.settings import router as settings_router
+from backend.app.api.logs import router as logs_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,7 +46,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Auto Read PDF Backend API",
-    version="2.0.0",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 
@@ -64,7 +66,7 @@ app.add_middleware(RequestLoggingMiddleware)
 # Healthcheck accepting both GET and HEAD
 @app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
-    return {"status": "ok", "app": "Auto Read PDF", "version": "2.0.0"}
+    return {"status": "ok", "app": "Auto Read PDF", "version": APP_VERSION}
 
 # Register API routers under /api/v1
 app.include_router(collections_router, prefix="/api/v1")
@@ -75,6 +77,7 @@ app.include_router(export_backup_router, prefix="/api/v1")
 app.include_router(color_rules_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(logs_router, prefix="/api/v1")
 
 if __name__ == "__main__":
     import multiprocessing
