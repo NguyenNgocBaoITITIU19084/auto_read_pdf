@@ -24,6 +24,20 @@ def test_normalize_manual_booking_rules():
     assert errors == []
 
 
+def test_normalize_manual_booking_uppercases_text_fields():
+    data, errors = normalize_manual_booking({
+        "Booking No": "sgn601021000",
+        "Vessel": "Kota Azam 2505s",
+        "Carrier": "pil",
+        "Port of Discharging": "durban",
+    })
+    assert errors == []
+    assert data["Booking No"] == "SGN601021000"
+    assert data["Vessel"] == "KOTA AZAM 2505S"
+    assert data["Carrier"] == "PIL"
+    assert data["Port of Discharging"] == "DURBAN"
+
+
 def test_manual_save_validates_and_warns_duplicates(client):
     col = db.create_collection("M")
     bad = client.post(f"{API}/bookings/manual-save", json={"collection_id": col, "booking": {"Carrier": "PIL"}})

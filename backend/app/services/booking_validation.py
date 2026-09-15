@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 
-from backend.app.services.extractor import parse_date_str
+from backend.app.services.extractor import parse_date_str, normalize_field_case
 
 DATE_FIELDS = ("ETD", "Port Cargo Cut-off")
 _DMY_RE = re.compile(r"^\d{2}/\d{2}/\d{4}( \d{2}:\d{2})?$")
@@ -30,6 +30,8 @@ def normalize_manual_booking(data: dict, require_identity: bool = True) -> tuple
             if value.lower() == "null":
                 value = ""
         out[key] = "" if value is None else value
+
+    normalize_field_case(out)
 
     errors: list[str] = []
     for field in DATE_FIELDS:
