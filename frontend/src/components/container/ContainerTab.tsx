@@ -7,9 +7,9 @@ import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
-import { ContainerInfo, ContainerWatchlist, ContainerWatchlistBatchItem } from '../../types';
+import { ContainerInfo, ContainerWatchlist, ContainerWatchlistBatchItem, PageResult, ContainerPageResult, TableQuery } from '../../types';
 import {
-  getContainers, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
+  getContainers, getContainersPage, getContainerIds, getContainersByIds, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
   addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist,
   addContainerWatchlistBatch, removeContainerWatchlistBatch, resyncContainersApi,
 } from '../../services/api';
@@ -28,16 +28,16 @@ import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { subscribeTourActions } from '../../services/tourService';
+import { useServerTable, LoadMode } from '../../hooks/useServerTable';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
-  useStableCallback, useAutoRefresh, rowsSignature, watchlistSignature, rowsToTSV, errorMessage,
+  useStableCallback, useAutoRefresh, watchlistSignature, rowsToTSV, errorMessage,
 } from '../vessel/tableHelpers';
 import { getCustomsStatus, getImdgInfo, sanitizeDisplayValue } from './customs';
 
 interface ContainerTabProps {
   initialSearchQuery?: string;
 }
-
-type LoadMode = 'loading' | 'refresh' | 'silent';
 
 /** v2: merge "Trạng thái thông quan" + "Giám sát HQ" into "Tình trạng thông quan". */
 const COLUMN_MIGRATION: ColumnMigration = {
@@ -73,21 +73,13 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const { t, activeCollection, autoSyncEnabled, autoSyncStatus } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
-  const [containers, setContainers] = useState<ContainerInfo[]>([]);
-  const [loading, setLoading] = useState(false);
   const [querying, setQuerying] = useState(false);
   const [bulkBusy, setBulkBusy] = useState<string | null>(null);
 
   // Filter by event type
   const [eventTypeFilter, setEventTypeFilter] = useState<string>('ALL');
 
-  // Pagination state
-  const [pageSize, setPageSize] = useState<number>(() => {
-    const saved = localStorage.getItem('container_page_size');
-    return saved && !isNaN(Number(saved)) ? Number(saved) : 50;
-  });
-  const [currentPage, setCurrentPage] = useState<number>(1);
-
+  // Search in database
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
 
@@ -107,6 +99,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const [watchlist, setWatchlist] = useState<ContainerWatchlist[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
+  const [exportRows, setExportRows] = useState<ContainerInfo[]>([]);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
 
@@ -235,71 +228,50 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   };
 
   // ---------------------------------------------------------------------------
-  // Data loading (single request pipeline: containers + watchlist in parallel)
+  // Data loading (server-paged table + separate watchlist load)
   // ---------------------------------------------------------------------------
-  const requestSeqRef = useRef(0);
-  const inFlightRef = useRef(false);
-  const dataSigRef = useRef('');
-  const watchSigRef = useRef('');
+  const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  const tableQuery = useMemo<TableQuery>(
+    () => ({
+      search_query: debouncedQuery,
+      search_field: searchField,
+      event_type: eventTypeFilter === 'ALL' ? undefined : eventTypeFilter,
+    }),
+    [debouncedQuery, searchField, eventTypeFilter]
+  );
 
+  const table = useServerTable<ContainerInfo, ContainerPageResult>({
+    enabled: !!activeCollection,
+    queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
+    pageSizeStorageKey: 'container_page_size',
+    fetchPage: (limit, offset) => getContainersPage(activeCollection!.id, limit, offset, tableQuery),
+    onError: (e) => addToast(errorMessage(e, t.common.error), 'error'),
+  });
+  const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+
+  const watchSigRef = useRef('');
   const loadWatchlist = useStableCallback(async () => {
     if (!activeCollection) return;
     try {
       const data = await getContainerWatchlist(activeCollection.id);
-      watchSigRef.current = watchlistSignature(data);
-      setWatchlist(data);
+      const wsig = watchlistSignature(data);
+      if (wsig !== watchSigRef.current) {
+        watchSigRef.current = wsig;
+        setWatchlist(data);
+      }
     } catch (e) {
       console.error(e);
     }
   });
 
-  /**
-   * - 'loading': skeleton + error toast
-   * - 'refresh': no skeleton, always applies result (after mutations)
-   * - 'silent': background poll — skipped while a request is in flight, applies only when data changed
-   */
-  const loadData = useStableCallback(async (mode: LoadMode = 'loading') => {
-    if (!activeCollection) return;
-    if (mode === 'silent' && inFlightRef.current) return;
-    const seq = ++requestSeqRef.current;
-    inFlightRef.current = true;
-    if (mode === 'loading') setLoading(true);
-    try {
-      const [data, wl] = await Promise.all([
-        getContainers(activeCollection.id, searchQuery, searchField),
-        getContainerWatchlist(activeCollection.id).catch((e) => {
-          console.error(e);
-          return null;
-        }),
-      ]);
-      if (seq !== requestSeqRef.current) return;
-      const sig = rowsSignature(data);
-      if (mode !== 'silent' || sig !== dataSigRef.current) {
-        dataSigRef.current = sig;
-        setContainers(data);
-      }
-      if (wl) {
-        const wsig = watchlistSignature(wl);
-        if (mode !== 'silent' || wsig !== watchSigRef.current) {
-          watchSigRef.current = wsig;
-          setWatchlist(wl);
-        }
-      }
-    } catch (e: any) {
-      console.error(e);
-      if (mode !== 'silent' && seq === requestSeqRef.current) addToast(errorMessage(e, t.common.error), 'error');
-    } finally {
-      if (seq === requestSeqRef.current) {
-        inFlightRef.current = false;
-        setLoading(false);
-      }
-    }
+  /** 'loading' | 'refresh' | 'silent' — reloads the current page and the watchlist together. */
+  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    await Promise.all([table.reload(mode), loadWatchlist()]);
   });
 
   useEffect(() => {
-    setCurrentPage(1);
-    loadData('loading');
-  }, [activeCollection, searchQuery, searchField, loadData]);
+    loadWatchlist();
+  }, [activeCollection?.id, loadWatchlist]);
 
   const silentRefresh = useCallback(() => {
     loadData('silent');
@@ -313,17 +285,10 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     refresh: silentRefresh,
   });
 
-  // Compute event counts across all containers in current collection
+  // Event counts from server result or fallback
   const eventCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: containers.length };
-    containers.forEach((c) => {
-      const type = (c.event_type || '').trim().toUpperCase();
-      if (type) {
-        counts[type] = (counts[type] || 0) + 1;
-      }
-    });
-    return counts;
-  }, [containers]);
+    return table.result?.event_type_counts || { ALL: total };
+  }, [table.result?.event_type_counts, total]);
 
   // List of distinct event types found in data
   const availableEventTypes = useMemo(() => {
@@ -336,26 +301,29 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     return sorted;
   }, [eventCounts]);
 
-  // Filter containers by selected event type
-  const filteredContainers = useMemo(() => {
-    if (eventTypeFilter === 'ALL') return containers;
-    return containers.filter(
-      (c) => (c.event_type || '').trim().toUpperCase() === eventTypeFilter.toUpperCase()
-    );
-  }, [containers, eventTypeFilter]);
+  const selection = useRowSelection(
+    pageRows,
+    getRowId,
+    [activeCollection?.id, debouncedQuery, searchField, eventTypeFilter],
+    { pruneMissing: false }
+  );
+  const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
 
-  const paginatedContainers = useMemo(() => {
-    if (pageSize >= filteredContainers.length || pageSize <= 0) return filteredContainers;
-    const start = (currentPage - 1) * pageSize;
-    return filteredContainers.slice(start, start + pageSize);
-  }, [filteredContainers, currentPage, pageSize]);
+  /** Selected rows even when they live on other pages. */
+  const resolveSelectedRows = useCallback(async (): Promise<ContainerInfo[]> => {
+    if (selection.selectedRows.length === selection.count) return selection.selectedRows;
+    return getContainersByIds(selectedIdList);
+  }, [selection.selectedRows, selection.count, selectedIdList]);
 
-  const selection = useRowSelection(filteredContainers, getRowId, [
-    activeCollection?.id,
-    searchQuery,
-    searchField,
-    eventTypeFilter,
-  ]);
+  const handleSelectAllResults = useCallback(async () => {
+    if (!activeCollection) return;
+    try {
+      const ids = await getContainerIds(activeCollection.id, tableQuery);
+      selection.selectIds(ids, true);
+    } catch (e) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    }
+  }, [activeCollection, tableQuery, selection, addToast, t]);
 
   // Watchlist index: container_no -> entries (site/event checked on the few candidates)
   const watchlistIndex = useMemo(() => {
@@ -466,7 +434,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     try {
       await deleteContainer(id);
       addToast(t.common.success, 'success');
-      setContainers((prev) => prev.filter((c) => c.id !== id));
+      selection.selectIds([id], false);
+      await loadData('refresh');
     } catch (e: any) {
       addToast(errorMessage(e, t.common.error), 'error');
     }
@@ -479,8 +448,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     try {
       await clearContainers(activeCollection.id);
       addToast(t.common.success, 'success');
-      setContainers([]);
       selection.clear();
+      await loadData('refresh');
     } catch (e: any) {
       addToast(errorMessage(e, t.common.error), 'error');
     }
@@ -489,17 +458,6 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   // ---------------------------------------------------------------------------
   // Bulk actions
   // ---------------------------------------------------------------------------
-  const selectedRows = selection.selectedRows;
-  const selectedIdList = useMemo(() => selectedRows.map((r) => r.id), [selectedRows]);
-  const selectedWatchlistIds = useMemo(() => {
-    const ids = new Set<number>();
-    selectedRows.forEach((r) => {
-      const w = findWatchlistItem(r);
-      if (w) ids.add(w.id);
-    });
-    return Array.from(ids);
-  }, [selectedRows, findWatchlistItem]);
-
   const runBulk = async (key: string, fn: () => Promise<void>) => {
     if (bulkBusy) return;
     setBulkBusy(key);
@@ -524,18 +482,18 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     await runBulk('delete', async () => {
       await deleteContainersBatch(ids);
       addToast(tf(t.container.deleteSelectedSuccess, { count: ids.length }), 'success');
-      const idSet = new Set(ids);
-      setContainers((prev) => prev.filter((c) => !idSet.has(c.id)));
-      selection.clear();
+      selection.selectIds(ids, false);
+      await loadData('refresh');
     });
   };
 
   const handleBatchAddWatchlist = () =>
     runBulk('watch-add', async () => {
       if (!activeCollection) return;
+      const rows = await resolveSelectedRows();
       const seen = new Set<string>();
       const items: ContainerWatchlistBatchItem[] = [];
-      selectedRows.forEach((r) => {
+      rows.forEach((r) => {
         const containerNo = norm(r.containerno);
         if (!containerNo || findWatchlistItem(r)) return;
         const item = {
@@ -559,15 +517,21 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
   const handleBatchRemoveWatchlist = () =>
     runBulk('watch-remove', async () => {
-      const ids = selectedWatchlistIds;
-      if (ids.length === 0) {
+      const rows = await resolveSelectedRows();
+      const ids = new Set<number>();
+      rows.forEach((r) => {
+        const w = findWatchlistItem(r);
+        if (w) ids.add(w.id);
+      });
+      const idList = Array.from(ids);
+      if (idList.length === 0) {
         addToast(t.container.watchlistBatchNoneTracked, 'info');
         return;
       }
-      const res = await removeContainerWatchlistBatch(ids);
-      const idSet = new Set(ids);
+      const res = await removeContainerWatchlistBatch(idList);
+      const idSet = new Set(idList);
       setWatchlist((prev) => prev.filter((w) => !idSet.has(w.id)));
-      addToast(tf(t.container.watchlistBatchRemoved, { count: res?.removed ?? ids.length }), 'success');
+      addToast(tf(t.container.watchlistBatchRemoved, { count: res?.removed ?? idList.length }), 'success');
     });
 
   const handleBatchResync = () =>
@@ -587,18 +551,36 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     });
 
   const handleCopySelected = async () => {
-    if (selectedRows.length === 0) return;
+    const rows = await resolveSelectedRows();
+    if (rows.length === 0) return;
     const cols = visibleColumns.map((c) => ({ key: c.key, label: c.label }));
-    const text = rowsToTSV(selectedRows, cols, getContainerExportValue);
+    const text = rowsToTSV(rows, cols, getContainerExportValue);
     const success = await copyTextToClipboard(text);
     addToast(
-      success ? tf(t.container.copyRowsSuccess, { count: selectedRows.length }) : t.common.error,
+      success ? tf(t.container.copyRowsSuccess, { count: rows.length }) : t.common.error,
       success ? 'success' : 'error'
     );
   };
 
+  const handleOpenExport = async (scope: 'all' | 'selected') => {
+    if (!activeCollection) return;
+    setExportScope(scope);
+    try {
+      const rows = scope === 'all'
+        ? await getContainers(activeCollection.id, debouncedQuery, searchField)
+        : await resolveSelectedRows();
+      const filtered = eventTypeFilter === 'ALL' || scope === 'selected'
+        ? rows
+        : rows.filter((c) => (c.event_type || '').trim().toUpperCase() === eventTypeFilter.toUpperCase());
+      setExportRows(filtered.map(toExportRow));
+      setIsExportOpen(true);
+    } catch (e) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    }
+  };
+
   const bulkActions: BulkAction[] = [
-    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => { setExportScope('selected'); setIsExportOpen(true); } },
+    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => handleOpenExport('selected') },
     { key: 'copy', label: t.bulk.copySelected, icon: ClipboardCopy, onClick: handleCopySelected },
     { key: 'watch-add', label: t.bulk.addToWatchlist, icon: BookmarkPlus, onClick: handleBatchAddWatchlist, loading: bulkBusy === 'watch-add', disabled: !!bulkBusy },
     {
@@ -607,18 +589,14 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       icon: BookmarkMinus,
       onClick: handleBatchRemoveWatchlist,
       loading: bulkBusy === 'watch-remove',
-      disabled: !!bulkBusy || selectedWatchlistIds.length === 0,
+      disabled: !!bulkBusy,
     },
     { key: 'resync', label: t.bulk.resync, icon: RotateCw, onClick: handleBatchResync, loading: bulkBusy === 'resync', disabled: !!bulkBusy },
     { key: 'move', label: t.container.moveToCollection, icon: FolderInput, onClick: () => setIsMoveOpen(true), disabled: !!bulkBusy },
     { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
   ];
 
-  const exportData = useMemo(() => {
-    if (!isExportOpen) return [];
-    const rows = exportScope === 'selected' && selectedRows.length > 0 ? selectedRows : filteredContainers;
-    return rows.map(toExportRow);
-  }, [isExportOpen, exportScope, selectedRows, filteredContainers]);
+  const exportData = exportRows;
 
   const exportColumns = useMemo(() => [
     { key: "STT", label: t.container.columns["STT"] },
@@ -627,13 +605,13 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
   // Header checkbox (page) with indeterminate state
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
-  const pageAllSelected = selection.isPageAllSelected(paginatedContainers);
-  const pagePartiallySelected = selection.isPagePartiallySelected(paginatedContainers);
+  const pageAllSelected = selection.isPageAllSelected(pageRows);
+  const pagePartiallySelected = selection.isPagePartiallySelected(pageRows);
   useEffect(() => {
     if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = pagePartiallySelected;
   }, [pagePartiallySelected]);
 
-  const rowOffset = pageSize >= filteredContainers.length || pageSize <= 0 ? 0 : (currentPage - 1) * pageSize;
+  const rowOffset = (currentPage - 1) * pageSize;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
@@ -766,12 +744,11 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               value={eventTypeFilter}
               onChange={(e) => {
                 setEventTypeFilter(e.target.value);
-                setCurrentPage(1);
               }}
               className="text-xs font-bold bg-transparent text-slate-800 dark:text-slate-100 border-none outline-none cursor-pointer pr-1"
             >
               <option value="ALL" className="bg-white dark:bg-slate-800">
-                {t.container.allEvents || 'Tất cả'} ({containers.length})
+                {t.container.allEvents || 'Tất cả'} ({eventCounts['ALL'] ?? total})
               </option>
               {availableEventTypes.map((type) => (
                 <option key={type} value={type} className="bg-white dark:bg-slate-800">
@@ -795,8 +772,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
           <Tooltip content="Xuất danh sách Container ra file Excel">
             <button
-              onClick={() => { setExportScope('all'); setIsExportOpen(true); }}
-              disabled={containers.length === 0}
+              onClick={() => handleOpenExport('all')}
+              disabled={total === 0}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -813,7 +790,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
             </button>
           </Tooltip>
 
-          {containers.length > 0 && (
+          {total > 0 && (
             <Tooltip content="Xóa tất cả Container trong bộ sưu tập này">
               <button
                 onClick={handleClearAll}
@@ -827,7 +804,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       </div>
 
       {/* Quick Event Filter Pills */}
-      {containers.length > 0 && availableEventTypes.length > 0 && (
+      {availableEventTypes.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 text-xs shrink-0 shadow-2xs">
           <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1">
             <Filter className="w-3 h-3 text-primary-500" />
@@ -835,7 +812,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           </span>
           <button
             type="button"
-            onClick={() => { setEventTypeFilter('ALL'); setCurrentPage(1); }}
+            onClick={() => { setEventTypeFilter('ALL'); }}
             className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
               eventTypeFilter === 'ALL'
                 ? 'bg-primary-600 text-white shadow-xs'
@@ -848,7 +825,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                 ? 'bg-white/20 text-white'
                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 font-semibold'
             }`}>
-              {containers.length}
+              {eventCounts['ALL'] ?? total}
             </span>
           </button>
           {availableEventTypes.map((type) => {
@@ -865,7 +842,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               <button
                 key={type}
                 type="button"
-                onClick={() => { setEventTypeFilter(type); setCurrentPage(1); }}
+                onClick={() => { setEventTypeFilter(type); }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
                   isActive
                     ? `${pillColor} shadow-xs border-transparent`
@@ -897,7 +874,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                     ref={headerCheckboxRef}
                     type="checkbox"
                     checked={pageAllSelected}
-                    onChange={() => selection.selectPage(paginatedContainers, !pageAllSelected)}
+                    onChange={() => selection.selectPage(pageRows, !pageAllSelected)}
                     className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
                     title={t.bulk.selectPage}
                   />
@@ -929,7 +906,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                   hasActions={true}
                   actionColClass="w-24"
                 />
-              ) : containers.length === 0 ? (
+              ) : pageRows.length === 0 ? (
                 <tr>
                   <td
                     colSpan={visibleColumns.length + 3}
@@ -940,7 +917,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                   </td>
                 </tr>
               ) : (
-                paginatedContainers.map((item, idx) => (
+                pageRows.map((item, idx) => (
                   <ContainerRow
                     key={item.id ?? idx}
                     item={item}
@@ -965,14 +942,10 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         {/* Pagination Footer */}
         <Pagination
           currentPage={currentPage}
-          totalItems={filteredContainers.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={(newSize) => {
-            setPageSize(newSize);
-            localStorage.setItem('container_page_size', String(newSize));
-            setCurrentPage(1);
-          }}
+          onPageSizeChange={setPageSize}
         />
       </div>
 
@@ -981,13 +954,13 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         onClear={selection.clear}
         actions={bulkActions}
         extra={
-          !selection.isAllSelected && filteredContainers.length > selection.count ? (
+          !selection.isAllSelected && total > selection.count ? (
             <button
               type="button"
-              onClick={() => selection.selectAll(true)}
+              onClick={handleSelectAllResults}
               className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap"
             >
-              {tf(t.bulk.selectAllResults, { count: filteredContainers.length })}
+              {tf(t.bulk.selectAllResults, { count: total })}
             </button>
           ) : undefined
         }
@@ -1035,3 +1008,4 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     </div>
   );
 };
+
