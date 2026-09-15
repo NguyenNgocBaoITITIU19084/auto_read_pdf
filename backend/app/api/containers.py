@@ -5,7 +5,7 @@ from backend.app.core.database import (
     get_containers, insert_containers, delete_container, delete_containers_batch, clear_containers,
     get_container_watchlist, add_to_container_watchlist, remove_from_container_watchlist,
     add_container_watchlist_batch, remove_container_watchlist_batch, get_containers_by_ids,
-    update_watchlist_sync_status
+    update_watchlist_sync_status, get_containers_page, get_container_ids
 )
 from backend.app.services.eport_client import search_containers
 from backend.app.schemas.models import (
@@ -26,6 +26,30 @@ def list_containers(
     search_field: Optional[str] = Query(None)
 ):
     return get_containers(collection_id, search_query, search_field)
+
+@router.get("/page")
+def list_containers_page(
+    collection_id: int = Query(...),
+    limit: int = Query(50),
+    offset: int = Query(0),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+    event_type: Optional[str] = Query(None),
+):
+    return get_containers_page(collection_id, limit, offset, search_query, search_field, event_type)
+
+@router.get("/ids")
+def list_container_ids(
+    collection_id: int = Query(...),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+    event_type: Optional[str] = Query(None),
+):
+    return {"ids": get_container_ids(collection_id, search_query, search_field, event_type)}
+
+@router.post("/by-ids")
+def list_containers_by_ids(payload: BatchIdsRequest):
+    return get_containers_by_ids(payload.ids)
 
 @router.post("/search")
 def query_containers(payload: ContainerSearchRequest):

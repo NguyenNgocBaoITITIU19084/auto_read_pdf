@@ -81,6 +81,22 @@ def _chunks(items: list, size: int = 500):
         yield items[i:i + size]
 
 
+PAGE_MAX_LIMIT = 5000
+PAGE_DEFAULT_LIMIT = 50
+
+
+def _page_bounds(limit, offset) -> tuple[int, int]:
+    try:
+        limit = int(limit) if limit is not None else PAGE_DEFAULT_LIMIT
+    except (TypeError, ValueError):
+        limit = PAGE_DEFAULT_LIMIT
+    try:
+        offset = int(offset) if offset is not None else 0
+    except (TypeError, ValueError):
+        offset = 0
+    return max(1, min(limit, PAGE_MAX_LIMIT)), max(0, offset)
+
+
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, str]]):
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table});").fetchall()}
     for name, col_type in columns:
@@ -427,6 +443,7 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bookings_collection ON bookings(collection_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vessel_schedules_col_queried ON vessel_schedules(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_queried ON containers(collection_id, queried_at);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_event ON containers(collection_id, event_type);")
 
         # Create color_rules table
         conn.execute("""
@@ -1076,32 +1093,67 @@ CONTAINER_SEARCH_COLUMNS = {
 }
 
 
-def get_containers(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
-    order = "ORDER BY queried_at DESC, id ASC"
+_CONTAINER_ORDER = "ORDER BY queried_at DESC, id ASC"
+
+
+def _container_where(col_id: int, search_query: str = None, search_field: str = None,
+                     event_type: str = None) -> tuple[str, list]:
+    where = "collection_id = ?"
+    params: list = [col_id]
     if search_query:
         q = f"%{search_query}%"
         if search_field and search_field != "all" and search_field in CONTAINER_SEARCH_COLUMNS:
             expr = CUSTOMS_STATUS_SQL if search_field == "customs_status" else search_field
-            sql = f"SELECT * FROM containers WHERE collection_id = ? AND {expr} LIKE ? {order};"
-            params = (col_id, q)
+            where += f" AND {expr} LIKE ?"
+            params.append(q)
         else:
-            sql = f"""
-                SELECT * FROM containers
-                WHERE collection_id = ? AND (
-                    site_id LIKE ? OR containerno LIKE ? OR event_type LIKE ? OR
-                    location LIKE ? OR truck_vessel LIKE ? OR line_oper LIKE ? OR
-                    im_exp LIKE ? OR bill_book LIKE ? OR note LIKE ? OR item_seal_no LIKE ? OR
-                    custom_clearance_status LIKE ? OR infras_fee_status LIKE ? OR pod_destination LIKE ? OR
-                    {CUSTOMS_STATUS_SQL} LIKE ?
-                ) {order};
-            """
-            params = (col_id, *([q] * 14))
-    else:
-        sql = f"SELECT * FROM containers WHERE collection_id = ? {order};"
-        params = (col_id,)
+            where += f""" AND (
+                site_id LIKE ? OR containerno LIKE ? OR event_type LIKE ? OR
+                location LIKE ? OR truck_vessel LIKE ? OR line_oper LIKE ? OR
+                im_exp LIKE ? OR bill_book LIKE ? OR note LIKE ? OR item_seal_no LIKE ? OR
+                custom_clearance_status LIKE ? OR infras_fee_status LIKE ? OR pod_destination LIKE ? OR
+                {CUSTOMS_STATUS_SQL} LIKE ?
+            )"""
+            params.extend([q] * 14)
+    ev = (event_type or "").strip().upper()
+    if ev and ev != "ALL":
+        where += " AND UPPER(TRIM(COALESCE(event_type, ''))) = ?"
+        params.append(ev)
+    return where, params
+
+
+def get_containers(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
+    where, params = _container_where(col_id, search_query, search_field)
     with get_connection() as conn:
-        rows = _select_dicts(conn, sql, params)
+        rows = _select_dicts(conn, f"SELECT * FROM containers WHERE {where} {_CONTAINER_ORDER};", tuple(params))
     return [_enrich_container_row(r) for r in rows]
+
+
+def get_containers_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0, search_query: str = None,
+                        search_field: str = None, event_type: str = None) -> dict:
+    limit, offset = _page_bounds(limit, offset)
+    base_where, base_params = _container_where(col_id, search_query, search_field)
+    where, params = _container_where(col_id, search_query, search_field, event_type)
+    with get_connection() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM containers WHERE {where};", tuple(params)).fetchone()[0]
+        counts = {
+            ev: n for ev, n in conn.execute(
+                f"SELECT UPPER(TRIM(COALESCE(event_type, ''))) AS ev, COUNT(*) FROM containers "
+                f"WHERE {base_where} GROUP BY ev;", tuple(base_params)
+            ).fetchall()
+        }
+        rows = _select_dicts(
+            conn, f"SELECT * FROM containers WHERE {where} {_CONTAINER_ORDER} LIMIT ? OFFSET ?;",
+            (*params, limit, offset))
+    return {"items": [_enrich_container_row(r) for r in rows], "total": total, "event_type_counts": counts}
+
+
+def get_container_ids(col_id: int, search_query: str = None, search_field: str = None,
+                      event_type: str = None) -> list[int]:
+    where, params = _container_where(col_id, search_query, search_field, event_type)
+    with get_connection() as conn:
+        return [r[0] for r in conn.execute(
+            f"SELECT id FROM containers WHERE {where} {_CONTAINER_ORDER};", tuple(params)).fetchall()]
 
 
 def get_containers_by_ids(ids: list[int]) -> list[dict]:
