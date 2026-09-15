@@ -7,9 +7,9 @@ import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
-import { VesselSchedule, VesselWatchlist, VesselWatchlistBatchItem } from '../../types';
+import { VesselSchedule, VesselWatchlist, VesselWatchlistBatchItem, PageResult, TableQuery } from '../../types';
 import {
-  getVessels, searchVesselsApi, deleteVessel, deleteVesselsBatch, clearVessels,
+  getVessels, getVesselsPage, getVesselIds, getVesselsByIds, searchVesselsApi, deleteVessel, deleteVesselsBatch, clearVessels,
   addVesselWatchlist, getVesselWatchlist, deleteVesselWatchlist,
   addVesselWatchlistBatch, removeVesselWatchlistBatch, resyncVesselsApi,
 } from '../../services/api';
@@ -28,6 +28,8 @@ import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { subscribeTourActions } from '../../services/tourService';
+import { useServerTable, LoadMode } from '../../hooks/useServerTable';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
   useStableCallback, useAutoRefresh, rowsSignature, watchlistSignature, rowsToTSV, errorMessage,
 } from './tableHelpers';
@@ -35,8 +37,6 @@ import {
 interface VesselTabProps {
   initialSearchQuery?: string;
 }
-
-type LoadMode = 'loading' | 'refresh' | 'silent';
 
 const getRowId = (r: VesselSchedule) => r.id;
 const normalizeStr = (s?: string | null) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -49,17 +49,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   const { t, activeCollection, autoSyncEnabled, autoSyncStatus } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
-  const [schedules, setSchedules] = useState<VesselSchedule[]>([]);
-  const [loading, setLoading] = useState(false);
   const [querying, setQuerying] = useState(false);
   const [bulkBusy, setBulkBusy] = useState<string | null>(null);
-
-  // Pagination state
-  const [pageSize, setPageSize] = useState<number>(() => {
-    const saved = localStorage.getItem('vessel_page_size');
-    return saved && !isNaN(Number(saved)) ? Number(saved) : 50;
-  });
-  const [currentPage, setCurrentPage] = useState<number>(1);
 
   // Search in database
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
@@ -160,71 +151,46 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   };
 
   // ---------------------------------------------------------------------------
-  // Data loading (single request pipeline: schedules + watchlist in parallel)
+  // Data loading (server-paged table + separate watchlist load)
   // ---------------------------------------------------------------------------
-  const requestSeqRef = useRef(0);
-  const inFlightRef = useRef(false);
-  const dataSigRef = useRef('');
-  const watchSigRef = useRef('');
+  const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  const tableQuery = useMemo<TableQuery>(
+    () => ({ search_query: debouncedQuery, search_field: searchField }),
+    [debouncedQuery, searchField]
+  );
 
+  const table = useServerTable<VesselSchedule, PageResult<VesselSchedule>>({
+    enabled: !!activeCollection,
+    queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
+    pageSizeStorageKey: 'vessel_page_size',
+    fetchPage: (limit, offset) => getVesselsPage(activeCollection!.id, limit, offset, tableQuery),
+    onError: (e) => addToast(errorMessage(e, t.common.error), 'error'),
+  });
+  const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+
+  const watchSigRef = useRef('');
   const loadWatchlist = useStableCallback(async () => {
     if (!activeCollection) return;
     try {
       const data = await getVesselWatchlist(activeCollection.id);
-      watchSigRef.current = watchlistSignature(data);
-      setWatchlist(data);
+      const wsig = watchlistSignature(data);
+      if (wsig !== watchSigRef.current) {
+        watchSigRef.current = wsig;
+        setWatchlist(data);
+      }
     } catch (e) {
       console.error(e);
     }
   });
 
-  /**
-   * - 'loading': skeleton + error toast
-   * - 'refresh': no skeleton, always applies result (after mutations)
-   * - 'silent': background poll — skipped while a request is in flight, applies only when data changed
-   */
-  const loadData = useStableCallback(async (mode: LoadMode = 'loading') => {
-    if (!activeCollection) return;
-    if (mode === 'silent' && inFlightRef.current) return;
-    const seq = ++requestSeqRef.current;
-    inFlightRef.current = true;
-    if (mode === 'loading') setLoading(true);
-    try {
-      const [data, wl] = await Promise.all([
-        getVessels(activeCollection.id, searchQuery, searchField),
-        getVesselWatchlist(activeCollection.id).catch((e) => {
-          console.error(e);
-          return null;
-        }),
-      ]);
-      if (seq !== requestSeqRef.current) return;
-      const sig = rowsSignature(data);
-      if (mode !== 'silent' || sig !== dataSigRef.current) {
-        dataSigRef.current = sig;
-        setSchedules(data);
-      }
-      if (wl) {
-        const wsig = watchlistSignature(wl);
-        if (mode !== 'silent' || wsig !== watchSigRef.current) {
-          watchSigRef.current = wsig;
-          setWatchlist(wl);
-        }
-      }
-    } catch (e: any) {
-      console.error(e);
-      if (mode !== 'silent' && seq === requestSeqRef.current) addToast(errorMessage(e, t.common.error), 'error');
-    } finally {
-      if (seq === requestSeqRef.current) {
-        inFlightRef.current = false;
-        setLoading(false);
-      }
-    }
+  /** 'loading' | 'refresh' | 'silent' — reloads the current page and the watchlist together. */
+  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    await Promise.all([table.reload(mode), loadWatchlist()]);
   });
 
   useEffect(() => {
-    setCurrentPage(1);
-    loadData('loading');
-  }, [activeCollection, searchQuery, searchField, loadData]);
+    loadWatchlist();
+  }, [activeCollection?.id, loadWatchlist]);
 
   const silentRefresh = useCallback(() => {
     loadData('silent');
@@ -238,13 +204,24 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     refresh: silentRefresh,
   });
 
-  const paginatedSchedules = useMemo(() => {
-    if (pageSize >= schedules.length || pageSize <= 0) return schedules;
-    const start = (currentPage - 1) * pageSize;
-    return schedules.slice(start, start + pageSize);
-  }, [schedules, currentPage, pageSize]);
+  const selection = useRowSelection(pageRows, getRowId, [activeCollection?.id, debouncedQuery, searchField], { pruneMissing: false });
+  const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
 
-  const selection = useRowSelection(schedules, getRowId, [activeCollection?.id, searchQuery, searchField]);
+  /** Selected rows even when they live on other pages. */
+  const resolveSelectedRows = useCallback(async (): Promise<VesselSchedule[]> => {
+    if (selection.selectedRows.length === selection.count) return selection.selectedRows;
+    return getVesselsByIds(selectedIdList);
+  }, [selection.selectedRows, selection.count, selectedIdList]);
+
+  const handleSelectAllResults = useCallback(async () => {
+    if (!activeCollection) return;
+    try {
+      const ids = await getVesselIds(activeCollection.id, tableQuery);
+      selection.selectIds(ids, true);
+    } catch (e) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    }
+  }, [activeCollection, tableQuery, selection, addToast, t]);
 
   // Watchlist index: normalized vessel name -> entries (site/voyage checked on the few candidates)
   const watchlistIndex = useMemo(() => {
@@ -334,7 +311,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     try {
       await deleteVessel(id);
       addToast(t.common.success, 'success');
-      setSchedules((prev) => prev.filter((s) => s.id !== id));
+      selection.selectIds([id], false);
+      await loadData('refresh');
     } catch (e: any) {
       addToast(errorMessage(e, t.common.error), 'error');
     }
@@ -347,8 +325,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     try {
       await clearVessels(activeCollection.id);
       addToast(t.common.success, 'success');
-      setSchedules([]);
       selection.clear();
+      await loadData('refresh');
     } catch (e: any) {
       addToast(errorMessage(e, t.common.error), 'error');
     }
@@ -357,16 +335,14 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   // ---------------------------------------------------------------------------
   // Bulk actions
   // ---------------------------------------------------------------------------
-  const selectedRows = selection.selectedRows;
-  const selectedIdList = useMemo(() => selectedRows.map((r) => r.id), [selectedRows]);
   const selectedWatchlistIds = useMemo(() => {
     const ids = new Set<number>();
-    selectedRows.forEach((r) => {
+    selection.selectedRows.forEach((r) => {
       const w = findWatchlistItem(r);
       if (w) ids.add(w.id);
     });
     return Array.from(ids);
-  }, [selectedRows, findWatchlistItem]);
+  }, [selection.selectedRows, findWatchlistItem]);
 
   const runBulk = async (key: string, fn: () => Promise<void>) => {
     if (bulkBusy) return;
@@ -392,18 +368,18 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     await runBulk('delete', async () => {
       await deleteVesselsBatch(ids);
       addToast(tf(t.vessel.deleteSelectedSuccess, { count: ids.length }), 'success');
-      const idSet = new Set(ids);
-      setSchedules((prev) => prev.filter((s) => !idSet.has(s.id)));
-      selection.clear();
+      selection.selectIds(ids, false);
+      await loadData('refresh');
     });
   };
 
   const handleBatchAddWatchlist = () =>
     runBulk('watch-add', async () => {
       if (!activeCollection) return;
+      const rows = await resolveSelectedRows();
       const seen = new Set<string>();
       const items: VesselWatchlistBatchItem[] = [];
-      selectedRows.forEach((r) => {
+      rows.forEach((r) => {
         const name = (r.vessel_name || '').trim();
         if (!name || findWatchlistItem(r)) return;
         const item = {
@@ -455,18 +431,35 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     });
 
   const handleCopySelected = async () => {
-    if (selectedRows.length === 0) return;
+    const rows = await resolveSelectedRows();
+    if (rows.length === 0) return;
     const cols = visibleColumns.map((c) => ({ key: c.key, label: c.label }));
-    const text = rowsToTSV(selectedRows, cols);
+    const text = rowsToTSV(rows, cols);
     const success = await copyTextToClipboard(text);
     addToast(
-      success ? tf(t.vessel.copyRowsSuccess, { count: selectedRows.length }) : t.common.error,
+      success ? tf(t.vessel.copyRowsSuccess, { count: rows.length }) : t.common.error,
       success ? 'success' : 'error'
     );
   };
 
+  const [exportRows, setExportRows] = useState<VesselSchedule[]>([]);
+
+  const handleOpenExport = async (scope: 'all' | 'selected') => {
+    if (!activeCollection) return;
+    setExportScope(scope);
+    try {
+      const rows = scope === 'all'
+        ? await getVessels(activeCollection.id, debouncedQuery, searchField)
+        : await resolveSelectedRows();
+      setExportRows(rows);
+      setIsExportOpen(true);
+    } catch (e) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    }
+  };
+
   const bulkActions: BulkAction[] = [
-    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => { setExportScope('selected'); setIsExportOpen(true); } },
+    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => handleOpenExport('selected') },
     { key: 'copy', label: t.bulk.copySelected, icon: ClipboardCopy, onClick: handleCopySelected },
     { key: 'watch-add', label: t.bulk.addToWatchlist, icon: BookmarkPlus, onClick: handleBatchAddWatchlist, loading: bulkBusy === 'watch-add', disabled: !!bulkBusy },
     {
@@ -482,10 +475,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
   ];
 
-  const exportData = useMemo(() => {
-    if (!isExportOpen) return [];
-    return exportScope === 'selected' && selectedRows.length > 0 ? selectedRows : schedules;
-  }, [isExportOpen, exportScope, selectedRows, schedules]);
+  const exportData = exportRows;
 
   const exportColumns = useMemo(() => [
     { key: "STT", label: t.vessel.columns["STT"] },
@@ -494,13 +484,13 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
   // Header checkbox (page) with indeterminate state
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
-  const pageAllSelected = selection.isPageAllSelected(paginatedSchedules);
-  const pagePartiallySelected = selection.isPagePartiallySelected(paginatedSchedules);
+  const pageAllSelected = selection.isPageAllSelected(pageRows);
+  const pagePartiallySelected = selection.isPagePartiallySelected(pageRows);
   useEffect(() => {
     if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = pagePartiallySelected;
   }, [pagePartiallySelected]);
 
-  const rowOffset = pageSize >= schedules.length || pageSize <= 0 ? 0 : (currentPage - 1) * pageSize;
+  const rowOffset = (currentPage - 1) * pageSize;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
@@ -610,8 +600,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
           <Tooltip content="Xuất danh sách lịch tàu ra file Excel">
             <button
-              onClick={() => { setExportScope('all'); setIsExportOpen(true); }}
-              disabled={schedules.length === 0}
+              onClick={() => handleOpenExport('all')}
+              disabled={total === 0}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -628,7 +618,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
             </button>
           </Tooltip>
 
-          {schedules.length > 0 && (
+          {total > 0 && (
             <Tooltip content="Xóa tất cả lịch tàu trong bộ sưu tập này">
               <button
                 onClick={handleClearAll}
@@ -652,7 +642,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
                     ref={headerCheckboxRef}
                     type="checkbox"
                     checked={pageAllSelected}
-                    onChange={() => selection.selectPage(paginatedSchedules, !pageAllSelected)}
+                    onChange={() => selection.selectPage(pageRows, !pageAllSelected)}
                     className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
                     title={t.bulk.selectPage}
                   />
@@ -684,7 +674,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
                   hasActions={true}
                   actionColClass="w-24"
                 />
-              ) : schedules.length === 0 ? (
+              ) : total === 0 ? (
                 <tr>
                   <td
                     colSpan={visibleColumns.length + 3}
@@ -695,7 +685,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
                   </td>
                 </tr>
               ) : (
-                paginatedSchedules.map((item, idx) => (
+                pageRows.map((item, idx) => (
                   <VesselRow
                     key={item.id ?? idx}
                     item={item}
@@ -720,14 +710,10 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
         {/* Pagination Footer */}
         <Pagination
           currentPage={currentPage}
-          totalItems={schedules.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={(newSize) => {
-            setPageSize(newSize);
-            localStorage.setItem('vessel_page_size', String(newSize));
-            setCurrentPage(1);
-          }}
+          onPageSizeChange={setPageSize}
         />
       </div>
 
@@ -736,13 +722,13 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
         onClear={selection.clear}
         actions={bulkActions}
         extra={
-          !selection.isAllSelected && schedules.length > selection.count ? (
+          total > selection.count ? (
             <button
               type="button"
-              onClick={() => selection.selectAll(true)}
+              onClick={handleSelectAllResults}
               className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap"
             >
-              {tf(t.bulk.selectAllResults, { count: schedules.length })}
+              {tf(t.bulk.selectAllResults, { count: total })}
             </button>
           ) : undefined
         }
