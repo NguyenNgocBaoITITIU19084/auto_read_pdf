@@ -16,7 +16,7 @@ from backend.app.services.extractor import (
     extract_booking_from_text, parse_date_str, parse_etd, detect_carrier, has_booking_fields
 )
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 DEFAULT_MODEL = "gemini-2.5-flash"
 FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
@@ -151,7 +151,7 @@ def extract_booking_from_image_ai(
     mime_type = get_image_mime_type(image_bytes)
     b64_data = base64.b64encode(image_bytes).decode("utf-8")
 
-    url = GEMINI_API_URL.format(model=model, api_key=api_key)
+    url = GEMINI_API_URL.format(model=model)
     payload = {
         "contents": [
             {
@@ -173,7 +173,7 @@ def extract_booking_from_image_ai(
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=timeout)
+        response = requests.post(url, json=payload, headers={"x-goog-api-key": api_key}, timeout=timeout)
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
         raise GeminiError("network", str(e))
     except requests.exceptions.RequestException as e:
@@ -455,7 +455,7 @@ def verify_gemini_api_key(api_key: str, model: str = DEFAULT_MODEL) -> Dict[str,
     Returns {"valid": bool, "message": str, "error_type": None|"invalid_key"|"model_not_found"|"quota"|"network"|"unknown"}.
     """
     model = (model or DEFAULT_MODEL).strip()
-    url = GEMINI_API_URL.format(model=model, api_key=api_key)
+    url = GEMINI_API_URL.format(model=model)
     payload = {
         "contents": [
             {
@@ -464,7 +464,7 @@ def verify_gemini_api_key(api_key: str, model: str = DEFAULT_MODEL) -> Dict[str,
         ]
     }
     try:
-        res = requests.post(url, json=payload, timeout=10)
+        res = requests.post(url, json=payload, headers={"x-goog-api-key": api_key}, timeout=10)
     except requests.exceptions.RequestException as e:
         return {"valid": False, "error_type": "network", "message": f"{W_NETWORK} ({e})"}
 
@@ -496,10 +496,10 @@ def list_gemini_models(api_key: str = "", timeout: float = 10) -> Tuple[List[str
         models: List[str] = []
         page_token = ""
         for _ in range(5):  # pagination guard
-            params = {"key": api_key, "pageSize": 1000}
+            params = {"pageSize": 1000}
             if page_token:
                 params["pageToken"] = page_token
-            res = requests.get(GEMINI_MODELS_URL, params=params, timeout=timeout)
+            res = requests.get(GEMINI_MODELS_URL, params=params, headers={"x-goog-api-key": api_key}, timeout=timeout)
             if res.status_code != 200:
                 return list(FALLBACK_MODELS), False
             body = res.json() or {}

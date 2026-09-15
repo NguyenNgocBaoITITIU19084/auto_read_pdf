@@ -323,3 +323,55 @@ def test_list_gemini_models_fallback(monkeypatch):
         raise _requests.exceptions.ConnectionError("offline")
     monkeypatch.setattr(ie.requests, "get", boom)
     assert ie.list_gemini_models("k") == (ie.FALLBACK_MODELS, False)
+
+
+# --- Regression: Google's newer "auth key" credentials (prefix "AQ.", issued by AI Studio
+# since mid-2026) are rejected by the API when sent as the legacy "?key=" query parameter
+# ("Request had invalid authentication credentials..."). They work when sent as the
+# x-goog-api-key header instead, which also works for classic "AIza..." keys. So the app
+# must always send the key via that header, never via the URL/query string.
+
+@patch("backend.app.services.image_extractor.requests.post")
+def test_extract_booking_from_image_ai_sends_key_via_header_not_url(mock_post):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}
+    mock_post.return_value = mock_response
+
+    extract_booking_from_image_ai(create_sample_image_bytes(), filename="a.jpg", api_key="AQ.super-secret-token")
+
+    _, kwargs = mock_post.call_args
+    call_url = mock_post.call_args.args[0] if mock_post.call_args.args else kwargs.get("url", "")
+    assert "AQ.super-secret-token" not in call_url
+    assert kwargs["headers"]["x-goog-api-key"] == "AQ.super-secret-token"
+
+
+@patch("backend.app.services.image_extractor.requests.post")
+def test_verify_gemini_api_key_sends_key_via_header_not_url(mock_post):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_post.return_value = mock_response
+
+    verify_gemini_api_key("AQ.super-secret-token")
+
+    _, kwargs = mock_post.call_args
+    call_url = mock_post.call_args.args[0] if mock_post.call_args.args else kwargs.get("url", "")
+    assert "AQ.super-secret-token" not in call_url
+    assert kwargs["headers"]["x-goog-api-key"] == "AQ.super-secret-token"
+
+
+def test_list_gemini_models_sends_key_via_header_not_url(monkeypatch):
+    import backend.app.services.image_extractor as ie
+
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["params"] = params
+        captured["headers"] = headers
+        return _resp(200, {"models": []})
+
+    monkeypatch.setattr(ie.requests, "get", fake_get)
+    ie.list_gemini_models("AQ.super-secret-token")
+
+    assert "key" not in (captured["params"] or {})
+    assert captured["headers"]["x-goog-api-key"] == "AQ.super-secret-token"
