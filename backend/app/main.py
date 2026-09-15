@@ -36,6 +36,9 @@ from backend.app.api.export_backup import router as export_backup_router
 from backend.app.api.color_rules import router as color_rules_router
 from backend.app.api.dashboard import router as dashboard_router
 from backend.app.api.settings import router as settings_router
+from backend.app.api.mobile import router as mobile_router
+from backend.app.services.mobile_bridge import bridge
+from backend.app.services.lan_server import lan_server
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,6 +50,8 @@ async def lifespan(app: FastAPI):
         create_collection("Default Collection")
     yield
     # Shutdown
+    bridge.stop()
+    lan_server.stop()
 
 app = FastAPI(
     title="Auto Read PDF Backend API",
@@ -77,6 +82,7 @@ app.include_router(export_backup_router, prefix="/api/v1")
 app.include_router(color_rules_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(mobile_router, prefix="/api/v1")
 
 if __name__ == "__main__":
     import multiprocessing
