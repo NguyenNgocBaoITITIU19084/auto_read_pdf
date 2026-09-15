@@ -3,7 +3,7 @@ import {
   Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
-  PageResult, ContainerPageResult, TableQuery,
+  PageResult, ContainerPageResult, TableQuery, MobileSession,
 } from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
@@ -529,5 +529,33 @@ export const getAIModelsApi = async (apiKey?: string): Promise<string[]> => {
     console.warn('Failed to load AI models, using fallback list:', e);
     return [...FALLBACK_GEMINI_MODELS];
   }
+};
+
+// Mobile phone session (QR pairing)
+export const startMobileSessionApi = async (ip?: string): Promise<MobileSession> => {
+  const body: Record<string, any> = {};
+  if (ip !== undefined) {
+    body.ip = ip;
+  }
+  const res = await apiClient.post<MobileSession>('/mobile/session', body);
+  return res.data;
+};
+
+export const getMobileSessionApi = async (): Promise<MobileSession> => {
+  const res = await apiClient.get<MobileSession>('/mobile/session');
+  return res.data;
+};
+
+export const stopMobileSessionApi = async (): Promise<void> => {
+  await apiClient.delete('/mobile/session');
+};
+
+export const fetchMobilePhotoApi = async (id: string, filename: string): Promise<File> => {
+  const res = await apiClient.get(`/mobile/photos/${id}`, { responseType: 'blob' });
+  return new File([res.data], filename, { type: 'image/jpeg' });
+};
+
+export const ackMobilePhotoApi = async (id: string): Promise<void> => {
+  await apiClient.delete(`/mobile/photos/${id}`);
 };
 

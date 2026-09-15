@@ -398,6 +398,30 @@ export const translations = {
         engineNone: "Không có công cụ đọc",
         readingHint: "Đang đọc dữ liệu từ ảnh..."
       },
+      phone: {
+        button: "Chụp từ điện thoại",
+        connected: "Điện thoại đã kết nối",
+        modalTitle: "Quét mã QR từ điện thoại",
+        scanHint: "Quét mã QR bằng điện thoại để ghép nối",
+        sameWifiHint: "Điện thoại và máy tính phải ở chung một mạng WiFi",
+        chooseIp: "Chọn địa chỉ IP",
+        copyLink: "Sao chép liên kết",
+        devices: "Thiết bị đã kết nối",
+        noDevices: "Chưa có thiết bị nào kết nối",
+        photosWaiting: "Ảnh đang chờ",
+        disconnect: "Ngắt kết nối",
+        received: "Đã nhận",
+        startFailed: "Không thể bắt đầu phiên kết nối. Vui lòng kiểm tra lại mạng WiFi.",
+        troubleshootTitle: "Gặp vấn đề kết nối?",
+        troubleshootItems: [
+          "Kiểm tra điện thoại và máy tính đang ở chung một mạng WiFi (không phải WiFi khách)",
+          "Nếu dùng WiFi khách, hãy bật hotspot riêng trên điện thoại và kết nối máy tính vào đó",
+          "Cho phép truy cập mạng khi hệ thống hỏi (Windows/macOS firewall)",
+          "Tắt VPN trên điện thoại và máy tính"
+        ],
+        sessionExpired: "Phiên kết nối đã hết hạn",
+        pendingInModal: "Còn {count} ảnh đang chờ"
+      },
       bulkActions: {
         deleteSuccess: "Đã xóa {count} booking",
         copySuccess: "Đã sao chép {count} dòng (dán được vào Excel)",
@@ -1156,6 +1180,30 @@ export const translations = {
         engineOcr: "Offline OCR",
         engineNone: "No engine available",
         readingHint: "Reading data from the image..."
+      },
+      phone: {
+        button: "Capture from phone",
+        connected: "Phone connected",
+        modalTitle: "Scan QR code from phone",
+        scanHint: "Scan the QR code using your phone to pair",
+        sameWifiHint: "Your phone and computer must be on the same WiFi network",
+        chooseIp: "Select IP address",
+        copyLink: "Copy link",
+        devices: "Connected devices",
+        noDevices: "No devices connected yet",
+        photosWaiting: "Photos waiting",
+        disconnect: "Disconnect",
+        received: "Received",
+        startFailed: "Could not start the pairing session. Please check your WiFi connection.",
+        troubleshootTitle: "Having trouble connecting?",
+        troubleshootItems: [
+          "Make sure your phone and computer are on the same WiFi network (not guest WiFi)",
+          "If using guest WiFi, enable your phone's personal hotspot and connect your computer to it instead",
+          "Allow network access when the system prompts (Windows/macOS firewall)",
+          "Disable VPN on both your phone and computer"
+        ],
+        sessionExpired: "Pairing session has expired",
+        pendingInModal: "{count} photo(s) waiting"
       },
       bulkActions: {
         deleteSuccess: "Deleted {count} booking(s)",

@@ -358,4 +358,32 @@ export interface TableQuery {
   event_type?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Mobile phone session (QR pairing)
+// ---------------------------------------------------------------------------
+export interface MobileDeviceInfo {
+  id: string;
+  label: string;
+  last_seen: number;
+}
+
+export interface MobilePendingPhoto {
+  id: string;
+  filename: string;
+  size: number;
+  received_at: number;
+}
+
+export interface MobileSession {
+  active: boolean;
+  session_id?: string;
+  pair_url?: string;
+  ips?: string[];
+  selected_ip?: string;
+  port?: number;
+  pairing_expires_at?: number;
+  devices: MobileDeviceInfo[];
+  pending: MobilePendingPhoto[];
+}
+
 
