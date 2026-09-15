@@ -729,6 +729,9 @@ def export_backup_data() -> dict:
     }
 
 
+RESTORE_MODES = ("merge", "replace")
+
+
 def _insert_collection_unique(cursor: sqlite3.Cursor, name: str, created_at: str, settings) -> int:
     base_name = (name or "").strip() or "Imported Collection"
     candidate = base_name
@@ -747,24 +750,54 @@ def _insert_collection_unique(cursor: sqlite3.Cursor, name: str, created_at: str
     return cursor.lastrowid
 
 
-def import_backup_data(backup_data: dict):
+def _merge_collection(cursor: sqlite3.Cursor, name: str, created_at: str, settings) -> int:
+    base_name = (name or "").strip() or "Imported Collection"
+    row = cursor.execute("SELECT id FROM collections WHERE name = ?;", (base_name,)).fetchone()
+    if not row:
+        return _insert_collection_unique(cursor, base_name, created_at, settings)
+    if settings is not None:
+        cursor.execute("UPDATE collections SET settings = ? WHERE id = ?;", (settings, row[0]))
+    return row[0]
+
+
+def import_backup_data(backup_data: dict, mode: str = "merge"):
+    """
+    mode="merge": same-name collections are merged; on conflicts the backup row wins.
+    mode="replace": all collections (with their rows) and color rules are deleted first.
+    System settings are never touched. Runs in ONE transaction.
+    """
+    if mode not in RESTORE_MODES:
+        raise ValueError(f"Invalid restore mode: {mode}")
     if not isinstance(backup_data, dict) or "collections" not in backup_data:
         raise ValueError("Invalid backup format")
     collections = backup_data.get("collections") or []
     if not isinstance(collections, list):
         raise ValueError("Invalid backup format")
+    color_rules = backup_data.get("color_rules")
+    has_rules = isinstance(color_rules, list) and bool(color_rules)
 
     now_str = _now_str()
     # Everything runs in ONE transaction: either the whole backup is restored or nothing is.
     with get_connection() as conn:
         cursor = conn.cursor()
+        if mode == "replace":
+            cursor.execute("DELETE FROM collections;")  # ON DELETE CASCADE removes rows + watchlists
+            if has_rules:
+                cursor.execute("DELETE FROM color_rules;")
+
         for col_data in collections:
             if not isinstance(col_data, dict):
                 continue
             created_at = col_data.get("created_at") or now_str
-            col_id = _insert_collection_unique(cursor, col_data.get("name"), created_at, col_data.get("settings"))
+            col_id = _merge_collection(cursor, col_data.get("name"), created_at, col_data.get("settings"))
 
             for b in col_data.get("bookings") or []:
+                booking_no = (b.get("Booking No", b.get("booking_no")) or "").strip()
+                pdf_name = b.get("Tên file PDF", b.get("pdf_name")) or ""
+                if booking_no:
+                    cursor.execute(
+                        "DELETE FROM bookings WHERE collection_id = ? AND booking_no = ? AND COALESCE(pdf_name, '') = ?;",
+                        (col_id, booking_no, pdf_name))
                 _insert_booking_row(cursor, col_id, b)
 
             vessels = col_data.get("vessel_schedules") or []
@@ -794,10 +827,7 @@ def import_backup_data(backup_data: dict):
                 VALUES (?, ?, ?, ?);
             """, [(col_id, *it) for it in c_items if it[1]])
 
-        color_rules = backup_data.get("color_rules")
-        if isinstance(color_rules, list) and color_rules:
-            # Replace (not append) so repeated restores never duplicate rules
-            cursor.execute("DELETE FROM color_rules;")
+        if has_rules:
             # Old backups may contain duplicates: the last occurrence wins (matches the UI, which
             # applies the newest rule), then INSERT OR IGNORE can't keep a stale earlier copy
             latest = {}
@@ -806,6 +836,10 @@ def import_backup_data(backup_data: dict):
                     key = _color_rule_key(cr)
                     latest.pop(key, None)
                     latest[key] = cr
+            if mode == "merge":
+                cursor.executemany(
+                    "DELETE FROM color_rules WHERE target_table = ? AND column_key = ? AND match_value = ? AND match_type = ?;",
+                    list(latest.keys()))
             cursor.executemany(_COLOR_RULE_INSERT_SQL, [
                 _color_rule_params(cr, cr.get("created_at") or now_str) for cr in latest.values()
             ])

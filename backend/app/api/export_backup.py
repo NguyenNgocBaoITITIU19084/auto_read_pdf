@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -40,10 +40,12 @@ def get_backup():
         raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
 
 @router.post("/restore")
-def restore_backup(payload: dict):
+def restore_backup(payload: dict, mode: str = Query("merge", description="merge | replace")):
+    if mode not in ("merge", "replace"):
+        raise HTTPException(status_code=400, detail="mode must be 'merge' or 'replace'")
     try:
-        import_backup_data(payload)
-        return {"status": "success", "message": "Database restored successfully"}
+        import_backup_data(payload, mode=mode)
+        return {"status": "success", "message": "Database restored successfully", "mode": mode}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Restore failed: {e}")
 
