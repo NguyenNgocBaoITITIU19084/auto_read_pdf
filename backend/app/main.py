@@ -27,7 +27,7 @@ if str(project_root) not in sys.path:
 
 from backend.app.core.config import BACKEND_HOST, BACKEND_PORT
 from backend.app.core.database import init_db, get_collections, create_collection
-from backend.app.services.background_tasks import setup_scheduler
+from backend.app.services.background_tasks import restore_auto_sync, shutdown_scheduler
 from backend.app.api.collections import router as collections_router
 from backend.app.api.bookings import router as bookings_router
 from backend.app.api.vessels import router as vessels_router
@@ -41,12 +41,14 @@ from backend.app.api.settings import router as settings_router
 async def lifespan(app: FastAPI):
     # Startup
     init_db()
-    setup_scheduler()
     collections = get_collections()
     if not collections:
         create_collection("Default Collection")
+    # Restore persisted auto-sync schedule (first run is delayed so startup stays fast)
+    await restore_auto_sync()
     yield
     # Shutdown
+    shutdown_scheduler()
 
 app = FastAPI(
     title="Auto Read PDF Backend API",
@@ -85,5 +87,5 @@ if __name__ == "__main__":
     is_frozen = getattr(sys, "frozen", False)
     logger.info(f"Starting backend server (frozen={is_frozen}) on {BACKEND_HOST}:{BACKEND_PORT}")
     
-    uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT, reload=False, log_level="info")
+    uvicorn.run(app, host=BACKEND_HOST, port=BACKEND_PORT, reload=False, log_level="info", access_log=False)
 

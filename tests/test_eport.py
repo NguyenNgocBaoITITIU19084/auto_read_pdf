@@ -3,8 +3,8 @@ import sqlite3
 import os
 from datetime import datetime
 from unittest.mock import patch, MagicMock
-from src.eport_client import search_vessels, search_containers
-from src.database import (
+from backend.app.services.eport_client import search_vessels, search_containers
+from backend.app.core.database import (
     init_db,
     insert_vessel_schedules,
     get_vessel_schedules,
@@ -21,13 +21,14 @@ from src.database import (
     clear_containers,
     get_container_watchlist,
     add_to_container_watchlist,
-    remove_from_container_watchlist
+    remove_from_container_watchlist,
+    get_connection
 )
 
 @pytest.fixture(autouse=True)
 def setup_db():
     init_db()
-    with sqlite3.connect("booking_data.db") as conn:
+    with get_connection() as conn:
         conn.execute("PRAGMA foreign_keys = ON;")
         conn.execute("DELETE FROM collections;")
         conn.commit()
@@ -71,7 +72,7 @@ def test_vessel_schedule_database_operations():
     ]
 
     # Act & Assert: Create a collection first
-    from src.database import create_collection
+    from backend.app.core.database import create_collection
     col_id = create_collection("Test Vessel Collection")
 
     insert_vessel_schedules(col_id, schedules)
@@ -193,7 +194,7 @@ def test_search_vessels_client_failures(mock_post):
     assert res == []
 
 def test_vessel_watchlist_operations():
-    from src.database import create_collection
+    from backend.app.core.database import create_collection
     col_id = create_collection("Watchlist Collection")
     
     # Empty at first
@@ -222,7 +223,7 @@ def test_vessel_watchlist_operations():
     assert get_watchlist(col_id)[0]["vessel_name"] == "EVER MEMO"
 
 def test_collection_settings_operations():
-    from src.database import create_collection, get_collections, update_collection_settings, export_backup_data, import_backup_data
+    from backend.app.core.database import create_collection, get_collections, update_collection_settings, export_backup_data, import_backup_data
     
     col_id = create_collection("Settings Test Collection")
     
@@ -246,7 +247,7 @@ def test_collection_settings_operations():
     assert backed_col["settings"] == settings_data
     
     # Delete collections to restore
-    with sqlite3.connect("booking_data.db") as conn:
+    with get_connection() as conn:
         conn.execute("DELETE FROM collections;")
         conn.commit()
         
@@ -261,7 +262,7 @@ def test_collection_settings_operations():
     assert restored[0]["settings"] == settings_data
 
 def test_container_database_operations():
-    from src.database import create_collection
+    from backend.app.core.database import create_collection
     col_id = create_collection("Container Test Collection")
     
     # Arrange container data
@@ -354,7 +355,7 @@ def test_container_database_operations():
     assert len(get_containers(col_id)) == 0
 
 def test_container_backup_restore():
-    from src.database import create_collection, get_collections
+    from backend.app.core.database import create_collection, get_collections
     col_id = create_collection("Container Backup Test")
     
     # Insert container and watchlist
@@ -367,7 +368,7 @@ def test_container_backup_restore():
     backup = export_backup_data()
     
     # Delete to restore
-    with sqlite3.connect("booking_data.db") as conn:
+    with get_connection() as conn:
         conn.execute("DELETE FROM collections;")
         conn.commit()
         
@@ -389,7 +390,7 @@ def test_container_backup_restore():
     assert len(watchlist) == 1
     assert watchlist[0]["container_no"] == "EMCU9914560"
 
-@patch("src.eport_client.requests.post")
+@patch("backend.app.services.eport_client.requests.post")
 def test_search_containers_client(mock_post):
     # Mocking API response
     mock_resp = MagicMock()
@@ -414,3 +415,54 @@ def test_search_containers_client(mock_post):
     # Verify date is formatted properly
     expected_time = datetime.fromtimestamp(1782769311000 / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
     assert results[0]["EVENT_TIME"] == expected_time
+
+
+# ---------------------------------------------------------------------------
+# backend.app.services.eport_client
+# ---------------------------------------------------------------------------
+
+def test_backend_parse_eport_date_uses_vietnam_timezone():
+    from backend.app.services.eport_client import parse_eport_date
+    # 1782769311000 ms = 2026-06-29 21:41:51 UTC = 2026-06-30 04:41:51 Asia/Ho_Chi_Minh
+    assert parse_eport_date("/Date(1782769311000)/") == "2026-06-30 04:41:51"
+    assert parse_eport_date("") == ""
+    assert parse_eport_date("12:00 01/01/2026") == "12:00 01/01/2026"
+
+
+def _vessel_response(models):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"type": "success", "content": "", "model": models}
+    return mock_response
+
+
+@patch("backend.app.services.eport_client.requests.post")
+def test_backend_search_vessels_detailed_voyage_mismatch(mock_post):
+    from backend.app.services.eport_client import search_vessels, search_vessels_detailed
+    mock_post.return_value = _vessel_response([
+        {"VESSELNAME": "EVER MEMO ", "IN_OUT_VOYAGE": "1461-012E"},
+        {"VESSELNAME": "EVER MEMO", "IN_OUT_VOYAGE": "1462-013E"},
+        {"VESSELNAME": "OTHER SHIP", "IN_OUT_VOYAGE": "001N"},
+    ])
+
+    detail = search_vessels_detailed("CTL", "EVER MEMO", "999X")
+    assert detail["items"] == []
+    assert detail["reason"] == "voyage_mismatch"
+    assert detail["available_voyages"] == ["1461-012E", "1462-013E"]
+    assert search_vessels("CTL", "EVER MEMO", "999X") == []
+
+    detail = search_vessels_detailed("CTL", "EVER MEMO", "1462-013E")
+    assert detail["reason"] == "ok"
+    assert [m["IN_OUT_VOYAGE"] for m in detail["items"]] == ["1462-013E"]
+    assert search_vessels("CTL", "EVER MEMO", "1462-013E") == detail["items"]
+
+
+@patch("backend.app.services.eport_client.requests.post")
+def test_backend_search_vessels_detailed_vessel_not_found(mock_post):
+    from backend.app.services.eport_client import search_vessels_detailed
+    mock_post.return_value = _vessel_response([{"VESSELNAME": "OTHER SHIP", "IN_OUT_VOYAGE": "001N"}])
+    detail = search_vessels_detailed("CTL", "EVER MEMO", "1461-012E")
+    assert detail["items"] == []
+    assert detail["reason"] == "vessel_not_found"
+    assert detail["available_voyages"] == []
+    assert "EVER MEMO" in detail["message"]

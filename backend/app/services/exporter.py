@@ -1,12 +1,14 @@
 import io
-import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 def export_to_excel_buffer(data: list[dict], selected_columns: list[str]) -> io.BytesIO:
     if not data or not selected_columns:
         raise ValueError("Data and selected columns cannot be empty")
-        
+
+    # Heavy imports are deferred so backend startup stays fast
+    import pandas as pd
+    from openpyxl import load_workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+
     df = pd.DataFrame(data)
     df_filtered = df.reindex(columns=selected_columns).fillna("null")
     df_filtered = df_filtered.replace("", "null")
