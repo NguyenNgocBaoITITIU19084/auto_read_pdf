@@ -678,6 +678,45 @@ class TestConcurrency:
         t.join()
 
 
+class TestEnsureFreshPairingToken:
+    def test_noop_when_not_expired(self, bridge):
+        session = bridge.start()
+        token_before = session.pairing_token
+        expires_before = session.pairing_expires_at
+        bridge.ensure_fresh_pairing_token()
+        assert bridge._session.pairing_token == token_before
+        assert bridge._session.pairing_expires_at == expires_before
+
+    def test_rotates_when_expired_and_unused(self, bridge, clock):
+        session = bridge.start()
+        old_token = session.pairing_token
+        clock.advance(5 * 60 + 1)
+        bridge.ensure_fresh_pairing_token()
+        assert bridge._session.pairing_token != old_token
+        assert bridge._session.pairing_expires_at > clock()
+
+    def test_does_not_bump_last_activity(self, bridge, clock):
+        """Polling GET /session must not reset the 30-minute idle timer,
+        otherwise a desktop UI sitting on the pairing screen would keep the
+        session alive forever and the idle-expiry job would never fire."""
+        session = bridge.start()
+        last_activity_before = session.last_activity
+        clock.advance(5 * 60 + 1)
+        bridge.ensure_fresh_pairing_token()
+        assert bridge._session.last_activity == last_activity_before
+
+        # Prove expiry still fires: advance to just past 30 minutes total
+        # idle and confirm the session is torn down.
+        clock.advance(30 * 60 - (5 * 60 + 1) + 1)
+        bridge.ensure_fresh_pairing_token()  # a poll right before expiry check
+        assert bridge.expire_if_idle() is True
+        assert bridge._session is None
+
+    def test_noop_when_no_session(self, bridge):
+        bridge.ensure_fresh_pairing_token()  # must not raise
+        assert bridge._session is None
+
+
 class TestSnapshot:
     def test_snapshot_contains_no_device_token(self, bridge, paired):
         snap = bridge.snapshot()

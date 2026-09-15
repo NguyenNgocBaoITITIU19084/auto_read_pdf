@@ -229,6 +229,17 @@ class MobileBridge:
             self._photo_counter = 0
             return session
 
+    def set_on_stop(self, on_stop: Optional[Callable[[], None]]) -> None:
+        """Set/replace the ``on_stop`` callback after construction.
+
+        The module-level ``bridge`` singleton is constructed with no
+        callback (this module must not import the LAN server, to avoid a
+        circular import); ``lan_server.py`` calls this once at import time
+        to wire itself in instead.
+        """
+        with self._lock:
+            self._on_stop = on_stop
+
     def stop(self) -> None:
         with self._lock:
             callback = self._stop_locked()
@@ -263,6 +274,31 @@ class MobileBridge:
         if callback is not None:
             callback()
         return True
+
+    def ensure_fresh_pairing_token(self) -> None:
+        """Rotate the pairing token if it has expired but was never used.
+
+        ``pair()`` only rotates the token on a *successful* pairing; nothing
+        rotates an expired-but-unused token, so without this a QR code shown
+        by the desktop UI could go stale after 5 minutes with no way to
+        refresh other than restarting the whole session. ``GET
+        /mobile/session`` calls this before building its response so the UI
+        always has a valid code to render.
+
+        Deliberately does **not** touch ``last_activity``: this is called on
+        every poll of ``GET /session``, and if it counted as activity the
+        30-minute idle-expiry job would never fire while the desktop UI is
+        simply sitting on the pairing screen. No-op when there is no active
+        session.
+        """
+        with self._lock:
+            session = self._session
+            if session is None:
+                return
+            if self._clock() <= session.pairing_expires_at:
+                return
+            session.pairing_token = secrets.token_urlsafe(32)
+            session.pairing_expires_at = self._clock() + PAIRING_TOKEN_TTL_SECONDS
 
     # -- pairing -------------------------------------------------------------
 
