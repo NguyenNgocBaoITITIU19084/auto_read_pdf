@@ -30,6 +30,7 @@ import { TableSkeleton } from '../common/TableSkeleton';
 import { subscribeTourActions } from '../../services/tourService';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useVirtualRows } from '../../hooks/useVirtualRows';
 import {
   useStableCallback, useAutoRefresh, watchlistSignature, rowsToTSV, errorMessage,
 } from '../vessel/tableHelpers';
@@ -603,6 +604,15 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     ...columns.map((c) => ({ key: c.key, label: c.label })),
   ], [columns, t]);
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualRows(pageRows.length, scrollRef);
+  const colSpan = visibleColumns.length + 3;
+
+  // Back to the top when the page or filters change
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [currentPage, pageSize, tableQuery]);
+
   // Header checkbox (page) with indeterminate state
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   const pageAllSelected = selection.isPageAllSelected(pageRows);
@@ -865,7 +875,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
       {/* Container Table */}
       <div data-tour="container-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
-        <div className="flex-1 overflow-x-auto overflow-y-auto w-full">
+        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
               <tr>
@@ -909,7 +919,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               ) : pageRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={visibleColumns.length + 3}
+                    colSpan={colSpan}
                     className="py-12 text-center text-slate-400 dark:text-slate-500"
                   >
                     <Box className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
@@ -917,23 +927,38 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                   </td>
                 </tr>
               ) : (
-                pageRows.map((item, idx) => (
-                  <ContainerRow
-                    key={item.id ?? idx}
-                    item={item}
-                    rowNumber={rowOffset + idx + 1}
-                    visibleColumns={visibleColumns}
-                    columnWidths={columnWidths}
-                    isSelected={selection.selectedIds.has(item.id)}
-                    isBookmarked={!!findWatchlistItem(item)}
-                    t={t}
-                    onToggleSelect={selection.toggle}
-                    onOpen={setSelectedContainer}
-                    onCopy={handleCopyRow}
-                    onToggleWatchlist={handleToggleWatchlist}
-                    onDelete={handleDelete}
-                  />
-                ))
+                <>
+                  {virtual.paddingTop > 0 && (
+                    <tr aria-hidden="true" style={{ height: virtual.paddingTop }}>
+                      <td colSpan={colSpan} />
+                    </tr>
+                  )}
+                  {virtual.indexes.map((i) => {
+                    const item = pageRows[i];
+                    return (
+                      <ContainerRow
+                        key={item.id ?? i}
+                        item={item}
+                        rowNumber={rowOffset + i + 1}
+                        visibleColumns={visibleColumns}
+                        columnWidths={columnWidths}
+                        isSelected={selection.selectedIds.has(item.id)}
+                        isBookmarked={!!findWatchlistItem(item)}
+                        t={t}
+                        onToggleSelect={selection.toggle}
+                        onOpen={setSelectedContainer}
+                        onCopy={handleCopyRow}
+                        onToggleWatchlist={handleToggleWatchlist}
+                        onDelete={handleDelete}
+                      />
+                    );
+                  })}
+                  {virtual.paddingBottom > 0 && (
+                    <tr aria-hidden="true" style={{ height: virtual.paddingBottom }}>
+                      <td colSpan={colSpan} />
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>

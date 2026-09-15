@@ -30,6 +30,7 @@ import { TableSkeleton } from '../common/TableSkeleton';
 import { subscribeTourActions } from '../../services/tourService';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useVirtualRows } from '../../hooks/useVirtualRows';
 import {
   useStableCallback, useAutoRefresh, rowsSignature, watchlistSignature, rowsToTSV, errorMessage,
 } from './tableHelpers';
@@ -482,6 +483,15 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     ...columns.map((c) => ({ key: c.key, label: c.label })),
   ], [columns, t]);
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualRows(pageRows.length, scrollRef);
+  const colSpan = visibleColumns.length + 3;
+
+  // Back to the top when the page or filters change
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [currentPage, pageSize, tableQuery]);
+
   // Header checkbox (page) with indeterminate state
   const headerCheckboxRef = useRef<HTMLInputElement>(null);
   const pageAllSelected = selection.isPageAllSelected(pageRows);
@@ -598,7 +608,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
             </button>
           </Tooltip>
 
-          <Tooltip content="Xuất danh sách lịch tàu ra file Excel">
+          <Tooltip content="Xuất danh sách Lịch tàu ra file Excel">
             <button
               onClick={() => handleOpenExport('all')}
               disabled={total === 0}
@@ -609,7 +619,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
             </button>
           </Tooltip>
 
-          <Tooltip content="Tải lại dữ liệu lịch tàu">
+          <Tooltip content="Tải lại dữ liệu Lịch tàu">
             <button
               onClick={() => loadData('loading')}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
@@ -619,7 +629,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
           </Tooltip>
 
           {total > 0 && (
-            <Tooltip content="Xóa tất cả lịch tàu trong bộ sưu tập này">
+            <Tooltip content="Xóa tất cả Lịch tàu trong bộ sưu tập này">
               <button
                 onClick={handleClearAll}
                 className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 transition-colors"
@@ -633,7 +643,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
       {/* Vessel Schedules Table */}
       <div data-tour="vessel-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
-        <div className="flex-1 overflow-x-auto overflow-y-auto w-full">
+        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
               <tr>
@@ -677,7 +687,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
               ) : total === 0 ? (
                 <tr>
                   <td
-                    colSpan={visibleColumns.length + 3}
+                    colSpan={colSpan}
                     className="py-12 text-center text-slate-400 dark:text-slate-500"
                   >
                     <Ship className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
@@ -685,23 +695,38 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
                   </td>
                 </tr>
               ) : (
-                pageRows.map((item, idx) => (
-                  <VesselRow
-                    key={item.id ?? idx}
-                    item={item}
-                    rowNumber={rowOffset + idx + 1}
-                    visibleColumns={visibleColumns}
-                    columnWidths={columnWidths}
-                    isSelected={selection.selectedIds.has(item.id)}
-                    isBookmarked={!!findWatchlistItem(item)}
-                    t={t}
-                    onToggleSelect={selection.toggle}
-                    onOpen={setSelectedSchedule}
-                    onCopy={handleCopyRow}
-                    onToggleWatchlist={handleToggleWatchlist}
-                    onDelete={handleDelete}
-                  />
-                ))
+                <>
+                  {virtual.paddingTop > 0 && (
+                    <tr aria-hidden="true" style={{ height: virtual.paddingTop }}>
+                      <td colSpan={colSpan} />
+                    </tr>
+                  )}
+                  {virtual.indexes.map((i) => {
+                    const item = pageRows[i];
+                    return (
+                      <VesselRow
+                        key={item.id ?? i}
+                        item={item}
+                        rowNumber={rowOffset + i + 1}
+                        visibleColumns={visibleColumns}
+                        columnWidths={columnWidths}
+                        isSelected={selection.selectedIds.has(item.id)}
+                        isBookmarked={!!findWatchlistItem(item)}
+                        t={t}
+                        onToggleSelect={selection.toggle}
+                        onOpen={setSelectedSchedule}
+                        onCopy={handleCopyRow}
+                        onToggleWatchlist={handleToggleWatchlist}
+                        onDelete={handleDelete}
+                      />
+                    );
+                  })}
+                  {virtual.paddingBottom > 0 && (
+                    <tr aria-hidden="true" style={{ height: virtual.paddingBottom }}>
+                      <td colSpan={colSpan} />
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>
