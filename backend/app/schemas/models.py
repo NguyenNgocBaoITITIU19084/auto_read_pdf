@@ -1,5 +1,5 @@
-from typing import Optional, List, Any
-from pydantic import BaseModel
+from typing import Optional, List, Any, Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 class CollectionCreate(BaseModel):
     name: str
@@ -61,9 +61,49 @@ class ExportExcelRequest(BaseModel):
 class AutoSyncToggleRequest(BaseModel):
     enable: bool
     interval_minutes: Optional[int] = 10
+    mode: Optional[Literal["interval", "times"]] = None
+    times: Optional[List[str]] = None
 
 class BatchDeleteRequest(BaseModel):
     ids: List[int]
+
+class BatchIdsRequest(BaseModel):
+    ids: List[int]
+
+class VesselWatchlistItem(BaseModel):
+    site_id: Optional[str] = ""
+    vessel_name: str
+    voyage: Optional[str] = ""
+
+class VesselWatchlistBatchAddRequest(BaseModel):
+    collection_id: int
+    items: List[VesselWatchlistItem]
+
+class ContainerWatchlistItem(BaseModel):
+    site_id: Optional[str] = ""
+    container_no: str
+    event_type: Optional[str] = ""
+
+class ContainerWatchlistBatchAddRequest(BaseModel):
+    collection_id: int
+    items: List[ContainerWatchlistItem]
+
+class ResyncRequest(BaseModel):
+    ids: List[int]
+
+class ResyncResponse(BaseModel):
+    status: str
+    updated: int
+    not_found: List[str]
+    errors: List[str]
+
+class MoveItemsRequest(BaseModel):
+    entity: Literal["bookings", "vessels", "containers"]
+    ids: List[int]
+    target_collection_id: int
+    # JSON key is "copy"; renamed in Python to avoid shadowing BaseModel.copy
+    copy_items: Optional[bool] = Field(default=False, alias="copy")
+    model_config = ConfigDict(populate_by_name=True)
 
 class ColorRuleCreate(BaseModel):
     target_table: Optional[str] = "all"

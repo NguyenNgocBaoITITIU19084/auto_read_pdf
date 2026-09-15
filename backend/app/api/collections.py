@@ -1,8 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from backend.app.core.database import (
-    get_collections, create_collection, delete_collection, update_collection_settings
+    get_collections, create_collection, delete_collection, update_collection_settings,
+    move_items_to_collection
 )
-from backend.app.schemas.models import CollectionCreate, CollectionUpdateSettings, CollectionResponse
+from backend.app.schemas.models import (
+    CollectionCreate, CollectionUpdateSettings, CollectionResponse, MoveItemsRequest
+)
 
 router = APIRouter(prefix="/collections", tags=["Collections"])
 
@@ -20,6 +23,16 @@ def create_new_collection(payload: CollectionCreate):
         return {"id": col_id, "name": name}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to create collection: {e}")
+
+@router.post("/move")
+def move_items(payload: MoveItemsRequest):
+    try:
+        moved = move_items_to_collection(
+            payload.entity, payload.ids, payload.target_collection_id, copy=bool(payload.copy_items)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "success", "moved": moved}
 
 @router.delete("/{col_id}")
 def remove_collection(col_id: int):
