@@ -580,6 +580,10 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     }
   };
 
+  // Order matters: BulkActionBar shows the first 3 non-danger actions as labelled
+  // buttons and collapses the rest into a "Thêm" menu (E Task 5). Kept in the
+  // tab's pre-existing order (export, copy, watch-add first) rather than
+  // re-guessing priority.
   const bulkActions: BulkAction[] = [
     { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => handleOpenExport('selected') },
     { key: 'copy', label: t.bulk.copySelected, icon: ClipboardCopy, onClick: handleCopySelected },

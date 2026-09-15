@@ -184,6 +184,7 @@ export const translations = {
     bulk: {
       selectedCount: "Đã chọn {count}",
       clearSelection: "Bỏ chọn",
+      more: "Thêm",
       selectPage: "Chọn tất cả trên trang này",
       selectAllResults: "Chọn tất cả {count} kết quả",
       deleteSelected: "Xóa đã chọn",
@@ -864,6 +865,7 @@ export const translations = {
     bulk: {
       selectedCount: "{count} selected",
       clearSelection: "Clear selection",
+      more: "More",
       selectPage: "Select all on this page",
       selectAllResults: "Select all {count} results",
       deleteSelected: "Delete selected",

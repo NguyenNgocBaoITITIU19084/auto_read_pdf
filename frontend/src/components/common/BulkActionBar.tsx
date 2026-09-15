@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Loader2, X, CheckSquare } from 'lucide-react';
+import { Loader2, X, CheckSquare, MoreHorizontal } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { tf } from '../../services/i18nFormat';
 
@@ -28,7 +28,16 @@ export interface BulkActionBarProps {
   /** Optional extra content rendered after the count (e.g. "Chọn tất cả 1.234 kết quả" link) */
   extra?: React.ReactNode;
   className?: string;
+  /** Max non-danger actions shown as labelled buttons before the rest collapse into "Thêm". Default 3. */
+  maxVisibleActions?: number;
 }
+
+const actionButtonClass = (danger?: boolean) =>
+  `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
+    danger
+      ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 dark:border-rose-700 shadow-xs'
+      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+  }`;
 
 export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   count,
@@ -37,15 +46,62 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   variant = 'floating',
   extra,
   className = '',
+  maxVisibleActions = 3,
 }) => {
   const { t } = useApp();
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isMoreOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setIsMoreOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsMoreOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isMoreOpen]);
 
   if (count <= 0) return null;
+
+  const dangerActions = actions.filter((a) => a.danger);
+  const mainCandidates = actions.filter((a) => !a.danger);
+  const visibleActions = mainCandidates.slice(0, maxVisibleActions);
+  const overflowActions = mainCandidates.slice(maxVisibleActions);
 
   const container =
     variant === 'floating'
       ? 'fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-fit rounded-2xl shadow-2xl shadow-slate-900/20'
       : 'sticky top-0 z-20 w-full rounded-xl shadow-sm';
+
+  const renderActionButton = (action: BulkAction, iconOnly = false) => {
+    const Icon = action.icon;
+    const isDisabled = !!action.disabled || !!action.loading;
+    return (
+      <button
+        key={action.key}
+        type="button"
+        onClick={action.onClick}
+        disabled={isDisabled}
+        title={action.title || action.label}
+        aria-label={action.label}
+        className={iconOnly ? `${actionButtonClass(action.danger)} px-2` : actionButtonClass(action.danger)}
+      >
+        {action.loading ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <Icon className={`w-3.5 h-3.5 ${action.danger ? '' : 'text-slate-500 dark:text-slate-400'}`} />
+        )}
+        {!iconOnly && <span className="hidden sm:inline">{action.label}</span>}
+      </button>
+    );
+  };
 
   return (
     <div
@@ -62,31 +118,56 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        {actions.map((action) => {
-          const Icon = action.icon;
-          const isDisabled = !!action.disabled || !!action.loading;
-          return (
+        {visibleActions.map((action) => renderActionButton(action))}
+
+        {overflowActions.length > 0 && (
+          <div className="relative" ref={moreRef}>
             <button
-              key={action.key}
               type="button"
-              onClick={action.onClick}
-              disabled={isDisabled}
-              title={action.title || action.label}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
-                action.danger
-                  ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600 dark:border-rose-700 shadow-xs'
-                  : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
-              }`}
+              onClick={() => setIsMoreOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={isMoreOpen}
+              className={actionButtonClass(false)}
             >
-              {action.loading ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Icon className={`w-3.5 h-3.5 ${action.danger ? '' : 'text-slate-500 dark:text-slate-400'}`} />
-              )}
-              <span className="hidden sm:inline">{action.label}</span>
+              <MoreHorizontal className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+              <span className="hidden sm:inline">{t.bulk.more}</span>
             </button>
-          );
-        })}
+            {isMoreOpen && (
+              <div
+                role="menu"
+                className="absolute bottom-full mb-1.5 left-0 min-w-[10rem] py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg z-50"
+              >
+                {overflowActions.map((action) => {
+                  const Icon = action.icon;
+                  const isDisabled = !!action.disabled || !!action.loading;
+                  return (
+                    <button
+                      key={action.key}
+                      type="button"
+                      role="menuitem"
+                      disabled={isDisabled}
+                      title={action.title || action.label}
+                      onClick={() => {
+                        setIsMoreOpen(false);
+                        action.onClick();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    >
+                      {action.loading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Icon className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+                      )}
+                      {action.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {dangerActions.map((action) => renderActionButton(action, true))}
       </div>
 
       <button
