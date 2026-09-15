@@ -1,37 +1,58 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Ship, Search, RefreshCw, Trash2, FileSpreadsheet, 
-  SlidersHorizontal, Eye, BookmarkPlus, BookmarkCheck, Copy
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  Ship, Search, RefreshCw, Trash2, FileSpreadsheet,
+  SlidersHorizontal, BookmarkPlus, BookmarkMinus, ClipboardCopy, FolderInput, RotateCw
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { VesselSchedule, VesselWatchlist } from '../../types';
-import { 
-  getVessels, searchVesselsApi, deleteVessel, deleteVesselsBatch, clearVessels, 
-  addVesselWatchlist, getVesselWatchlist, deleteVesselWatchlist 
+import { useToastActions } from '../../context/ToastContext';
+import { useConfirm } from '../../hooks/useConfirm';
+import { useRowSelection } from '../../hooks/useRowSelection';
+import { VesselSchedule, VesselWatchlist, VesselWatchlistBatchItem } from '../../types';
+import {
+  getVessels, searchVesselsApi, deleteVessel, deleteVesselsBatch, clearVessels,
+  addVesselWatchlist, getVesselWatchlist, deleteVesselWatchlist,
+  addVesselWatchlistBatch, removeVesselWatchlistBatch, resyncVesselsApi,
 } from '../../services/api';
+import { tf } from '../../services/i18nFormat';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
+import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
+import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
 import { VesselDetailModal } from './VesselDetailModal';
 import { VesselWatchlistModal } from './VesselWatchlistModal';
+import { VesselRow } from './VesselRow';
 import { ResizableTh } from '../common/ResizableTh';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
-import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
+import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
-import { ValueBadge } from '../common/ValueBadge';
 import { subscribeTourActions } from '../../services/tourService';
+import {
+  useStableCallback, useAutoRefresh, rowsSignature, watchlistSignature, rowsToTSV, errorMessage,
+} from './tableHelpers';
 
 interface VesselTabProps {
   initialSearchQuery?: string;
 }
 
+type LoadMode = 'loading' | 'refresh' | 'silent';
+
+const getRowId = (r: VesselSchedule) => r.id;
+const normalizeStr = (s?: string | null) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const normSite = (s?: string | null) => (s || '').trim().toUpperCase();
+
+const previewList = (items: string[], max = 5) =>
+  items.length > max ? `${items.slice(0, max).join(', ')}, … (+${items.length - max})` : items.join(', ');
+
 export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
-  const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
+  const { t, activeCollection, autoSyncEnabled, autoSyncStatus } = useApp();
+  const { addToast } = useToastActions();
+  const confirm = useConfirm();
   const [schedules, setSchedules] = useState<VesselSchedule[]>([]);
   const [loading, setLoading] = useState(false);
   const [querying, setQuerying] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null);
 
   // Pagination state
   const [pageSize, setPageSize] = useState<number>(() => {
@@ -59,6 +80,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<VesselWatchlist[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
+  const [isMoveOpen, setIsMoveOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
 
   // Listen to interactive tour triggers (open/close Vessel Watchlist modal)
@@ -129,42 +152,91 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     );
   }, [t, defaultColumns, setColumns]);
 
+  const visibleColumns = useMemo(() => columns.filter((c) => c.visible), [columns]);
+
   const getColLabel = (key: string, fallback: string) => {
     const col = columns.find((c) => c.key === key);
     return col?.label || fallback;
   };
 
-  const loadWatchlist = async () => {
+  // ---------------------------------------------------------------------------
+  // Data loading (single request pipeline: schedules + watchlist in parallel)
+  // ---------------------------------------------------------------------------
+  const requestSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const dataSigRef = useRef('');
+  const watchSigRef = useRef('');
+
+  const loadWatchlist = useStableCallback(async () => {
     if (!activeCollection) return;
     try {
       const data = await getVesselWatchlist(activeCollection.id);
+      watchSigRef.current = watchlistSignature(data);
       setWatchlist(data);
     } catch (e) {
       console.error(e);
     }
-  };
+  });
 
-  const loadData = async (showLoading = true) => {
+  /**
+   * - 'loading': skeleton + error toast
+   * - 'refresh': no skeleton, always applies result (after mutations)
+   * - 'silent': background poll — skipped while a request is in flight, applies only when data changed
+   */
+  const loadData = useStableCallback(async (mode: LoadMode = 'loading') => {
     if (!activeCollection) return;
+    if (mode === 'silent' && inFlightRef.current) return;
+    const seq = ++requestSeqRef.current;
+    inFlightRef.current = true;
+    if (mode === 'loading') setLoading(true);
     try {
-      if (showLoading) setLoading(true);
-      const data = await getVessels(activeCollection.id, searchQuery, searchField);
-      setSchedules(data);
-      loadWatchlist();
+      const [data, wl] = await Promise.all([
+        getVessels(activeCollection.id, searchQuery, searchField),
+        getVesselWatchlist(activeCollection.id).catch((e) => {
+          console.error(e);
+          return null;
+        }),
+      ]);
+      if (seq !== requestSeqRef.current) return;
+      const sig = rowsSignature(data);
+      if (mode !== 'silent' || sig !== dataSigRef.current) {
+        dataSigRef.current = sig;
+        setSchedules(data);
+      }
+      if (wl) {
+        const wsig = watchlistSignature(wl);
+        if (mode !== 'silent' || wsig !== watchSigRef.current) {
+          watchSigRef.current = wsig;
+          setWatchlist(wl);
+        }
+      }
     } catch (e: any) {
       console.error(e);
-      if (showLoading) addToast(e.message || t.common.error, 'error');
+      if (mode !== 'silent' && seq === requestSeqRef.current) addToast(errorMessage(e, t.common.error), 'error');
     } finally {
-      if (showLoading) setLoading(false);
+      if (seq === requestSeqRef.current) {
+        inFlightRef.current = false;
+        setLoading(false);
+      }
     }
-  };
+  });
 
   useEffect(() => {
-    setSelectedIds([]);
     setCurrentPage(1);
-    loadData(true);
-    loadWatchlist();
-  }, [activeCollection, searchQuery, searchField]);
+    loadData('loading');
+  }, [activeCollection, searchQuery, searchField, loadData]);
+
+  const silentRefresh = useCallback(() => {
+    loadData('silent');
+  }, [loadData]);
+
+  // Refetch when the scheduler finishes a run; 60s safety poll while auto-sync is on; paused when hidden.
+  useAutoRefresh({
+    enabled: autoSyncEnabled && !!activeCollection,
+    lastRunAt: autoSyncStatus?.last_run_at,
+    running: autoSyncStatus?.running,
+    refresh: silentRefresh,
+  });
 
   const paginatedSchedules = useMemo(() => {
     if (pageSize >= schedules.length || pageSize <= 0) return schedules;
@@ -172,45 +244,39 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     return schedules.slice(start, start + pageSize);
   }, [schedules, currentPage, pageSize]);
 
-  // Periodic polling when auto-sync is active to automatically reflect new vessel schedules & statuses
-  useEffect(() => {
-    if (!autoSyncEnabled || !activeCollection) return;
+  const selection = useRowSelection(schedules, getRowId, [activeCollection?.id, searchQuery, searchField]);
 
-    const timer = setInterval(() => {
-      loadData(false);
-    }, 10000);
-
-    return () => clearInterval(timer);
-  }, [autoSyncEnabled, activeCollection, searchQuery, searchField]);
-
-  const normalizeStr = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Watchlist index: normalized vessel name -> entries (site/voyage checked on the few candidates)
+  const watchlistIndex = useMemo(() => {
+    const map = new Map<string, VesselWatchlist[]>();
+    watchlist.forEach((w) => {
+      const name = normalizeStr(w.vessel_name);
+      const list = map.get(name);
+      if (list) list.push(w);
+      else map.set(name, [w]);
+    });
+    return map;
+  }, [watchlist]);
 
   // Match a schedule item with watchlist
-  const getWatchlistItem = (item: VesselSchedule): VesselWatchlist | undefined => {
-    const itemName = normalizeStr(item.vessel_name);
+  const findWatchlistItem = useCallback((item: VesselSchedule): VesselWatchlist | undefined => {
+    const candidates = watchlistIndex.get(normalizeStr(item.vessel_name));
+    if (!candidates) return undefined;
     const itemVoyage = normalizeStr(item.in_out_voyage);
-    const itemSite = (item.site_id || '').trim().toUpperCase();
-
-    return watchlist.find((w) => {
-      const wSite = (w.site_id || '').trim().toUpperCase();
+    const itemSite = normSite(item.site_id);
+    return candidates.find((w) => {
+      const wSite = normSite(w.site_id);
       if (wSite && itemSite && wSite !== itemSite) return false;
-
-      const wName = normalizeStr(w.vessel_name);
-      if (wName !== itemName) return false;
-
       const wVoyage = normalizeStr(w.voyage);
-      if (wVoyage && itemVoyage) {
-        return wVoyage === itemVoyage;
-      }
-
+      if (wVoyage && itemVoyage) return wVoyage === itemVoyage;
       return true;
     });
-  };
+  }, [watchlistIndex]);
 
   // Toggle add/remove from watchlist
-  const handleToggleWatchlist = async (item: VesselSchedule) => {
+  const handleToggleWatchlist = useStableCallback(async (item: VesselSchedule) => {
     if (!activeCollection) return;
-    const matched = getWatchlistItem(item);
+    const matched = findWatchlistItem(item);
     try {
       if (matched) {
         await deleteVesselWatchlist(matched.id);
@@ -227,39 +293,9 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
         await loadWatchlist();
       }
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     }
-  };
-
-  const handleToggleSelect = (id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleSelectAll = () => {
-    const pageIds = paginatedSchedules.map((s) => s.id).filter((id): id is number => typeof id === 'number');
-    if (pageIds.length === 0) return;
-    const allPageSelected = pageIds.every((id) => selectedIds.includes(id));
-    if (allPageSelected) {
-      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)));
-    } else {
-      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])));
-    }
-  };
-
-  const handleBatchDelete = async () => {
-    if (selectedIds.length === 0) return;
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} dòng lịch tàu đã chọn?`)) return;
-    try {
-      await deleteVesselsBatch(selectedIds);
-      addToast(`Đã xóa thành công ${selectedIds.length} dòng lịch tàu!`, 'success');
-      setSchedules((prev) => prev.filter((s) => !selectedIds.includes(s.id)));
-      setSelectedIds([]);
-    } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
-    }
-  };
+  });
 
   const handleQueryEport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,51 +311,196 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
       const res = await searchVesselsApi(activeCollection.id, siteId, vesselName.trim(), voyage.trim());
       if (res.count > 0) {
         addToast(`Tìm thấy ${res.count} kết quả lịch tàu khớp!`, 'success');
-        await loadData();
+        await loadData('refresh');
       } else {
         addToast(res.message || 'Không tìm thấy thông tin chuyến tàu khớp trên ePort', 'info');
       }
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     } finally {
       setQuerying(false);
     }
   };
 
-  const handleCopyRow = async (item: VesselSchedule) => {
+  const handleCopyRow = useStableCallback(async (item: VesselSchedule) => {
     const text = formatRowForCopy(item, columns);
     const success = await copyTextToClipboard(text);
-    if (success) {
-      addToast(t.common.copySuccess, 'success');
-    } else {
-      addToast(t.common.error, 'error');
-    }
-  };
+    addToast(success ? t.common.copySuccess : t.common.error, success ? 'success' : 'error');
+  });
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm(t.common.deleteConfirm)) return;
+  const handleDelete = useStableCallback(async (id: number) => {
+    const ok = await confirm({ title: t.vessel.deleteOneTitle, message: t.common.deleteConfirm, danger: true });
+    if (!ok) return;
     try {
       await deleteVessel(id);
       addToast(t.common.success, 'success');
       setSchedules((prev) => prev.filter((s) => s.id !== id));
-      setSelectedIds((prev) => prev.filter((i) => i !== id));
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     }
-  };
+  });
 
   const handleClearAll = async () => {
     if (!activeCollection) return;
-    if (!window.confirm(t.common.clearConfirm)) return;
+    const ok = await confirm({ title: t.vessel.clearAllTitle, message: t.common.clearConfirm, danger: true });
+    if (!ok) return;
     try {
       await clearVessels(activeCollection.id);
       addToast(t.common.success, 'success');
       setSchedules([]);
-      setSelectedIds([]);
+      selection.clear();
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Bulk actions
+  // ---------------------------------------------------------------------------
+  const selectedRows = selection.selectedRows;
+  const selectedIdList = useMemo(() => selectedRows.map((r) => r.id), [selectedRows]);
+  const selectedWatchlistIds = useMemo(() => {
+    const ids = new Set<number>();
+    selectedRows.forEach((r) => {
+      const w = findWatchlistItem(r);
+      if (w) ids.add(w.id);
+    });
+    return Array.from(ids);
+  }, [selectedRows, findWatchlistItem]);
+
+  const runBulk = async (key: string, fn: () => Promise<void>) => {
+    if (bulkBusy) return;
+    setBulkBusy(key);
+    try {
+      await fn();
+    } catch (e: any) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    const ids = selectedIdList;
+    if (ids.length === 0) return;
+    const ok = await confirm({
+      title: t.vessel.deleteSelectedTitle,
+      message: tf(t.bulk.deleteSelectedConfirm, { count: ids.length }),
+      danger: true,
+    });
+    if (!ok) return;
+    await runBulk('delete', async () => {
+      await deleteVesselsBatch(ids);
+      addToast(tf(t.vessel.deleteSelectedSuccess, { count: ids.length }), 'success');
+      const idSet = new Set(ids);
+      setSchedules((prev) => prev.filter((s) => !idSet.has(s.id)));
+      selection.clear();
+    });
+  };
+
+  const handleBatchAddWatchlist = () =>
+    runBulk('watch-add', async () => {
+      if (!activeCollection) return;
+      const seen = new Set<string>();
+      const items: VesselWatchlistBatchItem[] = [];
+      selectedRows.forEach((r) => {
+        const name = (r.vessel_name || '').trim();
+        if (!name || findWatchlistItem(r)) return;
+        const item = {
+          site_id: normSite(r.site_id || siteId || 'CTL'),
+          vessel_name: name,
+          voyage: (r.in_out_voyage || '').trim(),
+        };
+        const key = `${item.site_id}|${normalizeStr(item.vessel_name)}|${normalizeStr(item.voyage)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        items.push(item);
+      });
+      if (items.length === 0) {
+        addToast(t.vessel.watchlistBatchAllTracked, 'info');
+        return;
+      }
+      const res = await addVesselWatchlistBatch(activeCollection.id, items);
+      addToast(tf(t.vessel.watchlistBatchAdded, { count: res?.added ?? items.length }), 'success');
+      await loadWatchlist();
+    });
+
+  const handleBatchRemoveWatchlist = () =>
+    runBulk('watch-remove', async () => {
+      const ids = selectedWatchlistIds;
+      if (ids.length === 0) {
+        addToast(t.vessel.watchlistBatchNoneTracked, 'info');
+        return;
+      }
+      const res = await removeVesselWatchlistBatch(ids);
+      const idSet = new Set(ids);
+      setWatchlist((prev) => prev.filter((w) => !idSet.has(w.id)));
+      addToast(tf(t.vessel.watchlistBatchRemoved, { count: res?.removed ?? ids.length }), 'success');
+    });
+
+  const handleBatchResync = () =>
+    runBulk('resync', async () => {
+      const ids = selectedIdList;
+      if (ids.length === 0) return;
+      const res = await resyncVesselsApi(ids);
+      const notFound = Array.isArray(res?.not_found) ? res.not_found : [];
+      const errors = Array.isArray(res?.errors) ? res.errors : [];
+      addToast(
+        tf(t.vessel.resyncSummary, { updated: res?.updated ?? 0, notFound: notFound.length, errors: errors.length }),
+        errors.length > 0 ? 'error' : notFound.length > 0 ? 'info' : 'success'
+      );
+      if (notFound.length > 0) addToast(tf(t.vessel.resyncNotFoundDetail, { items: previewList(notFound) }), 'info');
+      if (errors.length > 0) addToast(tf(t.vessel.resyncErrorDetail, { items: previewList(errors, 3) }), 'error');
+      await loadData('refresh');
+    });
+
+  const handleCopySelected = async () => {
+    if (selectedRows.length === 0) return;
+    const cols = visibleColumns.map((c) => ({ key: c.key, label: c.label }));
+    const text = rowsToTSV(selectedRows, cols);
+    const success = await copyTextToClipboard(text);
+    addToast(
+      success ? tf(t.vessel.copyRowsSuccess, { count: selectedRows.length }) : t.common.error,
+      success ? 'success' : 'error'
+    );
+  };
+
+  const bulkActions: BulkAction[] = [
+    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => { setExportScope('selected'); setIsExportOpen(true); } },
+    { key: 'copy', label: t.bulk.copySelected, icon: ClipboardCopy, onClick: handleCopySelected },
+    { key: 'watch-add', label: t.bulk.addToWatchlist, icon: BookmarkPlus, onClick: handleBatchAddWatchlist, loading: bulkBusy === 'watch-add', disabled: !!bulkBusy },
+    {
+      key: 'watch-remove',
+      label: t.bulk.removeFromWatchlist,
+      icon: BookmarkMinus,
+      onClick: handleBatchRemoveWatchlist,
+      loading: bulkBusy === 'watch-remove',
+      disabled: !!bulkBusy || selectedWatchlistIds.length === 0,
+    },
+    { key: 'resync', label: t.bulk.resync, icon: RotateCw, onClick: handleBatchResync, loading: bulkBusy === 'resync', disabled: !!bulkBusy },
+    { key: 'move', label: t.vessel.moveToCollection, icon: FolderInput, onClick: () => setIsMoveOpen(true), disabled: !!bulkBusy },
+    { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
+  ];
+
+  const exportData = useMemo(() => {
+    if (!isExportOpen) return [];
+    return exportScope === 'selected' && selectedRows.length > 0 ? selectedRows : schedules;
+  }, [isExportOpen, exportScope, selectedRows, schedules]);
+
+  const exportColumns = useMemo(() => [
+    { key: "STT", label: t.vessel.columns["STT"] },
+    ...columns.map((c) => ({ key: c.key, label: c.label })),
+  ], [columns, t]);
+
+  // Header checkbox (page) with indeterminate state
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const pageAllSelected = selection.isPageAllSelected(paginatedSchedules);
+  const pagePartiallySelected = selection.isPagePartiallySelected(paginatedSchedules);
+  useEffect(() => {
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = pagePartiallySelected;
+  }, [pagePartiallySelected]);
+
+  const rowOffset = pageSize >= schedules.length || pageSize <= 0 ? 0 : (currentPage - 1) * pageSize;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
@@ -417,24 +598,6 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          {selectedIds.length > 0 && (
-            <div className="flex items-center gap-1.5 mr-2 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 px-2 py-1 rounded-lg animate-in fade-in">
-              <button
-                onClick={handleBatchDelete}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Xóa đã chọn ({selectedIds.length})</span>
-              </button>
-              <button
-                onClick={() => setSelectedIds([])}
-                className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline px-1"
-              >
-                Bỏ chọn
-              </button>
-            </div>
-          )}
-
           <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
             <button
               onClick={() => setIsColumnConfigOpen(true)}
@@ -447,7 +610,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
           <Tooltip content="Xuất danh sách lịch tàu ra file Excel">
             <button
-              onClick={() => setIsExportOpen(true)}
+              onClick={() => { setExportScope('all'); setIsExportOpen(true); }}
               disabled={schedules.length === 0}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
             >
@@ -458,7 +621,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
           <Tooltip content="Tải lại dữ liệu lịch tàu">
             <button
-              onClick={() => loadData(true)}
+              onClick={() => loadData('loading')}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -486,27 +649,26 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
               <tr>
                 <th className="py-2 px-2 text-center w-8 shrink-0">
                   <input
+                    ref={headerCheckboxRef}
                     type="checkbox"
-                    checked={paginatedSchedules.length > 0 && paginatedSchedules.every((s) => selectedIds.includes(s.id))}
-                    onChange={handleSelectAll}
+                    checked={pageAllSelected}
+                    onChange={() => selection.selectPage(paginatedSchedules, !pageAllSelected)}
                     className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                    title="Chọn tất cả trên trang này / Bỏ chọn"
+                    title={t.bulk.selectPage}
                   />
                 </th>
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-10 shrink-0 text-[11px]">
                   {t.common.stt}
                 </th>
-                {columns
-                  .filter((c) => c.visible)
-                  .map((col) => (
-                    <ResizableTh
-                      key={col.key}
-                      colKey={col.key}
-                      label={col.label}
-                      width={columnWidths[col.key]}
-                      onResize={startResize}
-                    />
-                  ))}
+                {visibleColumns.map((col) => (
+                  <ResizableTh
+                    key={col.key}
+                    colKey={col.key}
+                    label={col.label}
+                    width={columnWidths[col.key]}
+                    onResize={startResize}
+                  />
+                ))}
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">
                   {t.common.actions}
                 </th>
@@ -525,7 +687,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
               ) : schedules.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={columns.filter((c) => c.visible).length + 3}
+                    colSpan={visibleColumns.length + 3}
                     className="py-12 text-center text-slate-400 dark:text-slate-500"
                   >
                     <Ship className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
@@ -533,177 +695,24 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
                   </td>
                 </tr>
               ) : (
-                paginatedSchedules.map((item, idx) => {
-                  const isRecent = isRecentUpdate(item.queried_at, 45);
-                  const watchlistItem = getWatchlistItem(item);
-                  const isBookmarked = !!watchlistItem;
-                  const isSelected = selectedIds.includes(item.id);
-                  return (
-                    <tr
-                      key={item.id || idx}
-                      onDoubleClick={() => setSelectedSchedule(item)}
-                      className={`hover:bg-sky-100/80 dark:hover:bg-sky-950/70 hover:shadow-xs transition-colors group cursor-pointer ${
-                        isSelected
-                          ? 'bg-sky-50 dark:bg-sky-950/50 ring-1 ring-inset ring-sky-300 dark:ring-sky-800'
-                          : isBookmarked
-                          ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-l-[3px] border-l-emerald-500'
-                          : ''
-                      }`}
-                    >
-                      <td className="py-1.5 px-2 text-center w-8" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleSelect(item.id)}
-                          className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                        />
-                      </td>
-                      <td className="py-1.5 px-2.5 text-center font-medium text-slate-400 w-10">
-                        {(currentPage - 1) * pageSize + idx + 1}
-                      </td>
-                      {columns
-                        .filter((c) => c.visible)
-                        .map((col) => {
-                          const val = item[col.key] || 'null';
-                          const isNull = val === 'null' || !val;
-                          const w = columnWidths[col.key];
-
-                          if (col.key === 'queried_at') {
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`Thời gian cập nhật: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">Chưa cập nhật</span>
-                                ) : (
-                                  <span
-                                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-tight border ${
-                                      isRecent
-                                        ? 'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 shadow-2xs'
-                                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                                    }`}
-                                  >
-                                    <span
-                                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                        isRecent ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
-                                      }`}
-                                    />
-                                    <span>{formatTimeAgo(val)}</span>
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          }
-
-                          if (col.key === 'vessel_name') {
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate font-bold"
-                                title={String(val)}
-                              >
-                                <div className="flex items-center gap-1.5 truncate">
-                                  {isBookmarked && (
-                                    <span
-                                      title="Đang trong Watchlist theo dõi"
-                                      className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
-                                    />
-                                  )}
-                                  <ValueBadge
-                                    table="vessel"
-                                    columnKey={col.key}
-                                    value={val}
-                                    className="font-bold text-slate-900 dark:text-slate-100"
-                                    fallbackText="-"
-                                  />
-                                </div>
-                              </td>
-                            );
-                          }
-
-                          return (
-                            <td
-                              key={col.key}
-                              style={{
-                                width: w ? `${w}px` : undefined,
-                                maxWidth: w ? `${w}px` : undefined,
-                              }}
-                              className="py-1.5 px-2.5 truncate"
-                              title={`${col.label}: ${String(val || '')}`}
-                            >
-                              <ValueBadge
-                                table="vessel"
-                                columnKey={col.key}
-                                value={val}
-                                fallbackText="null"
-                              />
-                            </td>
-                          );
-                        })}
-                    <td className="py-1.5 px-2.5 text-center w-24">
-                      <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                        <Tooltip content="Xem chi tiết đầy đủ lịch tàu">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setSelectedSchedule(item); }}
-                            className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        </Tooltip>
-                        <Tooltip content="Sao chép thông tin dòng">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleCopyRow(item); }}
-                            className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                        </Tooltip>
-                        <Tooltip
-                          content={
-                            isBookmarked
-                              ? (t.vessel.inWatchlistTooltip || 'Đang trong Watchlist (Nhấn để hủy theo dõi)')
-                              : (t.vessel.addToWatchlistTooltip || 'Thêm vào Watchlist để theo dõi')
-                          }
-                        >
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleToggleWatchlist(item); }}
-                            className={`p-1 rounded-md transition-all ${
-                              isBookmarked
-                                ? 'text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 shadow-2xs'
-                                : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50'
-                            }`}
-                          >
-                            {isBookmarked ? (
-                              <BookmarkCheck className="w-3.5 h-3.5 fill-amber-500/20 text-amber-500 dark:text-amber-400" />
-                            ) : (
-                              <BookmarkPlus className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </Tooltip>
-                        <Tooltip content="Xóa dòng lịch tàu này">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                            className="p-1 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
+                paginatedSchedules.map((item, idx) => (
+                  <VesselRow
+                    key={item.id ?? idx}
+                    item={item}
+                    rowNumber={rowOffset + idx + 1}
+                    visibleColumns={visibleColumns}
+                    columnWidths={columnWidths}
+                    isSelected={selection.selectedIds.has(item.id)}
+                    isBookmarked={!!findWatchlistItem(item)}
+                    t={t}
+                    onToggleSelect={selection.toggle}
+                    onOpen={setSelectedSchedule}
+                    onCopy={handleCopyRow}
+                    onToggleWatchlist={handleToggleWatchlist}
+                    onDelete={handleDelete}
+                  />
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -722,6 +731,23 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
         />
       </div>
 
+      <BulkActionBar
+        count={selection.count}
+        onClear={selection.clear}
+        actions={bulkActions}
+        extra={
+          !selection.isAllSelected && schedules.length > selection.count ? (
+            <button
+              type="button"
+              onClick={() => selection.selectAll(true)}
+              className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap"
+            >
+              {tf(t.bulk.selectAllResults, { count: schedules.length })}
+            </button>
+          ) : undefined
+        }
+      />
+
       {/* Modals */}
       <VesselDetailModal
         isOpen={!!selectedSchedule}
@@ -732,21 +758,26 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
       <VesselWatchlistModal
         isOpen={isWatchlistOpen}
         onClose={() => setIsWatchlistOpen(false)}
-        onDataUpdated={() => {
-          loadData();
-          loadWatchlist();
-        }}
+        onDataUpdated={() => loadData('refresh')}
       />
 
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
-        data={schedules}
-        allColumns={[
-          { key: "STT", label: t.vessel.columns["STT"] },
-          ...columns.map((c) => ({ key: c.key, label: c.label })),
-        ]}
-        filenamePrefix="vessel_schedules"
+        data={exportData}
+        allColumns={exportColumns}
+        filenamePrefix={exportScope === 'selected' ? 'vessel_schedules_selected' : 'vessel_schedules'}
+      />
+
+      <MoveToCollectionModal
+        isOpen={isMoveOpen}
+        onClose={() => setIsMoveOpen(false)}
+        entity="vessels"
+        ids={selectedIdList}
+        onDone={(result) => {
+          selection.clear();
+          if (!result.copy) loadData('refresh');
+        }}
       />
 
       <ColumnConfigModal
