@@ -10,3 +10,7 @@ D3 (container resync event filter): complete (ca8979a)
 D4 (approximate voyage match): dropped by decision 2026-09-15 — exact match stays as-is
 D5 (quick-vessel no autosave): complete (b68b1e0)
 OCR spike (D global constraint): blocked — needs 10 real customer booking images (gitignored, not present) and Windows OCR API (not testable on macOS)
+
+E1-4 (rotating logs, VN timestamps, key masking): complete (27d62f4)
+E Task 5 (bulk action bar: max 3 + "Thêm" menu): complete (598a7fd)
+E remaining: sửa booking (pencil edit), thêm booking thủ công, bộ sưu tập header popover redesign — not started
