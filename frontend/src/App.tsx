@@ -5,6 +5,7 @@ import type { BookingPasteRequest } from './components/booking/BookingTab';
 import { TableSkeleton } from './components/common/TableSkeleton';
 import { ToastContainer } from './components/common/Toast';
 import { extractClipboardFiles, isEditableTarget, isImageFile, isPdfFile } from './components/booking/clipboard';
+import { useMobileBridge } from './context/MobileBridgeContext';
 
 const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').then((m) => ({ default: m.DashboardTab })));
 const BookingTab = lazy(() => import('./components/booking/BookingTab').then((m) => ({ default: m.BookingTab })));
@@ -21,6 +22,11 @@ export const App: React.FC = () => {
   }>({});
   const [pasteRequest, setPasteRequest] = useState<BookingPasteRequest | null>(null);
   const pasteSeqRef = useRef(0);
+
+  // A photo arriving from a paired phone should surface on the Booking tab, the same way a
+  // pasted/dropped image does — the user is actively capturing a booking, so jump there for them.
+  const { onPhotoArrived } = useMobileBridge();
+  useEffect(() => onPhotoArrived(() => setActiveTab('booking')), [onPhotoArrived]);
 
   const preloadTab = useCallback((tab: TabId) => {
     if (tab === 'booking') void import('./components/booking/BookingTab');
