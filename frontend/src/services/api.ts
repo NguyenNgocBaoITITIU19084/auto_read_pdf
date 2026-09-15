@@ -3,6 +3,7 @@ import {
   Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
+  PageResult, ContainerPageResult, TableQuery,
 } from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
@@ -17,6 +18,14 @@ export const apiClient = axios.create({
   baseURL: API_BASE,
   timeout: 60000,
 });
+
+const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, number> = {}) => {
+  const params: Record<string, string | number> = { collection_id: collectionId, ...extra };
+  if (q.search_query) params.search_query = q.search_query;
+  if (q.search_field && q.search_field !== 'all') params.search_field = q.search_field;
+  if (q.event_type && q.event_type !== 'ALL') params.event_type = q.event_type;
+  return params;
+};
 
 // Collections
 export const getCollections = async (): Promise<Collection[]> => {
@@ -45,6 +54,13 @@ export const getBookings = async (collectionId: number, query?: string, field?: 
   const res = await apiClient.get<Booking[]>('/bookings', { params });
   return res.data;
 };
+
+export const getBookingsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<Booking>> =>
+  (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+export const getBookingIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
+  (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q) })).data.ids;
+export const getBookingsByIds = async (ids: number[]): Promise<Booking[]> =>
+  (await apiClient.post<Booking[]>('/bookings/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
 export const uploadPDFs = async (collectionId: number, files: File[]): Promise<{ count: number; items: Booking[] }> => {
   const formData = new FormData();
@@ -123,6 +139,13 @@ export const getVessels = async (collectionId: number, query?: string, field?: s
   return res.data;
 };
 
+export const getVesselsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<VesselSchedule>> =>
+  (await apiClient.get<PageResult<VesselSchedule>>('/vessels/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+export const getVesselIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
+  (await apiClient.get<{ ids: number[] }>('/vessels/ids', { params: tableParams(collectionId, q) })).data.ids;
+export const getVesselsByIds = async (ids: number[]): Promise<VesselSchedule[]> =>
+  (await apiClient.post<VesselSchedule[]>('/vessels/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
+
 export const searchVesselsApi = async (collectionId: number, siteId: string, vesselName: string, voyage?: string): Promise<any> => {
   const res = await apiClient.post('/vessels/search', {
     collection_id: collectionId,
@@ -197,6 +220,13 @@ export const getContainers = async (collectionId: number, query?: string, field?
   const res = await apiClient.get<ContainerInfo[]>('/containers', { params });
   return res.data;
 };
+
+export const getContainersPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<ContainerPageResult> =>
+  (await apiClient.get<ContainerPageResult>('/containers/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+export const getContainerIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
+  (await apiClient.get<{ ids: number[] }>('/containers/ids', { params: tableParams(collectionId, q) })).data.ids;
+export const getContainersByIds = async (ids: number[]): Promise<ContainerInfo[]> =>
+  (await apiClient.post<ContainerInfo[]>('/containers/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
 export const searchContainersApi = async (
   collectionId: number,

@@ -7,8 +7,8 @@ import { useApp } from '../../context/AppContext';
 import { Tooltip } from './Tooltip';
 import { tf } from '../../services/i18nFormat';
 
-/** Max rows rendered per page — "Tất cả" / custom sizes are capped to keep the DOM light. */
-export const MAX_ROWS_PER_PAGE = 500;
+/** Max rows per page — rows are virtualized, so large pages stay smooth. Must match backend PAGE_MAX_LIMIT. */
+export const MAX_ROWS_PER_PAGE = 5000;
 
 interface PaginationProps {
   currentPage: number;
@@ -26,7 +26,7 @@ export const Pagination: React.FC<PaginationProps> = ({
   pageSize,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [10, 25, 50, 100, 200],
+  pageSizeOptions = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000],
   className = '',
 }) => {
   const { t } = useApp();
@@ -34,15 +34,15 @@ export const Pagination: React.FC<PaginationProps> = ({
   const [customInput, setCustomInput] = useState<string>(String(pageSize));
   const customInputRef = useRef<HTMLInputElement>(null);
 
-  const isAll = pageSize >= totalItems && totalItems > 0 && pageSize > 200;
+  const isAll = pageSize >= totalItems && totalItems > 0 && pageSize > 5000;
   const isCapped = totalItems > MAX_ROWS_PER_PAGE && pageSize >= MAX_ROWS_PER_PAGE;
 
   // Enforce the cap (also fixes a persisted "all" page size once data grows beyond the cap)
   useEffect(() => {
-    if (totalItems > MAX_ROWS_PER_PAGE && pageSize > MAX_ROWS_PER_PAGE) {
+    if (pageSize > MAX_ROWS_PER_PAGE) {
       onPageSizeChange(MAX_ROWS_PER_PAGE);
     }
-  }, [totalItems, pageSize, onPageSizeChange]);
+  }, [pageSize, onPageSizeChange]);
   const totalPages = isAll || pageSize <= 0 ? 1 : Math.max(1, Math.ceil(totalItems / pageSize));
 
   // Ensure current page is valid when totalPages changes
@@ -89,7 +89,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       return;
     }
     if (val === 'all') {
-      onPageSizeChange(totalItems > MAX_ROWS_PER_PAGE ? MAX_ROWS_PER_PAGE : Math.max(totalItems, 999999));
+      onPageSizeChange(Math.min(Math.max(totalItems, 1), MAX_ROWS_PER_PAGE));
       return;
     }
     const parsed = parseInt(val, 10);

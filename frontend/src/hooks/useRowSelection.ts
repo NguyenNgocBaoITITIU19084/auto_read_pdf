@@ -23,19 +23,26 @@ export interface RowSelection<T> {
 
 const EMPTY_SET: Set<number> = new Set();
 
+export interface RowSelectionOptions {
+  /** Drop selected ids that are not in `rows` (client-side lists). Set false for server-paged tables. Default true. */
+  pruneMissing?: boolean;
+}
+
 /**
  * Set-based multi-row selection.
  * - `rows`: the full (filtered) list in display order — used for shift-range and pruning.
  * - `getId`: row -> numeric id (may be an inline arrow; it is read through a ref).
  * - `resetKeys`: selection is cleared whenever any of these values change (e.g. collection, filter).
  *   Keep the array length constant between renders.
- * Ids that disappear from `rows` are pruned automatically.
+ * Ids that disappear from `rows` are pruned automatically (unless `pruneMissing: false`).
  */
 export function useRowSelection<T>(
   rows: T[],
   getId: (r: T) => number,
-  resetKeys: unknown[]
+  resetKeys: unknown[],
+  options: RowSelectionOptions = {}
 ): RowSelection<T> {
+  const pruneMissing = options.pruneMissing !== false;
   const [selectedIds, setSelectedIds] = useState<Set<number>>(EMPTY_SET);
   const getIdRef = useRef(getId);
   getIdRef.current = getId;
@@ -60,6 +67,7 @@ export function useRowSelection<T>(
 
   // Prune ids that are no longer present in rows
   useEffect(() => {
+    if (!pruneMissing) return;
     setSelectedIds((prev) => {
       if (prev.size === 0) return prev;
       let changed = false;
@@ -73,7 +81,7 @@ export function useRowSelection<T>(
     if (anchorRef.current !== null && !rowIdSet.has(anchorRef.current)) {
       anchorRef.current = null;
     }
-  }, [rowIdSet]);
+  }, [rowIdSet, pruneMissing]);
 
   const isSelected = useCallback((id: number) => selectedIds.has(id), [selectedIds]);
 
@@ -167,12 +175,13 @@ export function useRowSelection<T>(
   // count reflects only ids still present (pruning effect runs after render)
   const count = useMemo(() => {
     if (selectedIds.size === 0) return 0;
+    if (!pruneMissing) return selectedIds.size;
     let n = 0;
     selectedIds.forEach((id) => {
       if (rowIdSet.has(id)) n += 1;
     });
     return n;
-  }, [selectedIds, rowIdSet]);
+  }, [selectedIds, rowIdSet, pruneMissing]);
 
   const isAllSelected = rowIds.length > 0 && count === rowIds.length;
 

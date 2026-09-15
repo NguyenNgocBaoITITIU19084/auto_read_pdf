@@ -337,3 +337,19 @@ declare global {
   }
 }
 
+export interface PageResult<T> {
+  items: T[];
+  total: number;
+}
+
+export interface ContainerPageResult extends PageResult<ContainerInfo> {
+  event_type_counts: Record<string, number>;
+}
+
+export interface TableQuery {
+  search_query?: string;
+  search_field?: string;
+  event_type?: string;
+}
+
+
