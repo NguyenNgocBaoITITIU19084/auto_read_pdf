@@ -168,7 +168,7 @@ def test_extract_culines_carrier():
     assert result["Equipment Type"] == "40'HC"
     assert result["Q'ty"] == "2"
     assert result["Empty Pick Up CY"] == "GREATING FORTUNE LOGISTICS CORP"
-    assert result["Full return CY"] == "Cat Lai Terminal (Saigon Newport)"
+    assert result["Full return CY"] == "CAT LAI TERMINAL (SAIGON NEWPORT)"
     assert result["ETD"] == "28/08/2026"
     assert result["Port Cargo Cut-off"] == "27/08/2026 19:00"
 
@@ -239,3 +239,32 @@ def test_port_cargo_cutoff_extracts_date_token_ignoring_trailing_junk():
     )
     result = _run(text, "pil_noisy.pdf")
     assert result["Port Cargo Cut-off"] == "21/06/2026 02:00"
+
+
+def test_normalize_field_case_uppercases_mixed_case_text_fields():
+    from backend.app.services.extractor import normalize_field_case
+    data = {
+        "STT": "",
+        "Tên file PDF": "Booking Photo.jpg",
+        "Booking No": "sgn601021000",
+        "Carrier": "Pil",
+        "Port of Discharging": "Durban",
+        "Vessel": "Kota Azam 2505s",
+        "Q'ty": "1",
+        "ETD": "21/06/2026",
+    }
+    out = normalize_field_case(data)
+    assert out["Booking No"] == "SGN601021000"
+    assert out["Carrier"] == "PIL"
+    assert out["Port of Discharging"] == "DURBAN"
+    assert out["Vessel"] == "KOTA AZAM 2505S"
+    # untouched: filename, numbers, dates
+    assert out["Tên file PDF"] == "Booking Photo.jpg"
+    assert out["Q'ty"] == "1"
+    assert out["ETD"] == "21/06/2026"
+
+
+def test_normalize_field_case_leaves_null_placeholder_alone():
+    from backend.app.services.extractor import normalize_field_case
+    out = normalize_field_case({"Vessel": "null"})
+    assert out["Vessel"] == "null"

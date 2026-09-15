@@ -76,7 +76,7 @@ def test_extract_booking_from_text_culines():
     assert res["Equipment Type"] == "40'HC"
     assert res["Q'ty"] == "2"
     assert res["Empty Pick Up CY"] == "GREATING FORTUNE LOGISTICS CORP"
-    assert res["Full return CY"] == "Cat Lai Terminal (Saigon Newport)"
+    assert res["Full return CY"] == "CAT LAI TERMINAL (SAIGON NEWPORT)"
     assert res["Port Cargo Cut-off"] == "27/08/2026 19:00"
     assert res["ETD"] == "28/08/2026"
 

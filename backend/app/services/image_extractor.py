@@ -13,7 +13,8 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from backend.app.core.database import get_system_setting
 from backend.app.services.extractor import (
-    extract_booking_from_text, parse_date_str, parse_etd, detect_carrier, has_booking_fields
+    extract_booking_from_text, parse_date_str, parse_etd, detect_carrier, has_booking_fields,
+    normalize_field_case
 )
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -255,7 +256,7 @@ def extract_booking_from_image_ai(
             if result[k] is None or result[k] == "":
                 result[k] = "null"
 
-    return result
+    return normalize_field_case(result)
 
 
 _SWIFT_OCR_CODE = '''

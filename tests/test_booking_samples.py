@@ -98,7 +98,7 @@ SAMPLES = [
             "Port of Discharging": "JEDDAH", "Place of Delivery": "JEDDAH", "Block": "null",
             "T/S Port": "PORT KLANG", "Equipment Type": "40'HC", "Q'ty": "2",
             "Empty Pick Up CY": "GREATING FORTUNE LOGISTICS CORP",
-            "Full return CY": "Cat Lai Terminal (Saigon Newport)",
+            "Full return CY": "CAT LAI TERMINAL (SAIGON NEWPORT)",
             "Port Cargo Cut-off": "27/08/2026 19:00",
             "Pre Carrier": "MTT SENARI 043S", "ETD_Pre": "28/08/2026",
             "Trunk Vessel": "null", "ETD_Trunk": "null",

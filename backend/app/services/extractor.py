@@ -256,6 +256,25 @@ def has_booking_fields(data: dict) -> bool:
     return False
 
 
+# Free-text fields normalized to uppercase to match the project's format: source booking
+# documents are printed in uppercase, but AI Vision / OCR can return mixed or Title Case.
+# Dates, quantities, "null" placeholders and the filename are left untouched.
+UPPERCASE_TEXT_FIELDS = (
+    "Booking No", "Carrier", "Port of Discharging", "Place of Delivery", "Block",
+    "T/S Port", "Equipment Type", "Empty Pick Up CY", "Full return CY",
+    "Pre Carrier", "Trunk Vessel", "Vessel",
+)
+
+
+def normalize_field_case(result: dict) -> dict:
+    """Uppercases UPPERCASE_TEXT_FIELDS in place (mutates and returns `result`)."""
+    for key in UPPERCASE_TEXT_FIELDS:
+        val = result.get(key)
+        if isinstance(val, str) and val and val != "null":
+            result[key] = val.upper()
+    return result
+
+
 def extract_booking_from_text(text: str, filename: str = "") -> dict:
     """
     Parses booking information from raw text extracted from PDF or OCR.
@@ -402,7 +421,7 @@ def extract_booking_from_text(text: str, filename: str = "") -> dict:
             if result[k] is None or result[k] == "":
                 result[k] = "null"
 
-    return result
+    return normalize_field_case(result)
 
 
 def read_pdf_text(pdf_path: str) -> str:
