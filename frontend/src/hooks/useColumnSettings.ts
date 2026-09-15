@@ -5,23 +5,101 @@ export interface ColumnWidthMap {
   [key: string]: number;
 }
 
+export interface ColumnMigrationOptions {
+  /** old key -> new key. The new column takes the old column's position & visibility; the old column is kept but hidden. */
+  replace?: Record<string, string>;
+  /** Keys forced hidden (appended hidden if missing from the stored list). */
+  hide?: string[];
+}
+
+export interface ColumnMigration extends ColumnMigrationOptions {
+  /** Bump to re-run. Applied once per version; stored at `${storageKey}_columns_version`. */
+  version: number;
+}
+
+/**
+ * Migrates a stored column list to a new set of defaults.
+ * - Keys in `replace` are swapped in place for their new key (unless the new key is already stored,
+ *   in which case the old one is simply hidden). Old keys that still exist in `defaults` are kept, hidden.
+ * - Keys in `hide` become `visible: false`.
+ * - Stored columns that no longer exist in `defaults` are dropped; missing defaults are appended.
+ */
+export function migrateColumns(
+  stored: ColumnDef[],
+  defaults: ColumnDef[],
+  options: ColumnMigrationOptions = {}
+): ColumnDef[] {
+  const replace = options.replace || {};
+  const hide = new Set(options.hide || []);
+  const defaultsByKey = new Map(defaults.map((d) => [d.key, d]));
+  const storedKeys = new Set(stored.map((c) => c.key));
+
+  const result: ColumnDef[] = [];
+  const seen = new Set<string>();
+
+  const push = (col: ColumnDef) => {
+    if (seen.has(col.key)) return;
+    seen.add(col.key);
+    result.push(col);
+  };
+
+  stored.forEach((col) => {
+    const newKey = replace[col.key];
+    if (newKey && newKey !== col.key) {
+      if (!storedKeys.has(newKey) && !seen.has(newKey)) {
+        const def = defaultsByKey.get(newKey);
+        push({
+          ...(def || { key: newKey, label: newKey }),
+          key: newKey,
+          defaultLabel: def?.label ?? newKey,
+          customLabel: undefined,
+          visible: col.visible,
+        } as ColumnDef);
+      }
+      // Old column stays available right after the new one, hidden
+      if (defaultsByKey.has(col.key)) push({ ...col, visible: false });
+      return;
+    }
+    if (!defaultsByKey.has(col.key)) return;
+    push({ ...col });
+  });
+
+  defaults.forEach((def) => {
+    if (!seen.has(def.key)) push({ ...def, defaultLabel: def.label });
+  });
+
+  return result.map((col) => (hide.has(col.key) ? { ...col, visible: false } : col));
+}
+
 interface UseColumnSettingsOptions {
   storageKey: string;
   defaultColumns: ColumnDef[];
   defaultWidths?: ColumnWidthMap;
+  /** Optional one-time migration of the stored column list (see `migrateColumns`). */
+  migration?: ColumnMigration;
 }
 
 export function useColumnSettings({
   storageKey,
   defaultColumns,
   defaultWidths = {},
+  migration,
 }: UseColumnSettingsOptions) {
   // Load initial column configuration
   const [columns, setColumnsState] = useState<ColumnDef[]>(() => {
     try {
       const saved = localStorage.getItem(`${storageKey}_columns`);
       if (saved) {
-        const parsed: ColumnDef[] = JSON.parse(saved);
+        let parsed: ColumnDef[] = JSON.parse(saved);
+        if (migration) {
+          const versionKey = `${storageKey}_columns_version`;
+          const storedVersion = Number(localStorage.getItem(versionKey) || 0);
+          if (storedVersion < migration.version) {
+            parsed = migrateColumns(parsed, defaultColumns, migration);
+            localStorage.setItem(`${storageKey}_columns`, JSON.stringify(parsed));
+            localStorage.setItem(versionKey, String(migration.version));
+          }
+        }
         const existingKeys = new Set(parsed.map((c) => c.key));
         const merged: ColumnDef[] = parsed.map((col) => {
           const def = defaultColumns.find((d) => d.key === col.key);
@@ -46,6 +124,13 @@ export function useColumnSettings({
       }
     } catch (e) {
       console.error('Error loading saved columns:', e);
+    }
+    if (migration) {
+      try {
+        localStorage.setItem(`${storageKey}_columns_version`, String(migration.version));
+      } catch {
+        /* ignore */
+      }
     }
     return defaultColumns.map((col) => ({
       ...col,
@@ -145,17 +230,32 @@ export function useColumnSettings({
 
       const targetColKey = colKey;
 
+      // Throttle width updates to one per animation frame
+      let rafId: number | null = null;
+      let pendingWidth: number | null = null;
+
+      const flushWidth = () => {
+        rafId = null;
+        if (pendingWidth === null) return;
+        const w = pendingWidth;
+        pendingWidth = null;
+        setColumnWidths((prev) => (prev[targetColKey] === w ? prev : { ...prev, [targetColKey]: w }));
+      };
+
       const onMouseMove = (moveEvent: MouseEvent) => {
         const deltaX = moveEvent.clientX - startX;
-        const newWidth = Math.max(50, Math.round(startWidth + deltaX));
-
-        setColumnWidths((prev) => ({
-          ...prev,
-          [targetColKey]: newWidth,
-        }));
+        pendingWidth = Math.max(50, Math.round(startWidth + deltaX));
+        if (rafId === null) {
+          rafId = window.requestAnimationFrame(flushWidth);
+        }
       };
 
       const onMouseUp = (upEvent: MouseEvent) => {
+        if (rafId !== null) {
+          window.cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        pendingWidth = null;
         const deltaX = upEvent.clientX - startX;
         const finalWidth = Math.max(50, Math.round(startWidth + deltaX));
 
@@ -176,6 +276,10 @@ export function useColumnSettings({
       };
 
       const cleanup = () => {
+        if (rafId !== null) {
+          window.cancelAnimationFrame(rafId);
+          rafId = null;
+        }
         window.removeEventListener('mousemove', onMouseMove);
         window.removeEventListener('mouseup', onMouseUp);
         document.body.style.cursor = '';

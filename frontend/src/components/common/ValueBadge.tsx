@@ -1,5 +1,5 @@
 import React from 'react';
-import { useApp } from '../../context/AppContext';
+import { useColorRuleLookup } from '../../context/AppContext';
 import { TargetTable } from '../../types';
 import { findMatchingColorRule, getColorPreset } from '../../utils/colorPresets';
 
@@ -12,7 +12,10 @@ interface ValueBadgeProps {
   badgeClassName?: string;
 }
 
-export const ValueBadge: React.FC<ValueBadgeProps> = ({
+const DEFAULT_BADGE_CLASS =
+  'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+
+const ValueBadgeInner: React.FC<ValueBadgeProps> = ({
   table,
   columnKey,
   value,
@@ -20,7 +23,8 @@ export const ValueBadge: React.FC<ValueBadgeProps> = ({
   className = '',
   badgeClassName = '',
 }) => {
-  const { colorRules } = useApp();
+  // Map-based lookup: only the rules relevant to this table/column are scanned.
+  const getRulesFor = useColorRuleLookup();
 
   if (value === undefined || value === null || value === '' || value === 'null') {
     return (
@@ -31,7 +35,10 @@ export const ValueBadge: React.FC<ValueBadgeProps> = ({
   }
 
   const strVal = String(value);
-  const matchingRule = findMatchingColorRule(colorRules, table, columnKey, strVal);
+  const candidates = getRulesFor(table, columnKey);
+  const matchingRule = candidates.length > 0
+    ? findMatchingColorRule(candidates, table, columnKey, strVal)
+    : null;
 
   if (matchingRule) {
     if (matchingRule.custom_bg) {
@@ -51,7 +58,7 @@ export const ValueBadge: React.FC<ValueBadgeProps> = ({
     }
 
     const preset = getColorPreset(matchingRule.preset_id);
-    const badgeClass = preset?.badgeClass || 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
+    const badgeClass = preset?.badgeClass || DEFAULT_BADGE_CLASS;
 
     return (
       <span
@@ -69,3 +76,6 @@ export const ValueBadge: React.FC<ValueBadgeProps> = ({
     </span>
   );
 };
+
+export const ValueBadge = React.memo(ValueBadgeInner);
+ValueBadge.displayName = 'ValueBadge';

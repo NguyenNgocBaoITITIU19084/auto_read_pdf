@@ -1,7 +1,17 @@
 import axios from 'axios';
-import { Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule } from '../types';
+import {
+  Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
+  AutoSyncStatus, AutoSyncMode, ImageExtractResult, BulkEntity,
+  VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
+} from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
+
+/** Timeout for long-running calls (ePort resync, PDF upload, image extraction). */
+export const LONG_TIMEOUT = 180000;
+
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const FALLBACK_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
 
 export const apiClient = axios.create({
   baseURL: API_BASE,
@@ -44,22 +54,43 @@ export const uploadPDFs = async (collectionId: number, files: File[]): Promise<{
   });
   const res = await apiClient.post('/bookings/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: LONG_TIMEOUT,
   });
   return res.data;
 };
 
 export const uploadFiles = uploadPDFs;
 
-export const extractBookingImageApi = async (file: File, apiKey?: string): Promise<Partial<Booking>> => {
+/**
+ * Extract booking fields from an image. Returns the full result
+ * `{data, engine_used, warnings}` so callers can surface engine failures.
+ */
+export const extractBookingImageDetailedApi = async (file: File, apiKey?: string): Promise<ImageExtractResult> => {
   const formData = new FormData();
   formData.append('file', file);
   if (apiKey) {
     formData.append('api_key', apiKey);
   }
-  const res = await apiClient.post<{ status: string; data: Partial<Booking> }>('/bookings/extract-image', formData, {
+  const res = await apiClient.post<{
+    status: string;
+    data: Partial<Booking>;
+    engine_used?: ImageExtractResult['engine_used'];
+    warnings?: string[];
+  }>('/bookings/extract-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: LONG_TIMEOUT,
   });
-  return res.data.data;
+  return {
+    data: res.data?.data || {},
+    engine_used: res.data?.engine_used || 'none',
+    warnings: Array.isArray(res.data?.warnings) ? res.data.warnings : [],
+  };
+};
+
+/** Backward-compatible: returns only `.data`. Prefer `extractBookingImageDetailedApi`. */
+export const extractBookingImageApi = async (file: File, apiKey?: string): Promise<Partial<Booking>> => {
+  const result = await extractBookingImageDetailedApi(file, apiKey);
+  return result.data;
 };
 
 export const saveManualBookingApi = async (collectionId: number, booking: Partial<Booking>): Promise<Booking> => {
@@ -76,6 +107,11 @@ export const deleteBooking = async (id: number): Promise<void> => {
 
 export const clearBookings = async (collectionId: number): Promise<void> => {
   await apiClient.delete(`/bookings/clear/${collectionId}`);
+};
+
+export const deleteBookingsBatch = async (ids: number[]): Promise<{ status: string; deleted: number }> => {
+  const res = await apiClient.post('/bookings/batch-delete', { ids });
+  return res.data;
 };
 
 // Vessels
@@ -128,7 +164,28 @@ export const deleteVesselWatchlist = async (watchlistId: number): Promise<void> 
 };
 
 export const syncVesselWatchlist = async (collectionId: number): Promise<any> => {
-  const res = await apiClient.post(`/vessels/watchlist/sync?collection_id=${collectionId}`);
+  const res = await apiClient.post(`/vessels/watchlist/sync?collection_id=${collectionId}`, undefined, {
+    timeout: LONG_TIMEOUT,
+  });
+  return res.data;
+};
+
+export const addVesselWatchlistBatch = async (
+  collectionId: number,
+  items: VesselWatchlistBatchItem[]
+): Promise<{ status: string; added: number }> => {
+  const res = await apiClient.post('/vessels/watchlist/batch-add', { collection_id: collectionId, items });
+  return res.data;
+};
+
+export const removeVesselWatchlistBatch = async (ids: number[]): Promise<{ status: string; removed: number }> => {
+  const res = await apiClient.post('/vessels/watchlist/batch-remove', { ids });
+  return res.data;
+};
+
+/** Re-query ePort for the given vessel_schedules ids. */
+export const resyncVesselsApi = async (ids: number[]): Promise<ResyncResult> => {
+  const res = await apiClient.post<ResyncResult>('/vessels/resync', { ids }, { timeout: LONG_TIMEOUT });
   return res.data;
 };
 
@@ -189,7 +246,44 @@ export const deleteContainerWatchlist = async (watchlistId: number): Promise<voi
 };
 
 export const syncContainerWatchlist = async (collectionId: number): Promise<any> => {
-  const res = await apiClient.post(`/containers/watchlist/sync?collection_id=${collectionId}`);
+  const res = await apiClient.post(`/containers/watchlist/sync?collection_id=${collectionId}`, undefined, {
+    timeout: LONG_TIMEOUT,
+  });
+  return res.data;
+};
+
+export const addContainerWatchlistBatch = async (
+  collectionId: number,
+  items: ContainerWatchlistBatchItem[]
+): Promise<{ status: string; added: number }> => {
+  const res = await apiClient.post('/containers/watchlist/batch-add', { collection_id: collectionId, items });
+  return res.data;
+};
+
+export const removeContainerWatchlistBatch = async (ids: number[]): Promise<{ status: string; removed: number }> => {
+  const res = await apiClient.post('/containers/watchlist/batch-remove', { ids });
+  return res.data;
+};
+
+/** Re-query ePort for the given containers ids. */
+export const resyncContainersApi = async (ids: number[]): Promise<ResyncResult> => {
+  const res = await apiClient.post<ResyncResult>('/containers/resync', { ids }, { timeout: LONG_TIMEOUT });
+  return res.data;
+};
+
+// Collections — move / copy items between collections
+export const moveItemsToCollection = async (
+  entity: BulkEntity,
+  ids: number[],
+  targetCollectionId: number,
+  copy: boolean = false
+): Promise<{ status: string; moved: number }> => {
+  const res = await apiClient.post('/collections/move', {
+    entity,
+    ids,
+    target_collection_id: targetCollectionId,
+    copy,
+  });
   return res.data;
 };
 
@@ -212,13 +306,58 @@ export const restoreBackupDb = async (backupData: any): Promise<any> => {
   return res.data;
 };
 
-export const getAutoSyncStatus = async (): Promise<{ enabled: boolean; interval_minutes: number }> => {
-  const res = await apiClient.get('/scheduler/status');
-  return res.data;
+const DEFAULT_AUTO_SYNC_STATUS: AutoSyncStatus = {
+  enabled: false,
+  mode: 'interval',
+  interval_minutes: 10,
+  times: [],
+  running: false,
+  last_run_at: null,
+  last_run_result: null,
+  next_run_at: null,
 };
 
-export const toggleAutoSyncApi = async (enable: boolean, intervalMinutes: number = 10): Promise<any> => {
-  const res = await apiClient.post('/scheduler/toggle', { enable, interval_minutes: intervalMinutes });
+/** Normalizes a (possibly older-backend) scheduler payload into a full AutoSyncStatus. */
+export const normalizeAutoSyncStatus = (raw: any): AutoSyncStatus => {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const interval = Number(r.interval_minutes);
+  return {
+    enabled: !!r.enabled,
+    mode: r.mode === 'times' ? 'times' : 'interval',
+    interval_minutes: Number.isFinite(interval) && interval > 0 ? interval : DEFAULT_AUTO_SYNC_STATUS.interval_minutes,
+    times: Array.isArray(r.times) ? r.times.filter((x: unknown) => typeof x === 'string') : [],
+    running: !!r.running,
+    last_run_at: r.last_run_at ?? null,
+    last_run_result: r.last_run_result ?? null,
+    next_run_at: r.next_run_at ?? null,
+  };
+};
+
+export const getAutoSyncStatus = async (): Promise<AutoSyncStatus> => {
+  const res = await apiClient.get('/scheduler/status');
+  return normalizeAutoSyncStatus(res.data);
+};
+
+export interface ToggleAutoSyncOptions {
+  mode?: AutoSyncMode;
+  times?: string[];
+}
+
+/** POST /scheduler/toggle — returns the full status after applying. */
+export const toggleAutoSyncApi = async (
+  enable: boolean,
+  intervalMinutes: number = 10,
+  options: ToggleAutoSyncOptions = {}
+): Promise<AutoSyncStatus> => {
+  const body: Record<string, unknown> = { enable, interval_minutes: intervalMinutes };
+  if (options.mode) body.mode = options.mode;
+  if (options.times) body.times = options.times;
+  const res = await apiClient.post('/scheduler/toggle', body);
+  return normalizeAutoSyncStatus(res.data);
+};
+
+export const runSyncNowApi = async (): Promise<{ status: RunSyncNowStatus }> => {
+  const res = await apiClient.post('/scheduler/run-now');
   return res.data;
 };
 
@@ -274,14 +413,37 @@ export const saveAISettingsApi = async (settings: {
   return res.data;
 };
 
+export type AIKeyErrorType = 'invalid_key' | 'model_not_found' | 'quota' | 'network' | 'unknown';
+
+export interface AIKeyTestResult {
+  valid: boolean;
+  message: string;
+  /** Present on newer backends */
+  error_type?: AIKeyErrorType | null;
+}
+
 export const testAIApiKeyApi = async (
   apiKey: string,
   model?: string
-): Promise<{ valid: boolean; message: string }> => {
+): Promise<AIKeyTestResult> => {
   const res = await apiClient.post('/settings/ai/test', {
     gemini_api_key: apiKey,
-    gemini_model: model || 'gemini-2.0-flash',
+    gemini_model: model || DEFAULT_GEMINI_MODEL,
   });
   return res.data;
+};
+
+/** GET /settings/ai/models — falls back to a static list on any error. */
+export const getAIModelsApi = async (apiKey?: string): Promise<string[]> => {
+  try {
+    const params: Record<string, string> = {};
+    if (apiKey) params.api_key = apiKey;
+    const res = await apiClient.get<{ models: string[] }>('/settings/ai/models', { params });
+    const models = Array.isArray(res.data?.models) ? res.data.models.filter((m) => typeof m === 'string' && m) : [];
+    return models.length > 0 ? models : [...FALLBACK_GEMINI_MODELS];
+  } catch (e) {
+    console.warn('Failed to load AI models, using fallback list:', e);
+    return [...FALLBACK_GEMINI_MODELS];
+  }
 };
 

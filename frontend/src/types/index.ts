@@ -49,7 +49,16 @@ export interface VesselSchedule {
   [key: string]: any;
 }
 
-export interface VesselWatchlist {
+export type WatchlistSyncStatus = 'ok' | 'not_found' | 'error';
+
+export interface WatchlistSyncFields {
+  /** Local time "%Y-%m-%d %H:%M:%S" of the last sync attempt for this item */
+  last_sync_at?: string | null;
+  last_sync_status?: WatchlistSyncStatus | string | null;
+  last_sync_message?: string | null;
+}
+
+export interface VesselWatchlist extends WatchlistSyncFields {
   id: number;
   collection_id: number;
   site_id: string;
@@ -96,12 +105,16 @@ export interface ContainerInfo {
   item_seal_no: string;
   custom_clearance_status: string;
   infras_fee_status: string;
+  /** Computed by backend: "Đã thông quan" | "Đang giám sát HQ" | "Chưa thông quan" | "" */
+  customs_status?: string;
+  /** Computed by backend: IMDG link extracted from raw `haz` HTML, else "" */
+  imdg_url?: string;
   item_key?: number;
   queried_at: string;
   [key: string]: any;
 }
 
-export interface ContainerWatchlist {
+export interface ContainerWatchlist extends WatchlistSyncFields {
   id: number;
   collection_id: number;
   site_id: string;
@@ -186,6 +199,8 @@ export interface UnclearedContainerAlert {
   event_type?: string;
   in_yard?: string;
   custom_clearance_status?: string;
+  cust?: string;
+  customs_status?: string;
   infras_fee_status?: string;
   fel?: string;
   iso?: string;
@@ -234,8 +249,91 @@ export interface AISettings {
   ocr_engine: string;
 }
 
-export interface ExtractImageResponse {
+export type ImageExtractEngine = 'gemini' | 'ocr' | 'none';
+
+export interface ImageExtractResult {
+  data: Partial<Booking>;
+  engine_used: ImageExtractEngine;
+  warnings: string[];
+}
+
+export interface ExtractImageResponse extends Partial<ImageExtractResult> {
   status: string;
   data: Partial<Booking>;
+}
+
+// ---------------------------------------------------------------------------
+// Auto sync (scheduler)
+// ---------------------------------------------------------------------------
+export type AutoSyncMode = 'interval' | 'times';
+
+export interface AutoSyncRunResult {
+  vessels_ok: number;
+  vessels_not_found: number;
+  containers_ok: number;
+  errors: number;
+}
+
+export interface AutoSyncStatus {
+  enabled: boolean;
+  mode: AutoSyncMode;
+  interval_minutes: number;
+  /** "HH:MM" list, Asia/Ho_Chi_Minh */
+  times: string[];
+  running: boolean;
+  last_run_at: string | null;
+  last_run_result: AutoSyncRunResult | null;
+  next_run_at: string | null;
+}
+
+export interface AutoSyncSchedule {
+  mode: AutoSyncMode;
+  interval_minutes: number;
+  times: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Bulk / batch API shapes
+// ---------------------------------------------------------------------------
+export type BulkEntity = 'bookings' | 'vessels' | 'containers';
+
+export interface VesselWatchlistBatchItem {
+  site_id: string;
+  vessel_name: string;
+  voyage: string;
+}
+
+export interface ContainerWatchlistBatchItem {
+  site_id: string;
+  container_no: string;
+  event_type: string;
+}
+
+export interface ResyncResult {
+  status: string;
+  updated: number;
+  not_found: string[];
+  errors: string[];
+}
+
+export type RunSyncNowStatus = 'started' | 'already_running';
+
+// ---------------------------------------------------------------------------
+// Electron preload bridge
+// ---------------------------------------------------------------------------
+export interface ElectronAPI {
+  platform?: string;
+  version?: string;
+  openExternal?: (url: string) => Promise<void>;
+  /** PNG data URL or null */
+  readClipboardImage?: () => Promise<string | null>;
+  /** Tells main process whether to hide-to-tray on close */
+  setAutoSyncActive?: (active: boolean) => void;
+}
+
+declare global {
+  interface Window {
+    electronAPI?: ElectronAPI;
+  }
 }
 

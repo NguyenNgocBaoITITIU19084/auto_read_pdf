@@ -5,6 +5,10 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Tooltip } from './Tooltip';
+import { tf } from '../../services/i18nFormat';
+
+/** Max rows rendered per page — "Tất cả" / custom sizes are capped to keep the DOM light. */
+export const MAX_ROWS_PER_PAGE = 500;
 
 interface PaginationProps {
   currentPage: number;
@@ -31,6 +35,14 @@ export const Pagination: React.FC<PaginationProps> = ({
   const customInputRef = useRef<HTMLInputElement>(null);
 
   const isAll = pageSize >= totalItems && totalItems > 0 && pageSize > 200;
+  const isCapped = totalItems > MAX_ROWS_PER_PAGE && pageSize >= MAX_ROWS_PER_PAGE;
+
+  // Enforce the cap (also fixes a persisted "all" page size once data grows beyond the cap)
+  useEffect(() => {
+    if (totalItems > MAX_ROWS_PER_PAGE && pageSize > MAX_ROWS_PER_PAGE) {
+      onPageSizeChange(MAX_ROWS_PER_PAGE);
+    }
+  }, [totalItems, pageSize, onPageSizeChange]);
   const totalPages = isAll || pageSize <= 0 ? 1 : Math.max(1, Math.ceil(totalItems / pageSize));
 
   // Ensure current page is valid when totalPages changes
@@ -77,7 +89,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       return;
     }
     if (val === 'all') {
-      onPageSizeChange(Math.max(totalItems, 999999));
+      onPageSizeChange(totalItems > MAX_ROWS_PER_PAGE ? MAX_ROWS_PER_PAGE : Math.max(totalItems, 999999));
       return;
     }
     const parsed = parseInt(val, 10);
@@ -92,8 +104,8 @@ export const Pagination: React.FC<PaginationProps> = ({
     if (isNaN(parsed) || parsed < 1) {
       return;
     }
-    // Cap custom page size between 1 and 2000 for reasonable DOM safety
-    const clamped = Math.min(Math.max(1, parsed), 2000);
+    // Cap custom page size for DOM safety
+    const clamped = Math.min(Math.max(1, parsed), MAX_ROWS_PER_PAGE);
     onPageSizeChange(clamped);
     setIsCustomOpen(false);
   };
@@ -127,7 +139,7 @@ export const Pagination: React.FC<PaginationProps> = ({
             <div className="flex items-center gap-1">
               <select
                 value={
-                  isAll
+                  isAll || isCapped
                     ? 'all'
                     : pageSizeOptions.includes(pageSize)
                     ? String(pageSize)
@@ -141,14 +153,25 @@ export const Pagination: React.FC<PaginationProps> = ({
                     {opt} {t.common.perPage}
                   </option>
                 ))}
-                {!pageSizeOptions.includes(pageSize) && !isAll && (
+                {!pageSizeOptions.includes(pageSize) && !isAll && !isCapped && (
                   <option value="custom">
                     {pageSize} {t.common.perPage} ({t.common.custom})
                   </option>
                 )}
-                <option value="all">{t.common.allRows}</option>
+                <option value="all">
+                  {totalItems > MAX_ROWS_PER_PAGE ? `${t.common.allRows} (≤ ${MAX_ROWS_PER_PAGE})` : t.common.allRows}
+                </option>
                 <option value="custom">{t.common.custom}</option>
               </select>
+
+              {isCapped && (
+                <span
+                  className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 whitespace-nowrap"
+                  title={tf(t.common.pageSizeCapped, { max: MAX_ROWS_PER_PAGE })}
+                >
+                  ≤ {MAX_ROWS_PER_PAGE}
+                </span>
+              )}
 
               <Tooltip content={t.common.customPageSize}>
                 <button
@@ -166,7 +189,7 @@ export const Pagination: React.FC<PaginationProps> = ({
                 ref={customInputRef}
                 type="number"
                 min="1"
-                max="2000"
+                max={MAX_ROWS_PER_PAGE}
                 value={customInput}
                 onChange={(e) => setCustomInput(e.target.value)}
                 placeholder="Số dòng"

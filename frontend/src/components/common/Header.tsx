@@ -11,6 +11,7 @@ import { BackupModal } from './BackupModal';
 import { CollectionManagerModal } from './CollectionManagerModal';
 import { ColorConfigModal } from './ColorConfigModal';
 import { Tooltip } from './Tooltip';
+import { describeAutoSyncSchedule, formatIntervalShort } from '../../services/autoSync';
 import { 
   startFullAppTour, startTabTour, 
   hasCompletedOnboarding, setOnboardingCompleted,
@@ -27,7 +28,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
     t, language, setLanguage, isDark, setIsDark, 
     collections, activeCollection, setActiveCollection, 
     handleCreateCollection, handleDeleteCollection,
-    autoSyncEnabled, syncInterval, toggleAutoSync
+    autoSyncEnabled, syncInterval, toggleAutoSync, autoSyncStatus
   } = useApp();
 
   const [isNewColOpen, setIsNewColOpen] = useState(false);
@@ -72,9 +73,15 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
     setIsNewColOpen(false);
   };
 
-  const intervalLabel = syncInterval >= 60 && syncInterval % 60 === 0 
-    ? `${syncInterval / 60}h` 
-    : `${syncInterval}p`;
+  const syncTimes = autoSyncStatus?.mode === 'times' ? autoSyncStatus.times : null;
+  const intervalLabel = syncTimes
+    ? (syncTimes.length <= 2 ? syncTimes.join(', ') : `${syncTimes[0]} +${syncTimes.length - 1}`) || '--:--'
+    : formatIntervalShort(syncInterval);
+  const scheduleText = describeAutoSyncSchedule(
+    autoSyncStatus ?? { mode: 'interval', interval_minutes: syncInterval, times: [] },
+    t.autoSync
+  );
+  const autoSyncRunning = !!autoSyncStatus?.running;
 
   const handleStartFullTour = () => {
     setIsHelpModalOpen(false);
@@ -170,7 +177,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
       <div className="flex items-center gap-2.5 shrink-0">
         {/* Auto Sync Toggle */}
         <div data-tour="auto-sync">
-          <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (mỗi ${syncInterval} phút). Nhấp để tắt hoặc vào tab Watchlist để đổi thời gian` : `Tự động đồng bộ đang TẮT (chu kỳ ${syncInterval} phút). Nhấp để bật hoặc vào tab Watchlist để đổi thời gian`} position="bottom">
+          <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (${scheduleText}). Nhấp để tắt hoặc vào Cài đặt / Watchlist để đổi lịch` : `Tự động đồng bộ đang TẮT (${scheduleText}). Nhấp để bật hoặc vào Cài đặt / Watchlist để đổi lịch`} position="bottom">
             <button
               onClick={() => toggleAutoSync()}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap shrink-0 ${
@@ -179,7 +186,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-750'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'animate-spin text-emerald-600' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'text-emerald-600' : ''} ${autoSyncRunning ? 'animate-spin' : ''}`} />
               <span>{t.common.autoSync}: {autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
             </button>
           </Tooltip>
