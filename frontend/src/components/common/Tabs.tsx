@@ -7,9 +7,10 @@ export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container';
 interface TabsProps {
   activeTab: TabId;
   onChange: (tab: TabId) => void;
+  onHoverTab?: (tab: TabId) => void;
 }
 
-export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange }) => {
+export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab }) => {
   const { t } = useApp();
 
   const tabItems: { id: TabId; label: string; icon: React.ReactNode }[] = [
@@ -44,6 +45,7 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange }) => {
             key={tab.id}
             data-tour={`tab-${tab.id}`}
             onClick={() => onChange(tab.id)}
+            onMouseEnter={() => onHoverTab?.(tab.id)}
             className={`flex items-center gap-2 px-3.5 py-2 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
               isActive
                 ? 'border-primary-600 dark:border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50/50 dark:bg-primary-950/30'

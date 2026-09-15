@@ -1,6 +1,8 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { ConfirmDialog, ConfirmOptions } from '../components/common/ConfirmDialog';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState, lazy, Suspense } from 'react';
+import type { ConfirmOptions } from '../components/common/ConfirmDialog';
 import { useApp } from '../context/AppContext';
+
+const ConfirmDialog = lazy(() => import('../components/common/ConfirmDialog').then((m) => ({ default: m.ConfirmDialog })));
 
 export type { ConfirmOptions } from '../components/common/ConfirmDialog';
 
@@ -69,20 +71,24 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      <ConfirmDialog
-        isOpen={!!pending}
-        title={pending?.options.title}
-        message={pending?.options.message}
-        confirmText={pending?.options.confirmText}
-        cancelText={pending?.options.cancelText}
-        danger={pending?.options.danger}
-        onConfirm={() => close(true)}
-        onCancel={() => close(false)}
-        defaultTitle={t.confirm.title}
-        defaultConfirmText={pending?.options.danger ? t.confirm.delete : t.confirm.confirm}
-        defaultCancelText={t.confirm.cancel}
-        keyboardHint={t.confirm.keyboardHint}
-      />
+      {pending && (
+        <Suspense fallback={null}>
+          <ConfirmDialog
+            isOpen={!!pending}
+            title={pending?.options.title}
+            message={pending?.options.message}
+            confirmText={pending?.options.confirmText}
+            cancelText={pending?.options.cancelText}
+            danger={pending?.options.danger}
+            onConfirm={() => close(true)}
+            onCancel={() => close(false)}
+            defaultTitle={t.confirm.title}
+            defaultConfirmText={pending?.options.danger ? t.confirm.delete : t.confirm.confirm}
+            defaultCancelText={t.confirm.cancel}
+            keyboardHint={t.confirm.keyboardHint}
+          />
+        </Suspense>
+      )}
     </ConfirmContext.Provider>
   );
 };

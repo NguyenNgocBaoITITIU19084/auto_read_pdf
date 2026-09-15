@@ -6,6 +6,9 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   base: './', // important for Electron file:// protocol
+  build: {
+    manifest: true,
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

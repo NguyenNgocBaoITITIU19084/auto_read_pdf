@@ -1,41 +1,13 @@
+import 'driver.js/dist/driver.css';
+import '../styles/driver-theme.css';
 import { driver, DriveStep, Config } from 'driver.js';
 import { TabId } from '../components/common/Tabs';
 import { translations } from '../i18n/translations';
+import { emitTourAction, hasCompletedOnboarding, setOnboardingCompleted } from './tourEvents';
+export { subscribeTourActions, emitTourAction, hasCompletedOnboarding, setOnboardingCompleted } from './tourEvents';
+export type { TourActionType } from './tourEvents';
 
 type TranslationType = typeof translations.vi;
-
-const ONBOARDING_KEY = 'auto_read_pdf_onboarding_completed_v2';
-
-export type TourActionType =
-  | 'openColorConfig'
-  | 'closeColorConfig'
-  | 'openImageModal'
-  | 'closeImageModal'
-  | 'openVesselWatchlist'
-  | 'closeVesselWatchlist'
-  | 'openContainerWatchlist'
-  | 'closeContainerWatchlist';
-
-type TourEventListener = (action: TourActionType) => void;
-
-const tourActionListeners = new Set<TourEventListener>();
-
-export const subscribeTourActions = (listener: TourEventListener) => {
-  tourActionListeners.add(listener);
-  return () => {
-    tourActionListeners.delete(listener);
-  };
-};
-
-export const emitTourAction = (action: TourActionType) => {
-  tourActionListeners.forEach((fn) => {
-    try {
-      fn(action);
-    } catch (e) {
-      console.error('Tour action error:', e);
-    }
-  });
-};
 
 export interface TourManagerOptions {
   t: TranslationType;
@@ -223,7 +195,7 @@ export const startFullAppTour = ({ t, onTabChange }: TourManagerOptions) => {
       emitTourAction('closeImageModal');
       emitTourAction('closeVesselWatchlist');
       emitTourAction('closeContainerWatchlist');
-      localStorage.setItem(ONBOARDING_KEY, 'true');
+      setOnboardingCompleted(true);
       driverObj.destroy();
     },
   } as Config);
@@ -528,19 +500,5 @@ export const startTabTour = (tabId: TabId, { t }: TourManagerOptions) => {
   } as Config);
 
   driverObj.drive();
-};
-
-/**
- * Checks if the user has completed onboarding before, returns boolean
- */
-export const hasCompletedOnboarding = (): boolean => {
-  return localStorage.getItem(ONBOARDING_KEY) === 'true';
-};
-
-/**
- * Marks onboarding as completed or dismissed
- */
-export const setOnboardingCompleted = (completed: boolean = true) => {
-  localStorage.setItem(ONBOARDING_KEY, completed ? 'true' : 'false');
 };
 
