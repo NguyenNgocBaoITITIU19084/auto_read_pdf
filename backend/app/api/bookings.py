@@ -1,13 +1,14 @@
 import os
+import asyncio
 import tempfile
 import shutil
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query, Body
+from typing import List, Optional, Dict, Any, Tuple
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from backend.app.core.database import (
-    insert_booking, get_bookings, delete_booking, clear_bookings
+    insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch
 )
-from backend.app.services.extractor import extract_booking_data
+from backend.app.services.extractor import extract_booking_data, has_booking_fields
 from backend.app.services.image_extractor import extract_booking_from_image
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
@@ -16,9 +17,67 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 PDF_EXTENSIONS = {".pdf"}
 ALLOWED_EXTENSIONS = PDF_EXTENSIONS.union(IMAGE_EXTENSIONS)
 
+W_PDF_NO_TEXT = "Không tìm thấy thông tin booking trong PDF (có thể là bản scan không có lớp chữ). Vui lòng thử dán ảnh hoặc nhập tay."
+
 class SaveBookingRequest(BaseModel):
     collection_id: int
     booking: Dict[str, Any]
+
+class BatchDeleteRequest(BaseModel):
+    ids: List[int] = []
+
+def _resolve_vessel_etd(data: dict) -> None:
+    """Vessel/ETD = Pre Carrier/ETD_Pre if present, else Trunk Vessel/ETD_Trunk."""
+    vessel = data.get("Pre Carrier", "null")
+    etd = data.get("ETD_Pre", "null")
+    if vessel == "null" or not vessel:
+        vessel = data.get("Trunk Vessel", "null")
+        etd = data.get("ETD_Trunk", "null")
+    if vessel != "null" and vessel:
+        data["Vessel"] = vessel
+        data["ETD"] = etd
+
+def _safe_basename(filename: str) -> str:
+    name = os.path.basename((filename or "").replace("\\", "/"))
+    return name or "uploaded_file"
+
+def _extract_pdf_bytes(file_bytes: bytes) -> dict:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        tmp_pdf.write(file_bytes)
+        tmp_pdf_path = tmp_pdf.name
+    try:
+        return extract_booking_data(tmp_pdf_path)
+    finally:
+        if os.path.exists(tmp_pdf_path):
+            os.remove(tmp_pdf_path)
+
+def _process_uploads(collection_id: int, uploads: List[Tuple[str, bytes]]) -> List[dict]:
+    """Blocking work (pdfplumber / Gemini / OCR / sqlite) — run in a worker thread."""
+    extracted_results = []
+    temp_dir = tempfile.mkdtemp(prefix="booking_upload_")
+    try:
+        for filename, file_bytes in uploads:
+            file_ext = os.path.splitext(filename)[1].lower()
+            try:
+                if file_ext == ".pdf":
+                    temp_path = os.path.join(temp_dir, _safe_basename(filename))
+                    with open(temp_path, "wb") as buffer:
+                        buffer.write(file_bytes)
+                    data = extract_booking_data(temp_path)
+                else:
+                    data = extract_booking_from_image(file_bytes, filename=filename)
+
+                data["Tên file PDF"] = filename
+                _resolve_vessel_etd(data)
+
+                row_id = insert_booking(collection_id, data)
+                data["id"] = row_id
+                extracted_results.append(data)
+            except Exception as e:
+                print(f"Error parsing {filename}: {e}")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return extracted_results
 
 @router.get("")
 def list_bookings(
@@ -35,51 +94,42 @@ async def upload_bookings(
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
-        
-    extracted_results = []
-    temp_dir = tempfile.mkdtemp(prefix="booking_upload_")
-    
-    try:
-        for file in files:
-            filename = file.filename or "uploaded_file"
-            file_ext = os.path.splitext(filename)[1].lower()
-            if file_ext not in ALLOWED_EXTENSIONS:
-                continue
-                
-            temp_path = os.path.join(temp_dir, filename)
-            with open(temp_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-                
-            try:
-                if file_ext == ".pdf":
-                    data = extract_booking_data(temp_path)
-                else:
-                    with open(temp_path, "rb") as f_img:
-                        img_bytes = f_img.read()
-                    data = extract_booking_from_image(img_bytes, filename=filename)
-                    
-                data["Tên file PDF"] = filename
-                
-                # Resolve Vessel & ETD
-                vessel = data.get("Pre Carrier", "null")
-                etd = data.get("ETD_Pre", "null")
-                if vessel == "null" or not vessel:
-                    vessel = data.get("Trunk Vessel", "null")
-                    etd = data.get("ETD_Trunk", "null")
-                
-                if vessel != "null" and vessel:
-                    data["Vessel"] = vessel
-                    data["ETD"] = etd
-                
-                row_id = insert_booking(collection_id, data)
-                data["id"] = row_id
-                extracted_results.append(data)
-            except Exception as e:
-                print(f"Error parsing {filename}: {e}")
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        
+
+    uploads: List[Tuple[str, bytes]] = []
+    for file in files:
+        filename = file.filename or "uploaded_file"
+        file_ext = os.path.splitext(filename)[1].lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            continue
+        uploads.append((filename, await file.read()))
+
+    extracted_results = await asyncio.to_thread(_process_uploads, collection_id, uploads)
     return {"count": len(extracted_results), "items": extracted_results}
+
+def _extract_preview(file_bytes: bytes, filename: str, file_ext: str, api_key: Optional[str]) -> dict:
+    engine_used = "none"
+    warnings: List[str] = []
+    if file_ext == ".pdf":
+        data = _extract_pdf_bytes(file_bytes)
+        # PDF text layer parsing (no AI); reported as local extraction
+        if has_booking_fields(data):
+            engine_used = "ocr"
+        else:
+            warnings.append(W_PDF_NO_TEXT)
+    else:
+        result = extract_booking_from_image(
+            file_bytes, filename=filename, api_key=api_key, return_details=True
+        )
+        if isinstance(result, dict) and "data" in result and "engine_used" in result:
+            data = result["data"]
+            engine_used = result.get("engine_used") or "none"
+            warnings = list(result.get("warnings") or [])
+        else:
+            data = result
+
+    data["Tên file PDF"] = filename
+    _resolve_vessel_etd(data)
+    return {"status": "success", "data": data, "engine_used": engine_used, "warnings": warnings}
 
 @router.post("/extract-image")
 async def extract_image_preview(
@@ -87,8 +137,8 @@ async def extract_image_preview(
     api_key: Optional[str] = Form(None)
 ):
     """
-    Extracts booking details from a single uploaded image without saving to DB.
-    Returns the parsed booking object for preview/editing.
+    Extracts booking details from a single uploaded image (or PDF) without saving to DB.
+    Returns {status, data, engine_used, warnings} for preview/editing.
     """
     filename = file.filename or "booking_photo.jpg"
     file_ext = os.path.splitext(filename)[1].lower()
@@ -103,30 +153,7 @@ async def extract_image_preview(
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
     try:
-        if file_ext == ".pdf":
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
-                tmp_pdf.write(file_bytes)
-                tmp_pdf_path = tmp_pdf.name
-            try:
-                data = extract_booking_data(tmp_pdf_path)
-            finally:
-                if os.path.exists(tmp_pdf_path):
-                    os.remove(tmp_pdf_path)
-        else:
-            data = extract_booking_from_image(file_bytes, filename=filename, api_key=api_key)
-
-        data["Tên file PDF"] = filename
-        # Ensure Vessel & ETD are consistent
-        vessel = data.get("Pre Carrier", "null")
-        etd = data.get("ETD_Pre", "null")
-        if vessel == "null" or not vessel:
-            vessel = data.get("Trunk Vessel", "null")
-            etd = data.get("ETD_Trunk", "null")
-        if vessel != "null" and vessel:
-            data["Vessel"] = vessel
-            data["ETD"] = etd
-
-        return {"status": "success", "data": data}
+        return await asyncio.to_thread(_extract_preview, file_bytes, filename, file_ext, api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to extract image: {e}")
 
@@ -139,6 +166,11 @@ def save_manual_booking(req: SaveBookingRequest):
     saved_booking = dict(req.booking)
     saved_booking["id"] = row_id
     return {"status": "success", "id": row_id, "item": saved_booking}
+
+@router.post("/batch-delete")
+def batch_delete_bookings(req: BatchDeleteRequest):
+    deleted = delete_bookings_batch(list(req.ids or []))
+    return {"status": "success", "deleted": deleted}
 
 @router.delete("/{booking_id}")
 def remove_booking(booking_id: int):
