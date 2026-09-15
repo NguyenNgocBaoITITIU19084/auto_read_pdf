@@ -38,11 +38,31 @@ def make_jpeg_bytes() -> bytes:
 
 
 def make_real_jpeg_bytes() -> bytes:
-    """A real, Pillow-decodable JPEG image."""
+    """A real, Pillow-decodable JPEG image with no EXIF orientation tag."""
     from PIL import Image
 
     buf = io.BytesIO()
     Image.new("RGB", (8, 8), color=(255, 0, 0)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def make_rotated_real_jpeg_bytes() -> bytes:
+    """A real JPEG with a non-default EXIF orientation tag (needs correcting)."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    exif = Image.Exif()
+    exif[0x0112] = 6  # "rotate 270" orientation
+    Image.new("RGB", (8, 4), color=(0, 255, 0)).save(buf, format="JPEG", exif=exif)
+    return buf.getvalue()
+
+
+def make_real_png_bytes() -> bytes:
+    """A real, Pillow-decodable PNG image (no EXIF orientation)."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color=(0, 0, 255)).save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -58,6 +78,11 @@ def make_webp_bytes() -> bytes:
 def make_heic_bytes() -> bytes:
     # ftyp box with 'heic' brand, as real HEIC files start.
     return b"\x00\x00\x00\x18ftypheic" + b"\x00" * 40
+
+
+def make_heic_mif1_bytes() -> bytes:
+    # Some real iPhone HEIC files use the 'mif1' major brand instead of 'heic'.
+    return b"\x00\x00\x00\x18ftypmif1" + b"\x00" * 40
 
 
 @pytest.fixture
@@ -169,6 +194,16 @@ class TestPair:
         device = bridge.pair(session.pairing_token, "curl/8.0")
         assert device.label == "Thiết bị"
 
+    def test_pair_non_ascii_token_raises_pairing_error_not_type_error(self, bridge):
+        bridge.start()
+        with pytest.raises(PairingError):
+            bridge.pair("café-token-not-real", "iPhone UA")
+
+    def test_pair_none_token_raises_pairing_error_not_type_error(self, bridge):
+        bridge.start()
+        with pytest.raises(PairingError):
+            bridge.pair(None, "iPhone UA")
+
 
 # ---------------------------------------------------------------------------
 # add_photo()
@@ -200,6 +235,11 @@ class TestAddPhoto:
     def test_heic_raises_bad_type_with_code(self, bridge, paired):
         with pytest.raises(BadType) as exc_info:
             bridge.add_photo(paired.token, make_heic_bytes())
+        assert exc_info.value.code == "heic"
+
+    def test_heic_mif1_brand_raises_bad_type_with_code(self, bridge, paired):
+        with pytest.raises(BadType) as exc_info:
+            bridge.add_photo(paired.token, make_heic_mif1_bytes())
         assert exc_info.value.code == "heic"
 
     def test_jpeg_accepted(self, bridge, paired):
@@ -263,20 +303,47 @@ class TestAddPhoto:
         photo = bridge.add_photo(paired.token, make_jpeg_bytes())
         assert photo.filename == f"phone_{expected_ts}_1.jpg"
 
-    def test_pillow_normalizes_real_jpeg_and_roundtrips(self, bridge, paired):
+    def test_real_jpeg_without_orientation_is_kept_byte_for_byte(self, bridge, paired):
+        # No EXIF orientation tag -> nothing to correct -> no recompression.
         data = make_real_jpeg_bytes()
+        photo = bridge.add_photo(paired.token, data)
+        out = bridge.read_photo(photo.id)
+        assert out == data
+
+    def test_real_jpeg_with_orientation_is_transposed_and_still_decodable(
+        self, bridge, paired
+    ):
+        data = make_rotated_real_jpeg_bytes()
         photo = bridge.add_photo(paired.token, data)
         out = bridge.read_photo(photo.id)
         assert out  # non-empty, decodable bytes
         from PIL import Image
 
-        Image.open(io.BytesIO(out)).verify()
+        img = Image.open(io.BytesIO(out))
+        img.verify()
+        # The orientation tag should no longer instruct a rotation.
+        img2 = Image.open(io.BytesIO(out))
+        assert img2.getexif().get(0x0112, 1) in (0, 1)
+
+    def test_real_png_without_orientation_roundtrips_byte_for_byte(self, bridge, paired):
+        data = make_real_png_bytes()
+        photo = bridge.add_photo(paired.token, data)
+        out = bridge.read_photo(photo.id)
+        assert out == data
 
     def test_synthetic_jpeg_falls_back_to_raw_bytes_and_roundtrips(self, bridge, paired):
         data = make_jpeg_bytes()
         photo = bridge.add_photo(paired.token, data)
         out = bridge.read_photo(photo.id)
         assert out == data
+
+    def test_non_ascii_device_token_raises_auth_error_not_type_error(self, bridge, paired):
+        with pytest.raises(AuthError):
+            bridge.add_photo("café-token-not-real", make_jpeg_bytes())
+
+    def test_none_device_token_raises_auth_error_not_type_error(self, bridge, paired):
+        with pytest.raises(AuthError):
+            bridge.add_photo(None, make_jpeg_bytes())
 
 
 # ---------------------------------------------------------------------------

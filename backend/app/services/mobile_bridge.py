@@ -23,7 +23,7 @@ import shutil
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -109,6 +109,24 @@ class MobileSession:
     tmp_dir: Path
 
 
+def _tokens_match(expected: str, provided: object) -> bool:
+    """Constant-time token comparison that tolerates non-str/non-ASCII input.
+
+    ``hmac.compare_digest`` raises ``TypeError`` when comparing ``str``
+    values that contain non-ASCII characters, and raises immediately if
+    either argument isn't a ``str``/``bytes``. Client-supplied tokens are
+    untrusted, so both cases must fail closed (return False) rather than
+    raise, letting callers turn a mismatch into a normal PairingError /
+    AuthError instead of leaking a 500.
+    """
+    if not isinstance(provided, str):
+        return False
+    try:
+        return hmac.compare_digest(expected.encode("utf-8"), provided.encode("utf-8"))
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return False
+
+
 def _label_from_user_agent(user_agent: str) -> str:
     """Derive a short, human-friendly device label from a User-Agent string."""
     ua = (user_agent or "").lower()
@@ -119,10 +137,19 @@ def _label_from_user_agent(user_agent: str) -> str:
     return "Thiết bị"
 
 
+_HEIC_FTYP_BRANDS = (
+    b"ftypheic",
+    b"ftypheix",
+    b"ftypheif",
+    b"ftypmif1",
+    b"ftypmsf1",
+)
+
+
 def _detect_image_type(data: bytes) -> str:
     """Return "jpeg" / "png" / "webp", or raise BadType (code="heic" for HEIC)."""
     header = data[:32]
-    if b"ftypheic" in header or b"ftypheix" in header or b"ftypheif" in header:
+    if any(brand in header for brand in _HEIC_FTYP_BRANDS):
         raise BadType("HEIC images are not supported", code="heic")
     if data[:3] == b"\xff\xd8\xff":
         return "jpeg"
@@ -226,7 +253,7 @@ class MobileBridge:
             session = self._session
             if session is None:
                 raise PairingError("No active session")
-            if not hmac.compare_digest(session.pairing_token, pairing_token):
+            if not _tokens_match(session.pairing_token, pairing_token):
                 raise PairingError("Invalid or already-used pairing token")
             now = self._clock()
             if now > session.pairing_expires_at:
@@ -249,7 +276,7 @@ class MobileBridge:
 
     def _find_device(self, device_token: str) -> MobileDevice:
         for device in self._devices.values():
-            if hmac.compare_digest(device.token, device_token):
+            if _tokens_match(device.token, device_token):
                 return device
         raise AuthError("Unknown or invalid device token")
 
@@ -286,7 +313,9 @@ class MobileBridge:
             timestamp = datetime.fromtimestamp(now, tz=TZ_HO_CHI_MINH).strftime(
                 "%Y%m%d_%H%M%S"
             )
-            _ = image_type  # detected/validated above; filename is always .jpg
+            # image_type is validated above (rejects unsupported/HEIC); the
+            # on-disk filename always uses a .jpg extension per the spec,
+            # regardless of the submitted container format.
             filename = f"phone_{timestamp}_{n}.jpg"
             path = session.tmp_dir / filename
 
@@ -310,10 +339,13 @@ class MobileBridge:
     def _normalize_exif(data: bytes) -> bytes:
         """Best-effort EXIF-orientation normalization via Pillow.
 
-        Falls back to the original bytes unchanged if Pillow is unavailable,
-        the data isn't decodable, or the transform doesn't change anything —
-        so the bytes returned by ``read_photo`` always match what was
-        submitted whenever no real transform was applied.
+        Returns the original bytes byte-for-byte unchanged unless the image
+        actually carries a non-default EXIF orientation tag (0x0112, values
+        other than 1) that needs correcting — this avoids silently
+        recompressing every photo that passes through here (which would
+        degrade quality for an OCR pipeline and, for PNGs, flatten alpha via
+        an unconditional RGB conversion). Falls back to the original bytes
+        on any error: Pillow unavailable, data not decodable, etc.
         """
         try:
             import io as _io
@@ -322,12 +354,17 @@ class MobileBridge:
 
             img = Image.open(_io.BytesIO(data))
             img.load()
+            orientation = img.getexif().get(0x0112, 1)
+            if orientation in (0, 1):
+                return data  # nothing to correct; keep submitted bytes as-is
+
             transposed = ImageOps.exif_transpose(img)
             if transposed is None:
                 return data
             buf = _io.BytesIO()
             save_format = img.format or "JPEG"
-            transposed.convert("RGB").save(buf, format="JPEG" if save_format == "MPO" else save_format)
+            save_kwargs = {"quality": 95} if save_format == "JPEG" else {}
+            transposed.save(buf, format=save_format, **save_kwargs)
             return buf.getvalue()
         except Exception:
             return data
