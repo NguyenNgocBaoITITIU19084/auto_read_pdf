@@ -5,6 +5,8 @@ Time is injected via a fake clock so tests never need real sleeps.
 
 import io
 import struct
+import threading
+import time as real_time
 
 import pytest
 
@@ -430,6 +432,149 @@ class TestExpireIfIdle:
 # ---------------------------------------------------------------------------
 # snapshot()
 # ---------------------------------------------------------------------------
+
+
+class TestConcurrency:
+    """Drives add_photo/ack/read_photo from real OS threads.
+
+    The module's own docstring says it will be called concurrently from two
+    different uvicorn server threads, so its lock discipline needs to be
+    exercised with real threads, not just sequential calls.
+    """
+
+    def test_concurrent_ack_and_read_photo_never_leaks_os_error(self):
+        # Real clock (not the fake one): these threads race in wall-clock
+        # time, so filenames/timestamps need to actually advance.
+        b = MobileBridge(clock=real_time.time)
+        session = b.start()
+        device = b.pair(session.pairing_token, "iPhone UA")
+
+        errors = []
+        outcomes = []
+        results_lock = threading.Lock()
+
+        def do_ack(photo_id):
+            try:
+                b.ack(photo_id)
+            except Exception as exc:  # pragma: no cover - failure path
+                with results_lock:
+                    errors.append(exc)
+
+        def do_read(photo_id):
+            try:
+                data = b.read_photo(photo_id)
+                with results_lock:
+                    outcomes.append(("bytes", len(data)))
+            except KeyError:
+                with results_lock:
+                    outcomes.append(("keyerror", None))
+            except Exception as exc:  # pragma: no cover - failure path
+                with results_lock:
+                    errors.append(exc)
+
+        ROUNDS = 40
+        for _ in range(ROUNDS):
+            photo = b.add_photo(device.token, make_jpeg_bytes())
+            t_ack = threading.Thread(target=do_ack, args=(photo.id,))
+            t_read = threading.Thread(target=do_read, args=(photo.id,))
+            # Start read first so it's more likely to be mid-check when ack
+            # runs; with the fix, the whole check+read happens under one
+            # lock acquisition so the interleaving can't matter.
+            t_read.start()
+            t_ack.start()
+            t_ack.join()
+            t_read.join()
+
+        assert errors == [], f"unhandled exceptions leaked: {errors!r}"
+        assert len(outcomes) == ROUNDS
+        for kind, _value in outcomes:
+            assert kind in ("bytes", "keyerror")
+        try:
+            b.stop()
+        except Exception:
+            pass
+
+    def test_concurrent_add_photo_from_multiple_devices_no_corruption(self):
+        b = MobileBridge(clock=real_time.time)
+        session = b.start()
+        device_a = b.pair(session.pairing_token, "iPhone UA")
+        session = b._session
+        device_b = b.pair(session.pairing_token, "Android UA")
+
+        errors = []
+        photo_ids = []
+        results_lock = threading.Lock()
+
+        def upload(token, payload):
+            try:
+                photo = b.add_photo(token, payload)
+                data = b.read_photo(photo.id)
+                assert data  # non-empty, readable immediately after return
+                with results_lock:
+                    photo_ids.append(photo.id)
+            except Exception as exc:  # pragma: no cover - failure path
+                with results_lock:
+                    errors.append(exc)
+
+        threads = []
+        for i in range(10):
+            payload = make_jpeg_bytes() if i % 2 == 0 else make_png_bytes()
+            token = device_a.token if i % 2 == 0 else device_b.token
+            threads.append(threading.Thread(target=upload, args=(token, payload)))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"unhandled exceptions leaked: {errors!r}"
+        assert len(photo_ids) == 10
+        assert len(set(photo_ids)) == 10  # every photo got a unique id/slot
+        try:
+            b.stop()
+        except Exception:
+            pass
+
+    def test_add_photo_does_not_hold_lock_during_image_normalization(
+        self, bridge, paired, monkeypatch
+    ):
+        """Regression test for lock-scope: pairing/status must not block on
+        another add_photo's Pillow decode/encode + disk write."""
+
+        def slow_normalize(data):
+            real_time.sleep(0.3)
+            return data
+
+        monkeypatch.setattr(
+            MobileBridge, "_normalize_exif", staticmethod(slow_normalize)
+        )
+
+        add_done = threading.Event()
+
+        def add():
+            bridge.add_photo(paired.token, make_jpeg_bytes())
+            add_done.set()
+
+        t = threading.Thread(target=add)
+        start = real_time.time()
+        t.start()
+        real_time.sleep(0.05)  # let add_photo get past the lock, into the sleep
+
+        # This must return promptly even though add_photo's normalization is
+        # still sleeping for another ~0.25s under the (fixed) lock discipline.
+        snap = bridge.snapshot()
+        snapshot_elapsed = real_time.time() - start
+
+        assert not add_done.is_set(), (
+            "add_photo finished before snapshot() returned; the test's "
+            "0.3s sleep didn't overlap snapshot() as intended"
+        )
+        assert snap["active"] is True
+        assert snapshot_elapsed < 0.2, (
+            "snapshot() blocked on add_photo's image normalization; "
+            "the lock is held across Pillow/disk I/O"
+        )
+
+        t.join()
 
 
 class TestSnapshot:

@@ -88,6 +88,10 @@ class MobilePhoto:
     received_at: float
     path: Path
     acked: bool = False
+    # False while the file is still being normalized/written to disk
+    # (outside the lock, see add_photo). Invisible to pending()/read_photo()
+    # until True, so no caller ever observes a half-written photo.
+    ready: bool = True
 
 
 @dataclass
@@ -283,6 +287,14 @@ class MobileBridge:
     # -- photos --------------------------------------------------------------
 
     def add_photo(self, device_token: str, data: bytes) -> MobilePhoto:
+        # Validation, limit checks, and all counter/bookkeeping mutations
+        # happen under the lock below. The actual image normalization
+        # (Pillow) and disk write happen *after* releasing it, so pairing,
+        # status polling, and other devices' uploads aren't serialized
+        # behind one photo's codec/I/O work. The photo is inserted into
+        # self._photos immediately (reserving its slot/id and byte budget
+        # for concurrent add_photo callers) but marked ready=False so
+        # pending()/read_photo() can't observe it until the write completes.
         with self._lock:
             session = self._session
             if session is None:
@@ -292,7 +304,7 @@ class MobileBridge:
             if len(data) > MAX_PHOTO_BYTES:
                 raise TooLarge(f"Photo exceeds {MAX_PHOTO_BYTES} bytes")
 
-            image_type = _detect_image_type(data)
+            _detect_image_type(data)  # raises BadType for unsupported/HEIC
 
             pending = [p for p in self._photos.values() if not p.acked]
             if len(pending) >= MAX_PENDING_PHOTOS:
@@ -319,9 +331,6 @@ class MobileBridge:
             filename = f"phone_{timestamp}_{n}.jpg"
             path = session.tmp_dir / filename
 
-            out_bytes = self._normalize_exif(data)
-            path.write_bytes(out_bytes)
-
             photo = MobilePhoto(
                 id=secrets.token_hex(8),
                 device_id=device.id,
@@ -329,11 +338,34 @@ class MobileBridge:
                 size=len(data),
                 received_at=now,
                 path=path,
+                ready=False,
             )
             self._photos[photo.id] = photo
             device.last_seen = now
             session.last_activity = now
-            return photo
+
+        # -- outside the lock: codec work + disk I/O -----------------------
+        try:
+            out_bytes = self._normalize_exif(data)
+            tmp_path = path.with_name(path.name + f".tmp{secrets.token_hex(4)}")
+            tmp_path.write_bytes(out_bytes)
+            tmp_path.replace(path)  # atomic on POSIX; same directory/filesystem
+        except Exception:
+            with self._lock:
+                self._photos.pop(photo.id, None)
+                try:
+                    window.remove(now)
+                except ValueError:
+                    pass
+            raise
+
+        with self._lock:
+            # Only flip visibility if the photo (and session) weren't torn
+            # down concurrently (e.g. session stop()/expire_if_idle()) while
+            # the write was in flight.
+            if photo.id in self._photos:
+                photo.ready = True
+        return photo
 
     @staticmethod
     def _normalize_exif(data: bytes) -> bytes:
@@ -371,15 +403,22 @@ class MobileBridge:
 
     def pending(self) -> list[MobilePhoto]:
         with self._lock:
-            return [p for p in self._photos.values() if not p.acked]
+            return [p for p in self._photos.values() if not p.acked and p.ready]
 
     def read_photo(self, photo_id: str) -> bytes:
+        # The existence/acked check and the actual disk read must happen
+        # under the same lock acquisition: releasing the lock in between
+        # would let a concurrent ack() delete the file after the check but
+        # before the read, turning a clean KeyError into an unhandled
+        # FileNotFoundError/OSError.
         with self._lock:
             photo = self._photos.get(photo_id)
-            if photo is None or photo.acked:
+            if photo is None or photo.acked or not photo.ready:
                 raise KeyError(f"Unknown photo id: {photo_id}")
-            path = photo.path
-        return path.read_bytes()
+            try:
+                return photo.path.read_bytes()
+            except OSError as exc:
+                raise KeyError(f"Unknown photo id: {photo_id}") from exc
 
     def ack(self, photo_id: str) -> None:
         with self._lock:
