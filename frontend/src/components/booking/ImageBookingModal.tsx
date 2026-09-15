@@ -244,7 +244,8 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
         "Tên file PDF": fields["Tên file PDF"] || imageFile?.name || "booking_photo.jpg"
       };
 
-      const saved = await saveManualBookingApi(activeCollection.id, bookingDataToSave);
+      const { item: saved, warnings } = await saveManualBookingApi(activeCollection.id, bookingDataToSave);
+      warnings.forEach((w) => addToast(w, 'info'));
       addToast(t.booking.imageModal.saveSuccess, 'success');
       if (onSavedSuccess) {
         onSavedSuccess(saved);

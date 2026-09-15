@@ -145,12 +145,17 @@ export const extractBookingImageApi = async (file: File, apiKey?: string): Promi
   return result.data;
 };
 
-export const saveManualBookingApi = async (collectionId: number, booking: Partial<Booking>): Promise<Booking> => {
-  const res = await apiClient.post<{ status: string; id: number; item: Booking }>('/bookings/manual-save', {
+export const saveManualBookingApi = async (collectionId: number, booking: Partial<Booking>): Promise<{ item: Booking; warnings: string[] }> => {
+  const res = await apiClient.post<{ status: string; id: number; item: Booking; warnings?: string[] }>('/bookings/manual-save', {
     collection_id: collectionId,
     booking,
   });
-  return res.data.item;
+  return { item: res.data.item, warnings: res.data.warnings || [] };
+};
+
+export const updateBookingApi = async (id: number, booking: Partial<Booking>): Promise<{ item: Booking; warnings: string[] }> => {
+  const res = await apiClient.put<{ status: string; item: Booking; warnings?: string[] }>(`/bookings/${id}`, { booking });
+  return { item: res.data.item, warnings: res.data.warnings || [] };
 };
 
 export const deleteBooking = async (id: number): Promise<void> => {
