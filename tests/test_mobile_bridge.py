@@ -7,6 +7,7 @@ import io
 import struct
 import threading
 import time as real_time
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +19,7 @@ from backend.app.services.mobile_bridge import (
     BadType,
     QueueFull,
     RateLimited,
+    SessionEnded,
 )
 
 
@@ -351,6 +353,54 @@ class TestAddPhoto:
 # ---------------------------------------------------------------------------
 # pending() / read_photo() / ack() / device_status()
 # ---------------------------------------------------------------------------
+
+
+class TestAddPhotoWriteFailureRollback:
+    """A write/replace failure mid-flight (e.g. the session's tmp_dir was
+    removed by a concurrent stop()/expire_if_idle()) must surface as this
+    module's own SessionEnded, never a raw OSError, and must not leak the
+    queue-slot/byte/rate-limit reservation taken under the lock."""
+
+    def test_write_failure_raises_session_ended_not_os_error(
+        self, bridge, paired, monkeypatch
+    ):
+        def boom(self, data):
+            raise OSError("simulated: tmp_dir removed mid-write")
+
+        monkeypatch.setattr(Path, "write_bytes", boom)
+
+        with pytest.raises(SessionEnded):
+            bridge.add_photo(paired.token, make_jpeg_bytes())
+
+    def test_write_failure_rolls_back_queue_and_rate_limit_reservation(
+        self, bridge, paired, monkeypatch
+    ):
+        def boom(self, data):
+            raise OSError("simulated: tmp_dir removed mid-write")
+
+        monkeypatch.setattr(Path, "write_bytes", boom)
+
+        snap_before = bridge.snapshot()
+        assert snap_before["pending_count"] == 0
+
+        with pytest.raises(SessionEnded):
+            bridge.add_photo(paired.token, make_jpeg_bytes())
+
+        # The failed attempt must not leave the photo registered, nor a
+        # phantom rate-limit timestamp behind.
+        snap_after = bridge.snapshot()
+        assert snap_after["pending_count"] == 0
+        assert bridge._photos == {}
+        assert bridge._rate_windows.get(paired.id, []) == []
+
+        # Prove the reservation was actually released (not merely
+        # under-counted): undo the write failure and confirm a normal
+        # add_photo call succeeds immediately afterwards, exactly as it
+        # would if the failed attempt had never reserved a slot.
+        monkeypatch.undo()
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        assert photo.id
+        assert bridge.snapshot()["pending_count"] == 1
 
 
 class TestQueueOperations:

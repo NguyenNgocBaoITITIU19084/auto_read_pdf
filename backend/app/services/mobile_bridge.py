@@ -76,6 +76,20 @@ class RateLimited(Exception):
     """Raised when a device exceeds the per-minute photo upload rate."""
 
 
+class SessionEnded(Exception):
+    """Raised when the session was torn down while a photo write was in flight.
+
+    ``add_photo`` reserves the photo's queue slot/byte budget under the lock,
+    then writes the (possibly EXIF-normalized) bytes to disk *outside* the
+    lock. If a concurrent ``stop()``/``expire_if_idle()`` removes the
+    session's ``tmp_dir`` while that write/replace is in progress, the
+    write raises a raw ``OSError``/``FileNotFoundError``. That is translated
+    into this domain error (after the queue-slot/rate-limit reservation is
+    rolled back) so callers only ever need to catch this module's own
+    exceptions, never an OS-level one.
+    """
+
+
 # --- Data types ----------------------------------------------------------
 
 
@@ -350,13 +364,22 @@ class MobileBridge:
             tmp_path = path.with_name(path.name + f".tmp{secrets.token_hex(4)}")
             tmp_path.write_bytes(out_bytes)
             tmp_path.replace(path)  # atomic on POSIX; same directory/filesystem
-        except Exception:
+        except Exception as exc:
             with self._lock:
                 self._photos.pop(photo.id, None)
                 try:
                     window.remove(now)
                 except ValueError:
                     pass
+            # A concurrent stop()/expire_if_idle() can rmtree() the session's
+            # tmp_dir while this write/replace is in flight, turning it into
+            # a raw OSError (FileNotFoundError on POSIX). Translate that into
+            # the module's own domain error so callers never need to catch
+            # an OS-level exception; any other error is re-raised as-is.
+            if isinstance(exc, OSError):
+                raise SessionEnded(
+                    "Session ended before the photo write completed"
+                ) from exc
             raise
 
         with self._lock:
@@ -423,7 +446,7 @@ class MobileBridge:
     def ack(self, photo_id: str) -> None:
         with self._lock:
             photo = self._photos.get(photo_id)
-            if photo is None:
+            if photo is None or not photo.ready:
                 raise KeyError(f"Unknown photo id: {photo_id}")
             photo.path.unlink(missing_ok=True)
             photo.acked = True
@@ -458,7 +481,12 @@ class MobileBridge:
                 }
                 for d in self._devices.values()
             ]
-            pending_count = sum(1 for p in self._photos.values() if not p.acked)
+            # Kept consistent with pending(): a not-yet-ready (still being
+            # written outside the lock) photo isn't "pending" from a caller's
+            # point of view since it isn't visible via pending()/read_photo().
+            pending_count = sum(
+                1 for p in self._photos.values() if not p.acked and p.ready
+            )
             return {
                 "active": True,
                 "session_id": session.id,
