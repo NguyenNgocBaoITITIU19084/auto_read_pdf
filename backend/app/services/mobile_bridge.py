@@ -1,0 +1,398 @@
+"""In-memory pairing / session / photo-queue service for the phone-camera-QR feature.
+
+A phone pairs with the desktop app over LAN by scanning a QR code that encodes
+a short-lived ``pairing_token``. Once paired, the phone uploads photos which are
+queued here (never persisted to the database, never stored inside the repo) for
+a later FastAPI route (a future task) to serve to the desktop OCR pipeline.
+
+Concurrency: a single ``threading.Lock`` protects all mutable state because this
+service is called both from the main API server thread and from a companion LAN
+server thread (see the plan's Task 4) running concurrently.
+
+Time is injected via a ``clock`` callable so tests never need real sleeps. The
+default clock is ``time.time`` (wall-clock epoch seconds) rather than
+``time.monotonic`` because photo filenames are derived from the same clock and
+must map onto real Asia/Ho_Chi_Minh wall-clock time.
+"""
+
+from __future__ import annotations
+
+import hmac
+import secrets
+import shutil
+import tempfile
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, Optional
+from zoneinfo import ZoneInfo
+
+TZ_HO_CHI_MINH = ZoneInfo("Asia/Ho_Chi_Minh")
+
+# --- Limits (see plan Task 2 brief) -----------------------------------------
+MAX_PHOTO_BYTES = 15 * 1024 * 1024
+MAX_PENDING_PHOTOS = 30
+MAX_SESSION_BYTES = 300 * 1024 * 1024
+MAX_PHOTOS_PER_MINUTE = 60
+PAIRING_TOKEN_TTL_SECONDS = 5 * 60
+SESSION_IDLE_TIMEOUT_SECONDS = 30 * 60
+RATE_LIMIT_WINDOW_SECONDS = 60.0
+
+
+# --- Errors ------------------------------------------------------------------
+
+
+class PairingError(Exception):
+    """Raised when a pairing token is missing, wrong, reused, or expired."""
+
+
+class AuthError(Exception):
+    """Raised when a device token does not match any paired device."""
+
+
+class TooLarge(Exception):
+    """Raised when a photo exceeds the per-photo size limit."""
+
+
+class BadType(Exception):
+    """Raised when the uploaded bytes are not a supported image type.
+
+    ``code`` optionally distinguishes specific reasons, e.g. ``"heic"`` for a
+    HEIC upload (which is explicitly rejected rather than merely unsupported).
+    """
+
+    def __init__(self, message: str, code: Optional[str] = None):
+        super().__init__(message)
+        self.code = code
+
+
+class QueueFull(Exception):
+    """Raised when the session's pending-photo count or byte total is exceeded."""
+
+
+class RateLimited(Exception):
+    """Raised when a device exceeds the per-minute photo upload rate."""
+
+
+# --- Data types ----------------------------------------------------------
+
+
+@dataclass
+class MobilePhoto:
+    id: str
+    device_id: str
+    filename: str
+    size: int
+    received_at: float
+    path: Path
+    acked: bool = False
+
+
+@dataclass
+class MobileDevice:
+    id: str
+    token: str
+    label: str
+    paired_at: float
+    last_seen: float
+
+
+@dataclass
+class MobileSession:
+    id: str
+    pairing_token: str
+    pairing_expires_at: float
+    created_at: float
+    last_activity: float
+    tmp_dir: Path
+
+
+def _label_from_user_agent(user_agent: str) -> str:
+    """Derive a short, human-friendly device label from a User-Agent string."""
+    ua = (user_agent or "").lower()
+    if "iphone" in ua or "ipad" in ua or "ipod" in ua:
+        return "iPhone"
+    if "android" in ua:
+        return "Android"
+    return "Thiết bị"
+
+
+def _detect_image_type(data: bytes) -> str:
+    """Return "jpeg" / "png" / "webp", or raise BadType (code="heic" for HEIC)."""
+    header = data[:32]
+    if b"ftypheic" in header or b"ftypheix" in header or b"ftypheif" in header:
+        raise BadType("HEIC images are not supported", code="heic")
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if data[:4] == b"\x89PNG":
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    raise BadType("Unsupported image type", code="unsupported")
+
+
+class MobileBridge:
+    """In-memory pairing/session/photo-queue service.
+
+    Args:
+        clock: injectable time source (default ``time.time``), used for all
+            TTL/expiry math and for deriving photo filenames' timestamps.
+        on_stop: optional callback invoked (with no arguments) whenever a
+            session is torn down, whether via an explicit ``stop()`` or via
+            ``expire_if_idle()``. A later task wires this to shut down the
+            companion LAN server alongside the session. Invoked *after* the
+            internal lock is released, so the callback may safely call back
+            into this bridge (e.g. to inspect ``snapshot()``).
+    """
+
+    def __init__(
+        self,
+        clock: Callable[[], float] = time.time,
+        on_stop: Optional[Callable[[], None]] = None,
+    ):
+        self._clock = clock
+        self._on_stop = on_stop
+        self._lock = threading.Lock()
+
+        self._session: Optional[MobileSession] = None
+        self._devices: dict[str, MobileDevice] = {}  # token -> device
+        self._photos: dict[str, MobilePhoto] = {}  # id -> photo, insertion order
+        self._rate_windows: dict[str, list[float]] = {}  # device.id -> timestamps
+        self._photo_counter = 0
+
+    # -- session lifecycle -------------------------------------------------
+
+    def start(self) -> MobileSession:
+        with self._lock:
+            if self._session is not None:
+                return self._session
+            now = self._clock()
+            session = MobileSession(
+                id=secrets.token_hex(8),
+                pairing_token=secrets.token_urlsafe(32),
+                pairing_expires_at=now + PAIRING_TOKEN_TTL_SECONDS,
+                created_at=now,
+                last_activity=now,
+                tmp_dir=Path(tempfile.mkdtemp(prefix="arp_mobile_")),
+            )
+            self._session = session
+            self._devices = {}
+            self._photos = {}
+            self._rate_windows = {}
+            self._photo_counter = 0
+            return session
+
+    def stop(self) -> None:
+        with self._lock:
+            callback = self._stop_locked()
+        if callback is not None:
+            callback()
+
+    def _stop_locked(self) -> Optional[Callable[[], None]]:
+        """Tear down the current session. Must be called with the lock held.
+
+        Returns the ``on_stop`` callback to invoke *after* releasing the lock,
+        or None if there was nothing to stop / no callback configured.
+        """
+        session = self._session
+        if session is None:
+            return None
+        shutil.rmtree(session.tmp_dir, ignore_errors=True)
+        self._session = None
+        self._devices = {}
+        self._photos = {}
+        self._rate_windows = {}
+        return self._on_stop
+
+    def expire_if_idle(self) -> bool:
+        """Stop the session if idle for more than 30 minutes. Returns True if stopped."""
+        with self._lock:
+            session = self._session
+            if session is None:
+                return False
+            if self._clock() - session.last_activity <= SESSION_IDLE_TIMEOUT_SECONDS:
+                return False
+            callback = self._stop_locked()
+        if callback is not None:
+            callback()
+        return True
+
+    # -- pairing -------------------------------------------------------------
+
+    def pair(self, pairing_token: str, user_agent: str) -> MobileDevice:
+        with self._lock:
+            session = self._session
+            if session is None:
+                raise PairingError("No active session")
+            if not hmac.compare_digest(session.pairing_token, pairing_token):
+                raise PairingError("Invalid or already-used pairing token")
+            now = self._clock()
+            if now > session.pairing_expires_at:
+                raise PairingError("Pairing token expired")
+
+            device = MobileDevice(
+                id=secrets.token_hex(8),
+                token=secrets.token_urlsafe(32),
+                label=_label_from_user_agent(user_agent),
+                paired_at=now,
+                last_seen=now,
+            )
+            self._devices[device.token] = device
+            # Single-use: rotate the pairing token so it cannot be replayed.
+            session.pairing_token = secrets.token_urlsafe(32)
+            session.last_activity = now
+            return device
+
+    # -- device lookup helper --------------------------------------------
+
+    def _find_device(self, device_token: str) -> MobileDevice:
+        for device in self._devices.values():
+            if hmac.compare_digest(device.token, device_token):
+                return device
+        raise AuthError("Unknown or invalid device token")
+
+    # -- photos --------------------------------------------------------------
+
+    def add_photo(self, device_token: str, data: bytes) -> MobilePhoto:
+        with self._lock:
+            session = self._session
+            if session is None:
+                raise AuthError("No active session")
+            device = self._find_device(device_token)
+
+            if len(data) > MAX_PHOTO_BYTES:
+                raise TooLarge(f"Photo exceeds {MAX_PHOTO_BYTES} bytes")
+
+            image_type = _detect_image_type(data)
+
+            pending = [p for p in self._photos.values() if not p.acked]
+            if len(pending) >= MAX_PENDING_PHOTOS:
+                raise QueueFull("Too many pending photos")
+            pending_bytes = sum(p.size for p in pending)
+            if pending_bytes + len(data) > MAX_SESSION_BYTES:
+                raise QueueFull("Session photo byte budget exceeded")
+
+            now = self._clock()
+            window = self._rate_windows.setdefault(device.id, [])
+            window[:] = [t for t in window if now - t < RATE_LIMIT_WINDOW_SECONDS]
+            if len(window) >= MAX_PHOTOS_PER_MINUTE:
+                raise RateLimited("Too many photos per minute")
+            window.append(now)
+
+            self._photo_counter += 1
+            n = self._photo_counter
+            timestamp = datetime.fromtimestamp(now, tz=TZ_HO_CHI_MINH).strftime(
+                "%Y%m%d_%H%M%S"
+            )
+            _ = image_type  # detected/validated above; filename is always .jpg
+            filename = f"phone_{timestamp}_{n}.jpg"
+            path = session.tmp_dir / filename
+
+            out_bytes = self._normalize_exif(data)
+            path.write_bytes(out_bytes)
+
+            photo = MobilePhoto(
+                id=secrets.token_hex(8),
+                device_id=device.id,
+                filename=filename,
+                size=len(data),
+                received_at=now,
+                path=path,
+            )
+            self._photos[photo.id] = photo
+            device.last_seen = now
+            session.last_activity = now
+            return photo
+
+    @staticmethod
+    def _normalize_exif(data: bytes) -> bytes:
+        """Best-effort EXIF-orientation normalization via Pillow.
+
+        Falls back to the original bytes unchanged if Pillow is unavailable,
+        the data isn't decodable, or the transform doesn't change anything —
+        so the bytes returned by ``read_photo`` always match what was
+        submitted whenever no real transform was applied.
+        """
+        try:
+            import io as _io
+
+            from PIL import Image, ImageOps
+
+            img = Image.open(_io.BytesIO(data))
+            img.load()
+            transposed = ImageOps.exif_transpose(img)
+            if transposed is None:
+                return data
+            buf = _io.BytesIO()
+            save_format = img.format or "JPEG"
+            transposed.convert("RGB").save(buf, format="JPEG" if save_format == "MPO" else save_format)
+            return buf.getvalue()
+        except Exception:
+            return data
+
+    def pending(self) -> list[MobilePhoto]:
+        with self._lock:
+            return [p for p in self._photos.values() if not p.acked]
+
+    def read_photo(self, photo_id: str) -> bytes:
+        with self._lock:
+            photo = self._photos.get(photo_id)
+            if photo is None or photo.acked:
+                raise KeyError(f"Unknown photo id: {photo_id}")
+            path = photo.path
+        return path.read_bytes()
+
+    def ack(self, photo_id: str) -> None:
+        with self._lock:
+            photo = self._photos.get(photo_id)
+            if photo is None:
+                raise KeyError(f"Unknown photo id: {photo_id}")
+            photo.path.unlink(missing_ok=True)
+            photo.acked = True
+
+    def device_status(self, device_token: str) -> dict:
+        with self._lock:
+            try:
+                device = self._find_device(device_token)
+            except AuthError:
+                return {"connected": False, "last_photo_received": False}
+            received = any(
+                p.device_id == device.id and p.acked for p in self._photos.values()
+            )
+            return {"connected": True, "last_photo_received": received}
+
+    def snapshot(self) -> dict:
+        """Return a status dict safe to expose via GET /mobile/session.
+
+        Includes the current ``pairing_token`` (needed to render the QR code)
+        but never any device token.
+        """
+        with self._lock:
+            session = self._session
+            if session is None:
+                return {"active": False}
+            devices = [
+                {
+                    "id": d.id,
+                    "label": d.label,
+                    "paired_at": d.paired_at,
+                    "last_seen": d.last_seen,
+                }
+                for d in self._devices.values()
+            ]
+            pending_count = sum(1 for p in self._photos.values() if not p.acked)
+            return {
+                "active": True,
+                "session_id": session.id,
+                "pairing_token": session.pairing_token,
+                "pairing_expires_at": session.pairing_expires_at,
+                "created_at": session.created_at,
+                "last_activity": session.last_activity,
+                "devices": devices,
+                "pending_count": pending_count,
+            }
+
+
+bridge = MobileBridge()

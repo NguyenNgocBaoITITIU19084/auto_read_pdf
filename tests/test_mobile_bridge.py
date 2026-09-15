@@ -1,0 +1,393 @@
+"""Tests for the in-memory mobile pairing/session/photo-queue service.
+
+Time is injected via a fake clock so tests never need real sleeps.
+"""
+
+import io
+import struct
+
+import pytest
+
+from backend.app.services.mobile_bridge import (
+    MobileBridge,
+    PairingError,
+    AuthError,
+    TooLarge,
+    BadType,
+    QueueFull,
+    RateLimited,
+)
+
+
+class FakeClock:
+    """A controllable clock: starts at an arbitrary epoch and can be advanced."""
+
+    def __init__(self, start: float = 1_700_000_000.0):
+        self._now = start
+
+    def __call__(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
+def make_jpeg_bytes() -> bytes:
+    """Minimal but valid JPEG magic-byte prefix + filler (not decodable by Pillow)."""
+    return b"\xff\xd8\xff" + b"\x00" * 100
+
+
+def make_real_jpeg_bytes() -> bytes:
+    """A real, Pillow-decodable JPEG image."""
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), color=(255, 0, 0)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def make_png_bytes() -> bytes:
+    return b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+
+
+def make_webp_bytes() -> bytes:
+    payload = b"WEBPVP8 " + b"\x00" * 40
+    return b"RIFF" + struct.pack("<I", len(payload)) + payload
+
+
+def make_heic_bytes() -> bytes:
+    # ftyp box with 'heic' brand, as real HEIC files start.
+    return b"\x00\x00\x00\x18ftypheic" + b"\x00" * 40
+
+
+@pytest.fixture
+def clock():
+    return FakeClock()
+
+
+@pytest.fixture
+def bridge(clock):
+    b = MobileBridge(clock=clock)
+    yield b
+    # best-effort cleanup in case a test forgot to stop the session
+    try:
+        b.stop()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# start() / stop()
+# ---------------------------------------------------------------------------
+
+
+class TestStartStop:
+    def test_start_creates_session(self, bridge):
+        session = bridge.start()
+        assert session.id
+        assert session.pairing_token
+        assert session.tmp_dir.exists()
+
+    def test_start_twice_returns_same_session(self, bridge):
+        s1 = bridge.start()
+        s2 = bridge.start()
+        assert s1.id == s2.id
+        assert s1.pairing_token == s2.pairing_token
+
+    def test_stop_removes_tmp_dir(self, bridge):
+        session = bridge.start()
+        tmp_dir = session.tmp_dir
+        bridge.stop()
+        assert not tmp_dir.exists()
+
+    def test_stop_idempotent(self, bridge):
+        bridge.start()
+        bridge.stop()
+        bridge.stop()  # must not raise
+
+    def test_stop_calls_on_stop_callback(self, clock):
+        called = []
+        b = MobileBridge(clock=clock, on_stop=lambda: called.append(True))
+        b.start()
+        b.stop()
+        assert called == [True]
+
+    def test_start_after_stop_creates_new_session(self, bridge):
+        s1 = bridge.start()
+        bridge.stop()
+        s2 = bridge.start()
+        assert s2.id != s1.id
+
+
+# ---------------------------------------------------------------------------
+# pair()
+# ---------------------------------------------------------------------------
+
+
+class TestPair:
+    def test_pair_success_returns_device_and_rotates_token(self, bridge):
+        session = bridge.start()
+        old_token = session.pairing_token
+        device = bridge.pair(old_token, "Mozilla/5.0 (iPhone; ...)")
+        assert device.token
+        assert device.label == "iPhone"
+        # pairing token must have changed (single-use)
+        assert bridge._session.pairing_token != old_token
+
+    def test_pair_reuse_old_token_fails(self, bridge):
+        session = bridge.start()
+        old_token = session.pairing_token
+        bridge.pair(old_token, "iPhone UA")
+        with pytest.raises(PairingError):
+            bridge.pair(old_token, "iPhone UA")
+
+    def test_pair_expired_token_fails(self, bridge, clock):
+        session = bridge.start()
+        token = session.pairing_token
+        clock.advance(5 * 60 + 1)
+        with pytest.raises(PairingError):
+            bridge.pair(token, "iPhone UA")
+
+    def test_pair_no_session_fails(self, bridge):
+        with pytest.raises(PairingError):
+            bridge.pair("whatever", "iPhone UA")
+
+    def test_pair_wrong_token_fails(self, bridge):
+        bridge.start()
+        with pytest.raises(PairingError):
+            bridge.pair("not-the-real-token", "iPhone UA")
+
+    def test_pair_label_android(self, bridge):
+        bridge.start()
+        session = bridge._session
+        device = bridge.pair(session.pairing_token, "Mozilla/5.0 (Linux; Android 13)")
+        assert device.label == "Android"
+
+    def test_pair_label_unknown_device(self, bridge):
+        bridge.start()
+        session = bridge._session
+        device = bridge.pair(session.pairing_token, "curl/8.0")
+        assert device.label == "Thiết bị"
+
+
+# ---------------------------------------------------------------------------
+# add_photo()
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def paired(bridge):
+    """Start a session and pair one device; return (bridge, device)."""
+    session = bridge.start()
+    device = bridge.pair(session.pairing_token, "iPhone UA")
+    return device
+
+
+class TestAddPhoto:
+    def test_wrong_device_token_raises_auth_error(self, bridge, paired):
+        with pytest.raises(AuthError):
+            bridge.add_photo("not-a-real-token", make_jpeg_bytes())
+
+    def test_too_large_raises(self, bridge, paired):
+        data = b"\xff\xd8\xff" + b"\x00" * (15 * 1024 * 1024 + 1)
+        with pytest.raises(TooLarge):
+            bridge.add_photo(paired.token, data)
+
+    def test_bad_type_raises(self, bridge, paired):
+        with pytest.raises(BadType):
+            bridge.add_photo(paired.token, b"not an image at all")
+
+    def test_heic_raises_bad_type_with_code(self, bridge, paired):
+        with pytest.raises(BadType) as exc_info:
+            bridge.add_photo(paired.token, make_heic_bytes())
+        assert exc_info.value.code == "heic"
+
+    def test_jpeg_accepted(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        assert photo.filename.endswith(".jpg")
+        assert photo.size == len(make_jpeg_bytes())
+
+    def test_png_accepted(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_png_bytes())
+        assert photo.id
+
+    def test_webp_accepted(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_webp_bytes())
+        assert photo.id
+
+    def test_queue_full_by_count(self, bridge, paired):
+        for _ in range(30):
+            bridge.add_photo(paired.token, make_jpeg_bytes())
+        with pytest.raises(QueueFull):
+            bridge.add_photo(paired.token, make_jpeg_bytes())
+
+    def test_queue_full_by_bytes(self, bridge, paired, clock):
+        # Use a smaller per-photo size so we don't also trip the 15MB/photo cap,
+        # but large enough that a handful exceed the 300MB session total.
+        big = b"\xff\xd8\xff" + b"\x00" * (14 * 1024 * 1024)
+        added = 0
+        try:
+            for _ in range(22):  # 22 * 14MB = 308MB > 300MB
+                bridge.add_photo(paired.token, big)
+                added += 1
+        except QueueFull:
+            pass
+        else:
+            pytest.fail("expected QueueFull before adding 22 photos")
+        assert added < 22
+
+    def test_rate_limited(self, bridge, paired, clock):
+        for i in range(60):
+            photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+            bridge.ack(photo.id)
+        with pytest.raises(RateLimited):
+            bridge.add_photo(paired.token, make_jpeg_bytes())
+
+    def test_rate_limit_window_resets(self, bridge, paired, clock):
+        for i in range(60):
+            photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+            bridge.ack(photo.id)
+        clock.advance(61)
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        assert photo.id
+
+    def test_filename_uses_injected_clock_and_ho_chi_minh_tz(self, bridge, paired, clock):
+        # Fixed epoch -> deterministic Asia/Ho_Chi_Minh (UTC+7) wall time.
+        clock._now = 1_700_000_000.0
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        expected_ts = datetime.fromtimestamp(
+            1_700_000_000.0, tz=ZoneInfo("Asia/Ho_Chi_Minh")
+        ).strftime("%Y%m%d_%H%M%S")
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        assert photo.filename == f"phone_{expected_ts}_1.jpg"
+
+    def test_pillow_normalizes_real_jpeg_and_roundtrips(self, bridge, paired):
+        data = make_real_jpeg_bytes()
+        photo = bridge.add_photo(paired.token, data)
+        out = bridge.read_photo(photo.id)
+        assert out  # non-empty, decodable bytes
+        from PIL import Image
+
+        Image.open(io.BytesIO(out)).verify()
+
+    def test_synthetic_jpeg_falls_back_to_raw_bytes_and_roundtrips(self, bridge, paired):
+        data = make_jpeg_bytes()
+        photo = bridge.add_photo(paired.token, data)
+        out = bridge.read_photo(photo.id)
+        assert out == data
+
+
+# ---------------------------------------------------------------------------
+# pending() / read_photo() / ack() / device_status()
+# ---------------------------------------------------------------------------
+
+
+class TestQueueOperations:
+    def test_pending_returns_in_received_order(self, bridge, paired):
+        p1 = bridge.add_photo(paired.token, make_jpeg_bytes())
+        p2 = bridge.add_photo(paired.token, make_png_bytes())
+        pending = bridge.pending()
+        assert [p.id for p in pending] == [p1.id, p2.id]
+
+    def test_read_photo_returns_bytes(self, bridge, paired):
+        data = make_jpeg_bytes()
+        photo = bridge.add_photo(paired.token, data)
+        assert bridge.read_photo(photo.id) == data
+
+    def test_ack_removes_file_and_from_pending(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        path = photo.path
+        bridge.ack(photo.id)
+        assert not path.exists()
+        assert photo.id not in [p.id for p in bridge.pending()]
+
+    def test_read_photo_after_ack_raises(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        bridge.ack(photo.id)
+        with pytest.raises(Exception):
+            bridge.read_photo(photo.id)
+
+    def test_device_status_reports_received_after_ack(self, bridge, paired):
+        status_before = bridge.device_status(paired.token)
+        assert status_before["last_photo_received"] is False
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        bridge.ack(photo.id)
+        status_after = bridge.device_status(paired.token)
+        assert status_after["last_photo_received"] is True
+        assert status_after["connected"] is True
+
+
+# ---------------------------------------------------------------------------
+# expire_if_idle()
+# ---------------------------------------------------------------------------
+
+
+class TestExpireIfIdle:
+    def test_expires_session_after_30_min_idle(self, bridge, clock):
+        session = bridge.start()
+        tmp_dir = session.tmp_dir
+        clock.advance(30 * 60 + 1)
+        bridge.expire_if_idle()
+        assert bridge._session is None
+        assert not tmp_dir.exists()
+
+    def test_does_not_expire_before_30_min(self, bridge, clock):
+        bridge.start()
+        clock.advance(30 * 60 - 1)
+        bridge.expire_if_idle()
+        assert bridge._session is not None
+
+    def test_activity_resets_idle_timer(self, bridge, clock, paired):
+        clock.advance(20 * 60)
+        bridge.add_photo(paired.token, make_jpeg_bytes())
+        clock.advance(20 * 60)
+        bridge.expire_if_idle()
+        # last activity was 20 min ago (photo add), not 40 min ago
+        assert bridge._session is not None
+
+    def test_calls_on_stop_exactly_once(self, clock):
+        called = []
+        b = MobileBridge(clock=clock, on_stop=lambda: called.append(True))
+        b.start()
+        clock.advance(30 * 60 + 1)
+        b.expire_if_idle()
+        b.expire_if_idle()  # no active session -> no extra callback
+        assert called == [True]
+
+    def test_noop_when_no_session(self, bridge):
+        bridge.expire_if_idle()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# snapshot()
+# ---------------------------------------------------------------------------
+
+
+class TestSnapshot:
+    def test_snapshot_contains_no_device_token(self, bridge, paired):
+        snap = bridge.snapshot()
+
+        def walk(obj):
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    yield from walk(v)
+            elif isinstance(obj, (list, tuple)):
+                for v in obj:
+                    yield from walk(v)
+            else:
+                yield obj
+
+        values = list(walk(snap))
+        assert paired.token not in values
+        assert paired.token not in repr(snap)
+
+    def test_snapshot_includes_pairing_token_for_qr(self, bridge):
+        session = bridge.start()
+        snap = bridge.snapshot()
+        assert snap["pairing_token"] == session.pairing_token
+
+    def test_snapshot_no_session(self, bridge):
+        snap = bridge.snapshot()
+        assert snap.get("active") is False

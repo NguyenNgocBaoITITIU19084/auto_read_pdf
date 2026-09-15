@@ -10,3 +10,4 @@ requests==2.32.3
 pytest==8.2.0
 httpx==0.28.1
 pyinstaller==6.21.0
+Pillow==12.3.0
