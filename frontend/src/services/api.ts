@@ -64,8 +64,8 @@ const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, 
 };
 
 // Collections
-export const getCollections = async (): Promise<Collection[]> => {
-  const res = await apiClient.get<Collection[]>('/collections');
+export const getCollections = async (withCounts = false): Promise<Collection[]> => {
+  const res = await apiClient.get<Collection[]>('/collections', { params: withCounts ? { with_counts: true } : undefined });
   return res.data;
 };
 
@@ -73,6 +73,9 @@ export const createCollection = async (name: string): Promise<{ id: number; name
   const res = await apiClient.post('/collections', { name });
   return res.data;
 };
+
+export const renameCollectionApi = async (id: number, name: string): Promise<{ id: number; name: string }> =>
+  (await apiClient.put<{ status: string; id: number; name: string }>(`/collections/${id}`, { name })).data;
 
 export const deleteCollection = async (id: number): Promise<void> => {
   await apiClient.delete(`/collections/${id}`);

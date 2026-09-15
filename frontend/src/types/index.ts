@@ -3,6 +3,10 @@ export interface Collection {
   name: string;
   created_at: string;
   settings?: string | null;
+  booking_count?: number;
+  vessel_count?: number;
+  container_count?: number;
+  watchlist_count?: number;
 }
 
 export interface Booking {

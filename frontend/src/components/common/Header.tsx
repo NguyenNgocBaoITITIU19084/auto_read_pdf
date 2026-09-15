@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { 
-  FolderPlus, Moon, Sun, Database, 
-  RefreshCw, Layers, ShieldCheck, Settings2, Palette,
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import {
+  Moon, Sun, Database,
+  RefreshCw, ShieldCheck, Palette,
   HelpCircle
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { TabId } from './Tabs';
 import { Tooltip } from './Tooltip';
+import { CollectionSwitcher } from './CollectionSwitcher';
 import { describeAutoSyncSchedule, formatIntervalShort } from '../../services/autoSync';
-import { 
+import {
   hasCompletedOnboarding,
   subscribeTourActions
 } from '../../services/tourEvents';
@@ -18,7 +19,6 @@ const CollectionManagerModal = lazy(() => import('./CollectionManagerModal').the
 const ColorConfigModal = lazy(() => import('./ColorConfigModal').then((m) => ({ default: m.ColorConfigModal })));
 const HelpTourModal = lazy(() => import('./HelpTourModal').then((m) => ({ default: m.HelpTourModal })));
 const WelcomeModal = lazy(() => import('./WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
-const NewCollectionModal = lazy(() => import('./NewCollectionModal').then((m) => ({ default: m.NewCollectionModal })));
 
 interface HeaderProps {
   activeTab?: TabId;
@@ -26,14 +26,11 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavigateTab }) => {
-  const { 
-    t, language, setLanguage, isDark, setIsDark, 
-    collections, activeCollection, setActiveCollection, 
-    handleCreateCollection, handleDeleteCollection,
+  const {
+    t, language, setLanguage, isDark, setIsDark,
     autoSyncEnabled, syncInterval, toggleAutoSync, autoSyncStatus
   } = useApp();
 
-  const [isNewColOpen, setIsNewColOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isCollectionManagerOpen, setIsCollectionManagerOpen] = useState(false);
   const [isColorConfigOpen, setIsColorConfigOpen] = useState(false);
@@ -116,47 +113,9 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
           </div>
         </div>
 
-        {/* Collection Dropdown */}
-        <div data-tour="collection-selector" className="flex items-center gap-2 pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0">
-            <Layers className="w-3.5 h-3.5" />
-            <span>{t.common.collection}:</span>
-          </div>
-
-          <Tooltip content="Chọn bộ sưu tập để làm việc" position="bottom">
-            <select
-              value={activeCollection?.id || ''}
-              onChange={(e) => {
-                const selected = collections.find((c) => c.id === Number(e.target.value));
-                if (selected) setActiveCollection(selected);
-              }}
-              className="w-44 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer truncate"
-            >
-              {collections.map((col) => (
-                <option key={col.id} value={col.id}>
-                  {col.name}
-                </option>
-              ))}
-            </select>
-          </Tooltip>
-
-          <Tooltip content="Tạo bộ sưu tập mới" position="bottom">
-            <button
-              onClick={() => setIsNewColOpen(true)}
-              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-950/50 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-            >
-              <FolderPlus className="w-4 h-4" />
-            </button>
-          </Tooltip>
-
-          <Tooltip content="Quản lý bộ sưu tập (xóa, tạo mới...)" position="bottom">
-            <button
-              onClick={() => setIsCollectionManagerOpen(true)}
-              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-400 bg-slate-100 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950/50 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
-          </Tooltip>
+        {/* Collection Switcher */}
+        <div className="pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
+          <CollectionSwitcher onManage={() => setIsCollectionManagerOpen(true)} />
         </div>
       </div>
 
@@ -267,16 +226,6 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
             onClose={() => setIsWelcomeModalOpen(false)}
             t={t}
             onStartFullTour={handleStartFullTour}
-          />
-        </Suspense>
-      )}
-
-      {/* New Collection Modal */}
-      {isNewColOpen && (
-        <Suspense fallback={null}>
-          <NewCollectionModal
-            isOpen={isNewColOpen}
-            onClose={() => setIsNewColOpen(false)}
           />
         </Suspense>
       )}

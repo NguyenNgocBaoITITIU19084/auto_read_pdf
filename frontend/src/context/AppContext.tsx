@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AutoSyncSchedule, AutoSyncStatus, Collection, ColorRule, RunSyncNowStatus } from '../types';
 import { Language, translations } from '../i18n/translations';
 import {
-  getCollections, createCollection, deleteCollection,
+  getCollections, createCollection, deleteCollection, renameCollectionApi,
   getAutoSyncStatus, toggleAutoSyncApi, runSyncNowApi,
   getColorRulesApi, createColorRuleApi, updateColorRuleApi, deleteColorRuleApi, resetColorRulesApi,
 } from '../services/api';
@@ -31,8 +31,9 @@ export interface AppContextType {
   activeCollection: Collection | null;
   setActiveCollection: (col: Collection | null) => void;
   refreshCollections: () => Promise<void>;
-  handleCreateCollection: (name: string) => Promise<void>;
+  handleCreateCollection: (name: string) => Promise<Collection | null>;
   handleDeleteCollection: (id: number) => Promise<void>;
+  handleRenameCollection: (id: number, name: string) => Promise<boolean>;
   /** Stable reference (toasts state lives in ToastContext — use `useToast()` to read it). */
   addToast: (text: string, type?: ToastType) => void;
   /** Stable reference. */
@@ -120,25 +121,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // ---------------------------------------------------------------------------
   const refreshCollections = useCallback(async () => {
     try {
-      const cols = await getCollections();
+      const cols = await getCollections(true);
       setCollections(cols);
       setActiveCollection((prev) => {
         if (cols.length === 0) return null;
-        if (prev && cols.some((c) => c.id === prev.id)) return prev;
-        return cols[0];
+        const next = prev ? cols.find((c) => c.id === prev.id) : undefined;
+        if (!next) return cols[0];
+        return next.name === prev!.name && next.settings === prev!.settings ? prev : next;
       });
     } catch (e: any) {
       console.error('Failed to load collections:', e);
     }
   }, []);
 
-  const handleCreateCollection = useCallback(async (name: string) => {
+  const handleCreateCollection = useCallback(async (name: string): Promise<Collection | null> => {
     try {
-      await createCollection(name);
+      const created = await createCollection(name);
       addToast(tRef.current.common.success, 'success');
       await refreshCollections();
+      return { id: created.id, name: created.name, created_at: '' };
     } catch (e: any) {
       addToast(errorMessage(e, tRef.current.common.error), 'error');
+      return null;
     }
   }, [addToast, refreshCollections]);
 
@@ -149,6 +153,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await refreshCollections();
     } catch (e: any) {
       addToast(errorMessage(e, tRef.current.common.error), 'error');
+    }
+  }, [addToast, refreshCollections]);
+
+  const handleRenameCollection = useCallback(async (id: number, name: string): Promise<boolean> => {
+    try {
+      await renameCollectionApi(id, name);
+      addToast(tRef.current.collections.renameSuccess, 'success');
+      await refreshCollections();
+      return true;
+    } catch (e: any) {
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
+      return false;
     }
   }, [addToast, refreshCollections]);
 
@@ -403,6 +419,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshCollections,
     handleCreateCollection,
     handleDeleteCollection,
+    handleRenameCollection,
     addToast,
     removeToast,
     autoSyncStatus,
@@ -423,6 +440,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }), [
     language, setLanguage, t, isDark, setIsDark,
     collections, activeCollection, refreshCollections, handleCreateCollection, handleDeleteCollection,
+    handleRenameCollection,
     addToast, removeToast,
     autoSyncStatus, autoSyncEnabled, syncInterval, refreshAutoSyncStatus, toggleAutoSync,
     updateSyncInterval, updateAutoSyncSchedule, runSyncNow,
