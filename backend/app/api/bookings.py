@@ -6,8 +6,10 @@ from typing import List, Optional, Dict, Any, Tuple
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from backend.app.core.database import (
-    insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch
+    insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
+    get_bookings_page, get_booking_ids, get_bookings_by_ids
 )
+from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
 from backend.app.services.image_extractor import extract_booking_from_image
 
@@ -86,6 +88,28 @@ def list_bookings(
     search_field: Optional[str] = Query(None, description="Specific field to search")
 ):
     return get_bookings(collection_id, search_query, search_field)
+
+@router.get("/page")
+def list_bookings_page(
+    collection_id: int = Query(...),
+    limit: int = Query(50),
+    offset: int = Query(0),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+):
+    return get_bookings_page(collection_id, limit, offset, search_query, search_field)
+
+@router.get("/ids")
+def list_booking_ids(
+    collection_id: int = Query(...),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+):
+    return {"ids": get_booking_ids(collection_id, search_query, search_field)}
+
+@router.post("/by-ids")
+def list_bookings_by_ids(payload: BatchIdsRequest):
+    return get_bookings_by_ids(payload.ids)
 
 @router.post("/upload")
 async def upload_bookings(

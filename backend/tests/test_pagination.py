@@ -83,3 +83,29 @@ def test_containers_page_50k_under_budget(fresh_db):
     assert page["total"] == 50_000
     assert first < 0.5, f"first page took {first:.3f}s"
     assert searched < 1.0, f"search page took {searched:.3f}s"
+
+
+def test_vessels_page_and_ids(fresh_db):
+    col = db.create_collection("V")
+    db.insert_vessel_schedules(col, [
+        {"SITE_ID": "CTL", "VESSELNAME": f"SHIP {i}", "IN_OUT_VOYAGE": f"{i:03d}N"} for i in range(6)
+    ])
+    page = db.get_vessel_schedules_page(col, limit=4, offset=4)
+    assert page["total"] == 6 and len(page["items"]) == 2
+    assert db.get_vessel_schedule_ids(col) == [r["id"] for r in db.get_vessel_schedules(col)]
+    assert db.get_vessel_schedules_page(col, search_query="SHIP 3", search_field="vessel_name")["total"] == 1
+
+
+def test_bookings_page_ids_and_by_ids(fresh_db):
+    client = TestClient(app)
+    col = db.create_collection("B")
+    for i in range(5):
+        db.insert_booking(col, {"Booking No": f"SGN{i}", "Vessel": "KOTA", "Carrier": "PIL"})
+    body = client.get(f"{API}/bookings/page", params={"collection_id": col, "limit": 2}).json()
+    assert body["total"] == 5 and [b["Booking No"] for b in body["items"]] == ["SGN0", "SGN1"]
+    ids = client.get(f"{API}/bookings/ids", params={"collection_id": col, "search_query": "SGN4"}).json()["ids"]
+    assert len(ids) == 1
+    rows = client.post(f"{API}/bookings/by-ids", json={"ids": ids}).json()
+    assert rows[0]["Booking No"] == "SGN4" and rows[0]["id"] == ids[0]
+    assert client.get(f"{API}/vessels/page", params={"collection_id": col}).json() == {"items": [], "total": 0}
+

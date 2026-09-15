@@ -6,7 +6,8 @@ from backend.app.core.database import (
     get_vessel_schedules, insert_vessel_schedules, delete_vessel_schedule,
     delete_vessel_schedules_batch, clear_vessel_schedules, get_watchlist,
     add_to_watchlist, remove_from_watchlist, add_vessel_watchlist_batch,
-    remove_vessel_watchlist_batch, get_vessel_schedules_by_ids, update_watchlist_sync_status
+    remove_vessel_watchlist_batch, get_vessel_schedules_by_ids, update_watchlist_sync_status,
+    get_vessel_schedules_page, get_vessel_schedule_ids
 )
 from backend.app.services.eport_client import search_vessels
 from backend.app.schemas.models import (
@@ -30,6 +31,28 @@ def list_vessels(
     search_field: Optional[str] = Query(None)
 ):
     return get_vessel_schedules(collection_id, search_query, search_field)
+
+@router.get("/page")
+def list_vessels_page(
+    collection_id: int = Query(...),
+    limit: int = Query(50),
+    offset: int = Query(0),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+):
+    return get_vessel_schedules_page(collection_id, limit, offset, search_query, search_field)
+
+@router.get("/ids")
+def list_vessel_ids(
+    collection_id: int = Query(...),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+):
+    return {"ids": get_vessel_schedule_ids(collection_id, search_query, search_field)}
+
+@router.post("/by-ids")
+def list_vessels_by_ids(payload: BatchIdsRequest):
+    return get_vessel_schedules_by_ids(payload.ids)
 
 @router.post("/search")
 def query_vessels(payload: VesselSearchRequest):

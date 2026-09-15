@@ -558,87 +558,101 @@ def insert_booking(col_id: int, data: dict) -> int:
         return _insert_booking_row(conn.cursor(), col_id, data)
 
 
-def get_bookings(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
-    with get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if search_query:
-            q = f"%{search_query}%"
-            if search_field and search_field != "all":
-                allowed_columns = {
-                    "pdf_name", "booking_no", "carrier", "port_of_discharging", "place_of_delivery", "block_val",
-                    "ts_port", "equipment_type", "qty", "empty_pickup_cy",
-                    "full_return_cy", "cutoff_time", "vessel", "etd"
-                }
-                if search_field in allowed_columns:
-                    query_str = f"SELECT * FROM bookings WHERE collection_id = ? AND {search_field} LIKE ? ORDER BY id ASC;"
-                    cursor.execute(query_str, (col_id, q))
-                else:
-                    search_field = "all"
+BOOKING_SEARCH_COLUMNS = {
+    "pdf_name", "booking_no", "carrier", "port_of_discharging", "place_of_delivery", "block_val",
+    "ts_port", "equipment_type", "qty", "empty_pickup_cy", "full_return_cy", "cutoff_time", "vessel", "etd"
+}
+_BOOKING_ALL_FIELDS = ("pdf_name", "booking_no", "carrier", "port_of_discharging", "place_of_delivery", "block_val",
+                       "ts_port", "equipment_type", "empty_pickup_cy", "full_return_cy", "vessel", "etd")
 
-            if not search_field or search_field == "all":
-                cursor.execute("""
-                    SELECT * FROM bookings
-                    WHERE collection_id = ? AND (
-                        pdf_name LIKE ? OR
-                        booking_no LIKE ? OR
-                        carrier LIKE ? OR
-                        port_of_discharging LIKE ? OR
-                        place_of_delivery LIKE ? OR
-                        block_val LIKE ? OR
-                        ts_port LIKE ? OR
-                        equipment_type LIKE ? OR
-                        empty_pickup_cy LIKE ? OR
-                        full_return_cy LIKE ? OR
-                        vessel LIKE ? OR
-                        etd LIKE ?
-                    ) ORDER BY id ASC;
-                """, (col_id, q, q, q, q, q, q, q, q, q, q, q, q))
+
+def _booking_where(col_id: int, search_query: str = None, search_field: str = None) -> tuple[str, list]:
+    where = "collection_id = ?"
+    params: list = [col_id]
+    if search_query:
+        q = f"%{search_query}%"
+        if search_field and search_field != "all" and search_field in BOOKING_SEARCH_COLUMNS:
+            where += f" AND {search_field} LIKE ?"
+            params.append(q)
         else:
-            cursor.execute("SELECT * FROM bookings WHERE collection_id = ? ORDER BY id ASC;", (col_id,))
+            where += " AND (" + " OR ".join(f"{c} LIKE ?" for c in _BOOKING_ALL_FIELDS) + ")"
+            params.extend([q] * len(_BOOKING_ALL_FIELDS))
+    return where, params
 
-        rows = cursor.fetchall()
-        result = []
-        for r in rows:
-            row_dict = dict(r)
-            carrier_val = row_dict.get("carrier")
-            if not carrier_val or carrier_val == "null" or carrier_val == "":
-                # Fallback carrier detection from metadata
-                b_no = row_dict.get("booking_no", "") or ""
-                v_name = row_dict.get("vessel", "") or ""
-                f_name = row_dict.get("pdf_name", "") or ""
-                upper_check = f"{b_no} {v_name} {f_name}".upper()
-                if "DONGJIN" in upper_check or "DJSC" in upper_check or b_no.startswith("DJ"):
-                    carrier_val = "DONGJIN"
-                elif "PIL" in upper_check or b_no.startswith("SGN6") or "KOTA" in upper_check:
-                    carrier_val = "PIL"
-                elif "ONE" in upper_check or b_no.startswith("ONEY"):
-                    carrier_val = "ONE"
-                elif "SITC" in upper_check:
-                    carrier_val = "SITC"
-                elif "COSCO" in upper_check:
-                    carrier_val = "COSCO"
-                else:
-                    carrier_val = "Khác"
 
-            result.append({
-                "id": row_dict["id"],
-                "Tên file PDF": row_dict["pdf_name"],
-                "Booking No": row_dict["booking_no"],
-                "Carrier": carrier_val,
-                "Port of Discharging": row_dict["port_of_discharging"],
-                "Place of Delivery": row_dict["place_of_delivery"],
-                "Block": row_dict["block_val"],
-                "T/S Port": row_dict["ts_port"],
-                "Equipment Type": row_dict["equipment_type"],
-                "Q'ty": row_dict["qty"],
-                "Empty Pick Up CY": row_dict["empty_pickup_cy"],
-                "Full return CY": row_dict["full_return_cy"],
-                "Port Cargo Cut-off": row_dict["cutoff_time"],
-                "Vessel": row_dict["vessel"],
-                "ETD": row_dict["etd"]
-            })
-        return result
+def _fallback_carrier(row: dict) -> str:
+    carrier_val = row.get("carrier")
+    if carrier_val and carrier_val != "null":
+        return carrier_val
+    b_no = row.get("booking_no", "") or ""
+    upper_check = f"{b_no} {row.get('vessel', '') or ''} {row.get('pdf_name', '') or ''}".upper()
+    if "DONGJIN" in upper_check or "DJSC" in upper_check or b_no.startswith("DJ"):
+        return "DONGJIN"
+    if "PIL" in upper_check or b_no.startswith("SGN6") or "KOTA" in upper_check:
+        return "PIL"
+    if "ONE" in upper_check or b_no.startswith("ONEY"):
+        return "ONE"
+    if "SITC" in upper_check:
+        return "SITC"
+    if "COSCO" in upper_check:
+        return "COSCO"
+    return "Khác"
+
+
+def _booking_row_to_api(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "Tên file PDF": row["pdf_name"],
+        "Booking No": row["booking_no"],
+        "Carrier": _fallback_carrier(row),
+        "Port of Discharging": row["port_of_discharging"],
+        "Place of Delivery": row["place_of_delivery"],
+        "Block": row["block_val"],
+        "T/S Port": row["ts_port"],
+        "Equipment Type": row["equipment_type"],
+        "Q'ty": row["qty"],
+        "Empty Pick Up CY": row["empty_pickup_cy"],
+        "Full return CY": row["full_return_cy"],
+        "Port Cargo Cut-off": row["cutoff_time"],
+        "Vessel": row["vessel"],
+        "ETD": row["etd"],
+    }
+
+
+def get_bookings(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
+    where, params = _booking_where(col_id, search_query, search_field)
+    with get_connection() as conn:
+        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} ORDER BY id ASC;", tuple(params))
+    return [_booking_row_to_api(r) for r in rows]
+
+
+def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
+                      search_query: str = None, search_field: str = None) -> dict:
+    limit, offset = _page_bounds(limit, offset)
+    where, params = _booking_where(col_id, search_query, search_field)
+    with get_connection() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
+        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?;",
+                             (*params, limit, offset))
+    return {"items": [_booking_row_to_api(r) for r in rows], "total": total}
+
+
+def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
+    where, params = _booking_where(col_id, search_query, search_field)
+    with get_connection() as conn:
+        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} ORDER BY id ASC;",
+                                           tuple(params)).fetchall()]
+
+
+def get_bookings_by_ids(ids: list[int]) -> list[dict]:
+    clean = _clean_ids(ids)
+    rows = []
+    with get_connection() as conn:
+        for chunk in _chunks(clean):
+            placeholders = ",".join(["?"] * len(chunk))
+            rows.extend(_select_dicts(conn, f"SELECT * FROM bookings WHERE id IN ({placeholders});", tuple(chunk)))
+    rows.sort(key=lambda r: r["id"])
+    return [_booking_row_to_api(r) for r in rows]
 
 
 def delete_booking(booking_id: int):
@@ -839,35 +853,52 @@ def insert_vessel_schedules(col_id: int, schedules: list[dict]) -> list[int]:
         return _insert_vessel_rows(conn.cursor(), col_id, schedules, _now_str())
 
 
-def get_vessel_schedules(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
-    with get_connection() as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        if search_query:
-            q = f"%{search_query}%"
-            if search_field and search_field != "all":
-                allowed_columns = {
-                    "site_id", "agent", "vessel_name", "in_out_voyage", "actual_berth_time",
-                    "actual_departure_time", "closing_time", "closing_time_icd", "in_gate",
-                    "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "remarks", "queried_at"
-                }
-                if search_field in allowed_columns:
-                    query_str = f"SELECT * FROM vessel_schedules WHERE collection_id = ? AND {search_field} LIKE ? ORDER BY queried_at DESC, id ASC;"
-                    cursor.execute(query_str, (col_id, q))
-                else:
-                    search_field = "all"
+_VESSEL_ORDER = "ORDER BY queried_at DESC, id ASC"
+VESSEL_SEARCH_COLUMNS = {
+    "site_id", "agent", "vessel_name", "in_out_voyage", "actual_berth_time",
+    "actual_departure_time", "closing_time", "closing_time_icd", "in_gate",
+    "open_ts", "reefer_open_ts", "oog_open_ts", "haz_open_ts", "remarks", "queried_at"
+}
 
-            if not search_field or search_field == "all":
-                cursor.execute("""
-                    SELECT * FROM vessel_schedules
-                    WHERE collection_id = ? AND (
-                        site_id LIKE ? OR agent LIKE ? OR vessel_name LIKE ? OR in_out_voyage LIKE ? OR remarks LIKE ? OR closing_time LIKE ? OR in_gate LIKE ?
-                    ) ORDER BY queried_at DESC, id ASC;
-                """, (col_id, q, q, q, q, q, q, q))
+
+def _vessel_where(col_id: int, search_query: str = None, search_field: str = None) -> tuple[str, list]:
+    where = "collection_id = ?"
+    params: list = [col_id]
+    if search_query:
+        q = f"%{search_query}%"
+        if search_field and search_field != "all" and search_field in VESSEL_SEARCH_COLUMNS:
+            where += f" AND {search_field} LIKE ?"
+            params.append(q)
         else:
-            cursor.execute("SELECT * FROM vessel_schedules WHERE collection_id = ? ORDER BY queried_at DESC, id ASC;", (col_id,))
+            where += (" AND (site_id LIKE ? OR agent LIKE ? OR vessel_name LIKE ? OR in_out_voyage LIKE ? "
+                      "OR remarks LIKE ? OR closing_time LIKE ? OR in_gate LIKE ?)")
+            params.extend([q] * 7)
+    return where, params
 
-        return [dict(row) for row in cursor.fetchall()]
+
+def get_vessel_schedules(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
+    where, params = _vessel_where(col_id, search_query, search_field)
+    with get_connection() as conn:
+        return _select_dicts(conn, f"SELECT * FROM vessel_schedules WHERE {where} {_VESSEL_ORDER};", tuple(params))
+
+
+def get_vessel_schedules_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
+                              search_query: str = None, search_field: str = None) -> dict:
+    limit, offset = _page_bounds(limit, offset)
+    where, params = _vessel_where(col_id, search_query, search_field)
+    with get_connection() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM vessel_schedules WHERE {where};", tuple(params)).fetchone()[0]
+        items = _select_dicts(
+            conn, f"SELECT * FROM vessel_schedules WHERE {where} {_VESSEL_ORDER} LIMIT ? OFFSET ?;",
+            (*params, limit, offset))
+    return {"items": items, "total": total}
+
+
+def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
+    where, params = _vessel_where(col_id, search_query, search_field)
+    with get_connection() as conn:
+        return [r[0] for r in conn.execute(
+            f"SELECT id FROM vessel_schedules WHERE {where} {_VESSEL_ORDER};", tuple(params)).fetchall()]
 
 
 def get_vessel_schedules_by_ids(ids: list[int]) -> list[dict]:
