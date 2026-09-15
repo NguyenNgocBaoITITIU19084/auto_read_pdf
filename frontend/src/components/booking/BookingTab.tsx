@@ -5,8 +5,11 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
-import { Booking } from '../../types';
-import { getBookings, uploadPDFs, deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi } from '../../services/api';
+import { Booking, PageResult, TableQuery } from '../../types';
+import {
+  getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
+  uploadPDFs, deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi
+} from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BookingDetailModal } from './BookingDetailModal';
@@ -25,6 +28,8 @@ import { ValueBadge } from '../common/ValueBadge';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
 import { subscribeTourActions } from '../../services/tourService';
+import { useServerTable, LoadMode } from '../../hooks/useServerTable';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { tf } from '../../services/i18nFormat';
 import type { TabId } from '../common/Tabs';
 import { isImageFile, isPdfFile } from './clipboard';
@@ -174,8 +179,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const { t, activeCollection } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
@@ -186,19 +189,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     }
   }, [initialSearchQuery]);
 
-  // Pagination state
-  const [pageSize, setPageSize] = useState<number>(() => {
-    const saved = localStorage.getItem('booking_page_size');
-    return saved && !isNaN(Number(saved)) ? Number(saved) : 50;
-  });
-  const [currentPage, setCurrentPage] = useState<number>(1);
-
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Modal states
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
-  const [exportScope, setExportScope] = useState<'all' | 'selected' | null>(null);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
+  const [exportRows, setExportRows] = useState<Booking[]>([]);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
@@ -297,40 +295,61 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     return col?.label || fallback;
   };
 
-  const loadRequestRef = useRef(0);
-  const loadData = useStableCallback(async () => {
-    if (!activeCollection) return;
-    const reqId = ++loadRequestRef.current;
-    try {
-      setLoading(true);
-      const data = await getBookings(activeCollection.id, searchQuery, searchField);
-      if (reqId !== loadRequestRef.current) return;
-      setBookings(data);
-    } catch (e: any) {
-      if (reqId !== loadRequestRef.current) return;
-      console.error(e);
-      addToast(e.message || t.common.error, 'error');
-    } finally {
-      if (reqId === loadRequestRef.current) setLoading(false);
-    }
+  // ---------------------------------------------------------------------------
+  // Data loading (server-paged table)
+  // ---------------------------------------------------------------------------
+  const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  const tableQuery = useMemo<TableQuery>(
+    () => ({ search_query: debouncedQuery, search_field: searchField }),
+    [debouncedQuery, searchField]
+  );
+
+  const table = useServerTable<Booking, PageResult<Booking>>({
+    enabled: !!activeCollection,
+    queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
+    pageSizeStorageKey: 'booking_page_size',
+    fetchPage: (limit, offset) => getBookingsPage(activeCollection!.id, limit, offset, tableQuery),
+    onError: (e: any) => {
+      const detail = e?.response?.data?.detail;
+      addToast((typeof detail === 'string' && detail) || e?.message || t.common.error, 'error');
+    },
+  });
+  const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+
+  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    await table.reload(mode);
   });
 
+  const selection = useRowSelection<Booking>(
+    pageRows,
+    getBookingId,
+    [activeCollection?.id, debouncedQuery, searchField],
+    { pruneMissing: false }
+  );
+  const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
+
+  /** Selected rows even when they live on other pages. */
+  const resolveSelectedRows = useCallback(async (): Promise<Booking[]> => {
+    if (selection.selectedRows.length === selection.count) return selection.selectedRows;
+    return getBookingsByIds(selectedIdList);
+  }, [selection.selectedRows, selection.count, selectedIdList]);
+
+  const handleSelectAllResults = useCallback(async () => {
+    if (!activeCollection) return;
+    try {
+      const ids = await getBookingIds(activeCollection.id, tableQuery);
+      selection.selectIds(ids, true);
+    } catch (e: any) {
+      addToast(e?.message || t.common.error, 'error');
+    }
+  }, [activeCollection, tableQuery, selection, addToast, t]);
+
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const pageAllSelected = selection.isPageAllSelected(pageRows);
+  const pagePartiallySelected = selection.isPagePartiallySelected(pageRows);
   useEffect(() => {
-    setCurrentPage(1);
-    loadData();
-  }, [activeCollection, searchQuery, searchField, loadData]);
-
-  const selection = useRowSelection<Booking>(bookings, getBookingId, [activeCollection?.id, searchQuery, searchField]);
-  const { selectedIds, selectedRows, count: selectedCount, clear: clearSelection } = selection;
-
-  const paginatedBookings = useMemo(() => {
-    if (pageSize >= bookings.length || pageSize <= 0) return bookings;
-    const start = (currentPage - 1) * pageSize;
-    return bookings.slice(start, start + pageSize);
-  }, [bookings, currentPage, pageSize]);
-
-  const pageAllSelected = selection.isPageAllSelected(paginatedBookings);
-  const pagePartiallySelected = selection.isPagePartiallySelected(paginatedBookings);
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = pagePartiallySelected;
+  }, [pagePartiallySelected]);
 
   const uploadFiles = useStableCallback(async (fileArray: File[]) => {
     if (!activeCollection) {
@@ -342,7 +361,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       setUploading(true);
       const res = await uploadPDFs(activeCollection.id, fileArray);
       addToast(t.booking.uploadSuccess.replace('{count}', res.count.toString()), 'success');
-      if (mountedRef.current) await loadData();
+      if (mountedRef.current) await loadData('refresh');
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
       addToast((typeof detail === 'string' && detail) || e.message || t.common.error, 'error');
@@ -409,7 +428,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     try {
       await deleteBooking(id);
       addToast(t.common.success, 'success');
-      setBookings((prev) => prev.filter((b) => b.id !== id));
+      selection.selectIds([id], false);
+      await loadData('refresh');
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -422,7 +442,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     try {
       await clearBookings(activeCollection.id);
       addToast(t.common.success, 'success');
-      setBookings([]);
+      selection.clear();
+      await loadData('refresh');
     } catch (e: any) {
       addToast(e.message || t.common.error, 'error');
     }
@@ -447,7 +468,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   // Bulk actions
   // ---------------------------------------------------------------------------
   const handleBulkDelete = async () => {
-    const ids = Array.from(selectedIds);
+    const ids = selectedIdList;
     if (ids.length === 0) return;
     const ok = await confirm({
       message: tf(t.bulk.deleteSelectedConfirm, { count: ids.length }),
@@ -458,9 +479,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       setBulkDeleting(true);
       const res = await deleteBookingsBatch(ids);
       const deleted = typeof res?.deleted === 'number' ? res.deleted : ids.length;
-      const idSet = new Set(ids);
-      setBookings((prev) => prev.filter((b) => !idSet.has(b.id)));
-      clearSelection();
+      selection.selectIds(ids, false);
+      await loadData('refresh');
       addToast(tf(t.booking.bulkActions.deleteSuccess, { count: deleted }), 'success');
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
@@ -471,10 +491,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   };
 
   const handleBulkCopy = async () => {
-    if (selectedRows.length === 0) return;
-    const ok = await copyTextToClipboard(formatRowsAsTsv(selectedRows, columns, true));
+    const rows = await resolveSelectedRows();
+    if (rows.length === 0) return;
+    const ok = await copyTextToClipboard(formatRowsAsTsv(rows, columns, true));
     addToast(
-      ok ? tf(t.booking.bulkActions.copySuccess, { count: selectedRows.length }) : t.common.error,
+      ok ? tf(t.booking.bulkActions.copySuccess, { count: rows.length }) : t.common.error,
       ok ? 'success' : 'error'
     );
   };
@@ -489,9 +510,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       /* ignore */
     }
 
+    const rows = await resolveSelectedRows();
     const targets = new Map<string, { site: string; name: string; voyage: string }>();
     let skipped = 0;
-    selectedRows.forEach((b) => {
+    rows.forEach((b) => {
       const candidate = getBookingVesselCandidates(b)[0];
       const { name, voyage } = splitVesselVoyage(candidate?.value);
       if (!name) {
@@ -534,6 +556,20 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     addToast(summary + skippedText, errors > 0 ? 'error' : found > 0 ? 'success' : 'info');
   };
 
+  const handleOpenExport = async (scope: 'all' | 'selected') => {
+    if (!activeCollection) return;
+    setExportScope(scope);
+    try {
+      const rows = scope === 'all'
+        ? await getBookings(activeCollection.id, debouncedQuery, searchField)
+        : await resolveSelectedRows();
+      setExportRows(rows);
+      setIsExportOpen(true);
+    } catch (e: any) {
+      addToast(e?.message || t.common.error, 'error');
+    }
+  };
+
   const bulkActions: BulkAction[] = [
     {
       key: 'lookup-vessels',
@@ -548,7 +584,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       key: 'export',
       label: t.bulk.exportSelected,
       icon: FileSpreadsheet,
-      onClick: () => setExportScope('selected'),
+      onClick: () => handleOpenExport('selected'),
     },
     {
       key: 'copy',
@@ -571,8 +607,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       loading: bulkDeleting,
     },
   ];
-
-  const moveIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
@@ -681,8 +715,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           <div data-tour="booking-export">
             <Tooltip content="Xuất danh sách Booking ra file Excel">
               <button
-                onClick={() => setExportScope('all')}
-                disabled={bookings.length === 0}
+                onClick={() => handleOpenExport('all')}
+                disabled={total === 0}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -693,14 +727,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
           <Tooltip content="Tải lại dữ liệu">
             <button
-              onClick={() => loadData()}
+              onClick={() => loadData('loading')}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </Tooltip>
 
-          {bookings.length > 0 && (
+          {total > 0 && (
             <Tooltip content="Xóa tất cả Booking trong bộ sưu tập này">
               <button
                 onClick={handleClearAll}
@@ -721,15 +755,13 @@ export const BookingTab: React.FC<BookingTabProps> = ({
               <tr>
                 <th className="py-2 px-2 text-center w-8">
                   <input
+                    ref={headerCheckboxRef}
                     type="checkbox"
                     aria-label={t.bulk.selectPage}
                     title={t.bulk.selectPage}
-                    ref={(el) => {
-                      if (el) el.indeterminate = pagePartiallySelected;
-                    }}
                     checked={pageAllSelected}
-                    disabled={loading || paginatedBookings.length === 0}
-                    onChange={(e) => selection.selectPage(paginatedBookings, e.target.checked)}
+                    disabled={loading || pageRows.length === 0}
+                    onChange={() => selection.selectPage(pageRows, !pageAllSelected)}
                     className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer align-middle"
                   />
                 </th>
@@ -760,7 +792,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                   hasActions={true}
                   actionColClass="w-24"
                 />
-              ) : bookings.length === 0 ? (
+              ) : pageRows.length === 0 ? (
                 <tr>
                   <td
                     colSpan={visibleColumns.length + 3}
@@ -771,14 +803,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                   </td>
                 </tr>
               ) : (
-                paginatedBookings.map((booking, idx) => (
+                pageRows.map((booking, idx) => (
                   <BookingRow
                     key={booking.id ?? idx}
                     booking={booking}
                     rowNumber={(currentPage - 1) * pageSize + idx + 1}
                     visibleColumns={visibleColumns}
                     columnWidths={columnWidths}
-                    selected={selectedIds.has(booking.id)}
+                    selected={selection.selectedIds.has(booking.id)}
                     onToggle={selection.toggle}
                     onOpen={openBooking}
                     onCopy={copyRow}
@@ -795,29 +827,25 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         {/* Pagination Footer */}
         <Pagination
           currentPage={currentPage}
-          totalItems={bookings.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={(newSize) => {
-            setPageSize(newSize);
-            localStorage.setItem('booking_page_size', String(newSize));
-            setCurrentPage(1);
-          }}
+          onPageSizeChange={setPageSize}
         />
       </div>
 
       <BulkActionBar
-        count={selectedCount}
-        onClear={clearSelection}
+        count={selection.count}
+        onClear={selection.clear}
         actions={bulkActions}
         extra={
-          pageAllSelected && selectedCount < bookings.length ? (
+          !selection.isAllSelected && total > selection.count ? (
             <button
               type="button"
-              onClick={() => selection.selectAll(true)}
+              onClick={handleSelectAllResults}
               className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap"
             >
-              {tf(t.bulk.selectAllResults, { count: bookings.length })}
+              {tf(t.bulk.selectAllResults, { count: total })}
             </button>
           ) : undefined
         }
@@ -839,9 +867,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       />
 
       <ExportModal
-        isOpen={exportScope !== null}
-        onClose={() => setExportScope(null)}
-        data={exportScope === 'selected' ? selectedRows : bookings}
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        data={exportRows}
         allColumns={exportColumns}
         filenamePrefix={exportScope === 'selected' ? 'bookings_selected' : 'bookings'}
       />
@@ -850,10 +878,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         isOpen={isMoveOpen}
         onClose={() => setIsMoveOpen(false)}
         entity="bookings"
-        ids={moveIds}
+        ids={selectedIdList}
         onDone={(result) => {
-          clearSelection();
-          if (!result.copy) loadData();
+          selection.clear();
+          if (!result.copy) loadData('refresh');
         }}
       />
 
@@ -869,9 +897,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         isOpen={isImageModalOpen}
         onClose={() => setIsImageModalOpen(false)}
         initialFile={activeImageFile}
-        onSavedSuccess={() => loadData()}
+        onSavedSuccess={() => loadData('refresh')}
         onPdfFiles={(files) => void uploadFiles(files)}
       />
     </div>
   );
 };
+
