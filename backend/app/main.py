@@ -20,7 +20,7 @@ from backend.app.core.request_logging import RequestLoggingMiddleware
 from backend.app.core.config import BACKEND_HOST, BACKEND_PORT
 from backend.app.core.database import init_db, get_collections, create_collection
 from backend.app.core.version import APP_VERSION
-from backend.app.services.background_tasks import restore_auto_sync, shutdown_scheduler
+from backend.app.services.background_tasks import restore_auto_sync, shutdown_scheduler, register_log_retention_job
 from backend.app.api.collections import router as collections_router
 from backend.app.api.bookings import router as bookings_router
 from backend.app.api.vessels import router as vessels_router
@@ -40,6 +40,8 @@ async def lifespan(app: FastAPI):
         create_collection("Default Collection")
     # Restore persisted auto-sync schedule (first run is delayed so startup stays fast)
     await restore_auto_sync()
+    # Daily log retention (deletes/trims logs older than 3 days); first run is delayed too
+    register_log_retention_job()
     yield
     # Shutdown
     shutdown_scheduler()

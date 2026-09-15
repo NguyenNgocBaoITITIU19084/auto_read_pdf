@@ -1,8 +1,10 @@
+import glob
 import logging
 import logging.handlers
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +17,11 @@ APP_LOG_MAX_BYTES = 5 * 1024 * 1024
 APP_LOG_BACKUP_COUNT = 5
 ERROR_LOG_MAX_BYTES = 2 * 1024 * 1024
 ERROR_LOG_BACKUP_COUNT = 3
+
+# Matches the start of a log line's timestamp, e.g. "2026-09-15 12:34:56" — as produced by
+# VnTimeFormatter's datefmt. Lines that don't match are continuation lines (e.g. traceback)
+# belonging to the most recent timestamped line above them.
+_LOG_LINE_TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 
 MASK = "***MASKED***"
 # Named kwarg style, unambiguous even bare: api_key=..., gemini_api_key=...
@@ -124,3 +131,128 @@ def configure_logging() -> str:
         root.addHandler(handler)
 
     return log_dir
+
+
+_retention_logger = logging.getLogger("backend.log_retention")
+
+
+def _cutoff_timestamp(max_age_days: int) -> float:
+    """Epoch seconds older than which a log block/backup file should be purged."""
+    now_vn = datetime.now(VN_TZ)
+    cutoff_vn = now_vn.timestamp() - (max_age_days * 86400)
+    return cutoff_vn
+
+
+def _find_open_handler(target_path: Path):
+    """Find a FileHandler on the root logger whose baseFilename matches target_path, if any."""
+    root = logging.getLogger()
+    resolved = str(target_path.resolve())
+    for handler in root.handlers:
+        base = getattr(handler, "baseFilename", None)
+        if base and str(Path(base).resolve()) == resolved:
+            return handler
+    return None
+
+
+def _trim_active_log(log_path: Path, cutoff_ts: float) -> int:
+    """Rewrite log_path, dropping timestamped blocks (a timestamped line plus any
+    non-timestamped continuation lines that follow it, e.g. a traceback) whose timestamp
+    is older than cutoff_ts. Returns the number of dropped log lines (blocks' leading lines).
+    Safe against a handler that currently holds the file open in append mode.
+    """
+    if not log_path.exists():
+        return 0
+
+    try:
+        raw = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    if not raw:
+        return 0
+
+    lines = raw.splitlines(keepends=True)
+
+    kept_lines: list[str] = []
+    dropped_count = 0
+    current_block_kept = True
+
+    for line in lines:
+        m = _LOG_LINE_TS_RE.match(line)
+        if m:
+            try:
+                dt = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=VN_TZ)
+                line_ts = dt.timestamp()
+            except ValueError:
+                line_ts = None
+            if line_ts is not None and line_ts < cutoff_ts:
+                current_block_kept = False
+                dropped_count += 1
+            else:
+                current_block_kept = True
+        # Non-timestamped lines are continuations of the current block's decision
+        if current_block_kept:
+            kept_lines.append(line)
+
+    if dropped_count == 0:
+        return 0
+
+    new_content = "".join(kept_lines)
+
+    handler = _find_open_handler(log_path)
+    if handler is not None:
+        handler.acquire()
+        try:
+            if handler.stream:
+                handler.stream.close()
+            log_path.write_text(new_content, encoding="utf-8")
+            handler.stream = handler._open()
+        finally:
+            handler.release()
+    else:
+        log_path.write_text(new_content, encoding="utf-8")
+
+    return dropped_count
+
+
+def _delete_stale_backups(log_dir: Path, base_name: str, cutoff_ts: float) -> list[str]:
+    """Delete RotatingFileHandler backup files (base_name.1, base_name.2, ...) older than cutoff_ts."""
+    deleted = []
+    for path_str in glob.glob(str(log_dir / f"{base_name}.*")):
+        path = Path(path_str)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff_ts:
+            try:
+                path.unlink()
+                deleted.append(str(path))
+            except OSError:
+                _retention_logger.warning(f"Could not delete stale log backup {path.name}")
+    return deleted
+
+
+def purge_old_logs(max_age_days: int = 3) -> dict:
+    """Delete rotated log backups and trim stale entries from the active app/error logs.
+
+    Runs periodically (see backend.app.services.background_tasks) to bound log growth by
+    TIME in addition to the existing size-based RotatingFileHandler rotation. Safe to call
+    even when the corresponding logging handlers are not open (e.g. in tests).
+    """
+    log_dir = Path(get_log_dir())
+    cutoff_ts = _cutoff_timestamp(max_age_days)
+
+    deleted_backups: list[str] = []
+    trimmed_files: dict[str, int] = {}
+
+    for base_name in (APP_LOG, ERROR_LOG):
+        deleted_backups.extend(_delete_stale_backups(log_dir, base_name, cutoff_ts))
+        trimmed_files[base_name] = _trim_active_log(log_dir / base_name, cutoff_ts)
+
+    result = {"deleted_backups": deleted_backups, "trimmed_files": trimmed_files}
+    _retention_logger.info(
+        f"Log retention: deleted {len(deleted_backups)} backup file(s), "
+        f"trimmed {sum(trimmed_files.values())} stale log line(s) "
+        f"(max_age_days={max_age_days})"
+    )
+    return result

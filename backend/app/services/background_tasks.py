@@ -18,12 +18,15 @@ from backend.app.core.database import (
     get_system_setting, set_system_setting,
 )
 from backend.app.services.eport_client import search_vessels_detailed, search_containers
+from backend.app.core.logging_setup import purge_old_logs
 
 logger = logging.getLogger("backend.background_tasks")
 
 AUTO_SYNC_JOB_ID = "auto_sync_job"
 AUTO_SYNC_KICK_JOB_ID = "auto_sync_kick"
 STARTUP_DELAY_SECONDS = 30
+LOG_RETENTION_JOB_ID = "log_retention"
+LOG_RETENTION_STARTUP_DELAY_SECONDS = 10
 DEFAULT_INTERVAL_MINUTES = 10
 MAX_INTERVAL_MINUTES = 10080  # 1 week
 VALID_MODES = ("interval", "times")
@@ -404,6 +407,28 @@ async def restore_auto_sync(startup_delay_seconds: float = STARTUP_DELAY_SECONDS
         apply_schedule(kick_delay_seconds=kick)
     except Exception:
         logger.exception("Could not restore auto-sync schedule")
+
+
+async def _run_log_retention():
+    try:
+        await asyncio.to_thread(purge_old_logs)
+    except Exception:
+        logger.exception("Log retention job failed")
+
+
+def register_log_retention_job(startup_delay_seconds: float = LOG_RETENTION_STARTUP_DELAY_SECONDS):
+    """Register the daily log-retention job (id=LOG_RETENTION_JOB_ID), plus a one-off delayed
+    kick so a purge runs shortly after startup without blocking it. Safe to call more than
+    once: `replace_existing` in JOB_OPTIONS avoids duplicate registrations."""
+    setup_scheduler()
+    _remove_job(LOG_RETENTION_JOB_ID)
+    scheduler.add_job(_run_log_retention, IntervalTrigger(hours=24, timezone=VN_TZ),
+                      id=LOG_RETENTION_JOB_ID, name="log_retention", **JOB_OPTIONS)
+    if startup_delay_seconds is not None:
+        _remove_job("log_retention_kick")
+        run_at = datetime.now(VN_TZ) + timedelta(seconds=max(0, startup_delay_seconds))
+        scheduler.add_job(_run_log_retention, DateTrigger(run_date=run_at, timezone=VN_TZ),
+                          id="log_retention_kick", name="log_retention_kick", **JOB_OPTIONS)
 
 
 def shutdown_scheduler():
