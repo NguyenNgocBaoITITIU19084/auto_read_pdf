@@ -269,6 +269,56 @@ class TestStatusEndpoint:
         assert body["connected"] is False
         assert body["photos"] == []
 
+    def test_status_does_not_leak_another_devices_photos(self, client):
+        """Two phones paired into the same session must only see their own
+        photos via /api/status -- this is the exact scoping bug being fixed."""
+        session = bridge.start()
+        pair_a = client.post(
+            "/api/pair",
+            json={"pairing_token": session.pairing_token},
+            headers={"User-Agent": "iPhone UA"},
+        )
+        token_a = pair_a.json()["device_token"]
+
+        pairing_token_2 = bridge.snapshot()["pairing_token"]
+        pair_b = client.post(
+            "/api/pair",
+            json={"pairing_token": pairing_token_2},
+            headers={"User-Agent": "Android UA"},
+        )
+        token_b = pair_b.json()["device_token"]
+
+        upload_a = client.post(
+            "/api/photos",
+            files={"file": ("photo.jpg", make_jpeg_bytes(), "image/jpeg")},
+            headers={"X-Device-Token": token_a},
+        )
+        photo_id_a = upload_a.json()["photo_id"]
+
+        resp_a = client.get("/api/status", headers={"X-Device-Token": token_a})
+        assert {"photo_id": photo_id_a, "state": "queued"} in resp_a.json()["photos"]
+
+        resp_b = client.get("/api/status", headers={"X-Device-Token": token_b})
+        body_b = resp_b.json()
+        assert body_b["connected"] is True
+        assert body_b["photos"] == []
+
+    def test_status_reports_received_state_after_ack(self, client):
+        token = pair_device(client)
+        upload = client.post(
+            "/api/photos",
+            files={"file": ("photo.jpg", make_jpeg_bytes(), "image/jpeg")},
+            headers={"X-Device-Token": token},
+        )
+        photo_id = upload.json()["photo_id"]
+
+        bridge.ack(photo_id)
+
+        resp = client.get("/api/status", headers={"X-Device-Token": token})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {"photo_id": photo_id, "state": "received"} in body["photos"]
+
 
 # ---------------------------------------------------------------------------
 # Isolation from the main app / no CORS

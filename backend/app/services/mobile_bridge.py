@@ -428,6 +428,26 @@ class MobileBridge:
         with self._lock:
             return [p for p in self._photos.values() if not p.acked and p.ready]
 
+    def device_photos(self, device_token: str) -> list[MobilePhoto]:
+        """Return this device's photos (queued and acked/received), most-recent-last.
+
+        Unlike ``pending()`` (queue-wide, excludes acked photos), this is
+        scoped to the single device identified by ``device_token`` and
+        includes acked photos too, so a caller (the ``/api/status`` route)
+        can report a per-photo "received" state. Still gated by ``ready`` so
+        an in-flight upload (write not yet complete) isn't exposed. Raises
+        ``AuthError`` for an unknown/invalid token, same as ``_find_device``.
+        """
+        with self._lock:
+            device = self._find_device(device_token)
+            photos = [
+                p
+                for p in self._photos.values()
+                if p.device_id == device.id and p.ready
+            ]
+            photos.sort(key=lambda p: p.received_at)
+            return photos
+
     def read_photo(self, photo_id: str) -> bytes:
         # The existence/acked check and the actual disk read must happen
         # under the same lock acquisition: releasing the lock in between

@@ -241,13 +241,16 @@ async def status_endpoint(request: Request):
     device_token = request.headers.get("x-device-token")
     status = bridge.device_status(device_token) if device_token else {"connected": False}
 
-    # mobile_bridge has no public "list this device's photos" method: the
-    # only way to enumerate is pending(), which is queue-wide (all devices
-    # in the session), not scoped to the requesting device's id — there is
-    # no public token->device_id lookup to filter by. For a single-phone
-    # pairing session (the expected usage) this is equivalent; documented as
-    # a concern in the task report rather than adding a new bridge method.
-    photos = [
-        {"photo_id": photo.id, "state": "queued"} for photo in bridge.pending()
-    ]
+    photos: list[dict] = []
+    if device_token and status.get("connected"):
+        # device_photos() is scoped to this device's id (unlike pending(),
+        # which is queue-wide across all paired devices) and includes acked
+        # photos so "received" can be reported alongside "queued".
+        photos = [
+            {
+                "photo_id": photo.id,
+                "state": "received" if photo.acked else "queued",
+            }
+            for photo in bridge.device_photos(device_token)
+        ]
     return {"connected": bool(status.get("connected")), "photos": photos}

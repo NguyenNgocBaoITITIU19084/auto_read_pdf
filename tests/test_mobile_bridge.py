@@ -438,6 +438,57 @@ class TestQueueOperations:
         assert status_after["connected"] is True
 
 
+class TestDevicePhotos:
+    def test_returns_queued_photo(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        result = bridge.device_photos(paired.token)
+        assert [p.id for p in result] == [photo.id]
+        assert result[0].acked is False
+
+    def test_returns_acked_photo_with_acked_flag_set(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        bridge.ack(photo.id)
+        result = bridge.device_photos(paired.token)
+        assert [p.id for p in result] == [photo.id]
+        assert result[0].acked is True
+
+    def test_returns_both_queued_and_acked_sorted_by_received_at(
+        self, bridge, paired, clock
+    ):
+        p1 = bridge.add_photo(paired.token, make_jpeg_bytes())
+        bridge.ack(p1.id)
+        clock.advance(1)
+        p2 = bridge.add_photo(paired.token, make_png_bytes())
+        result = bridge.device_photos(paired.token)
+        assert [p.id for p in result] == [p1.id, p2.id]
+        assert result[0].acked is True
+        assert result[1].acked is False
+
+    def test_does_not_return_another_devices_photos(self, bridge):
+        session = bridge.start()
+        device_a = bridge.pair(session.pairing_token, "iPhone UA")
+        session2_pairing_token = bridge.snapshot()["pairing_token"]
+        device_b = bridge.pair(session2_pairing_token, "Android UA")
+
+        photo_a = bridge.add_photo(device_a.token, make_jpeg_bytes())
+        photo_b = bridge.add_photo(device_b.token, make_png_bytes())
+
+        result_a = bridge.device_photos(device_a.token)
+        result_b = bridge.device_photos(device_b.token)
+        assert [p.id for p in result_a] == [photo_a.id]
+        assert [p.id for p in result_b] == [photo_b.id]
+
+    def test_does_not_return_not_yet_ready_photos(self, bridge, paired):
+        photo = bridge.add_photo(paired.token, make_jpeg_bytes())
+        bridge._photos[photo.id].ready = False
+        result = bridge.device_photos(paired.token)
+        assert result == []
+
+    def test_unknown_token_raises_auth_error(self, bridge, paired):
+        with pytest.raises(AuthError):
+            bridge.device_photos("not-a-real-token")
+
+
 # ---------------------------------------------------------------------------
 # expire_if_idle()
 # ---------------------------------------------------------------------------
