@@ -186,3 +186,25 @@ def test_fallback_patterns_for_ocr_like_text():
     assert result["Equipment Type"] == "20GP"
     assert result["Q'ty"] == "3"
     assert result["Port Cargo Cut-off"] == "14/07/2026 02:00"
+
+
+@pytest.mark.parametrize("raw", ["2026-02-30", "30/02/2026", "31Apr26", "2026-13-01", "15/09/2026 25:00", "00/09/2026"])
+def test_parse_date_str_keeps_invalid_dates_unchanged(raw):
+    from backend.app.services.extractor import parse_date_str
+    assert parse_date_str(f"  {raw} ") == raw
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("29Feb28", "29/02/2028"),
+    ("2026-09-15 23:59", "15/09/2026 23:59"),
+    ("1/9/2026", "01/09/2026"),
+])
+def test_parse_date_str_valid_dates_still_normalized(raw, expected):
+    from backend.app.services.extractor import parse_date_str
+    assert parse_date_str(raw) == expected
+
+
+def test_parse_etd_with_invalid_etd_keeps_raw():
+    from backend.app.services.extractor import parse_etd
+    assert parse_etd("13Jul26/31Jun26") == "31Jun26"
+

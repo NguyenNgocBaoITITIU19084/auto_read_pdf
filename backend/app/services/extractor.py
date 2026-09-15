@@ -1,5 +1,6 @@
 import os
 import re
+from datetime import datetime
 from typing import List, Optional, Pattern, Tuple
 
 MONTH_MAP = {
@@ -13,12 +14,22 @@ _RE_ISO = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{
 _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 
 
-def _fmt_date(day: str, month: str, year: str, time_part: Optional[str]) -> str:
-    formatted = f"{int(day):02d}/{int(month):02d}/{year}"
-    if time_part:
-        hh, mm = time_part.split(":")
-        formatted += f" {int(hh):02d}:{mm}"
-    return formatted
+def _fmt_date(day: str, month: str, year: str, time_part: Optional[str]) -> Optional[str]:
+    """DD/MM/YYYY[ HH:MM], or None when the date/time does not exist (e.g. 30/02, 25:00)."""
+    try:
+        d = int(day)
+        m = int(month)
+        y = int(year)
+        if time_part:
+            hh_s, mm_s = time_part.split(":")
+            hh = int(hh_s)
+            mm = int(mm_s)
+            datetime(y, m, d, hh, mm)
+            return f"{d:02d}/{m:02d}/{y:04d} {hh:02d}:{mm:02d}"
+        datetime(y, m, d)
+        return f"{d:02d}/{m:02d}/{y:04d}"
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 def parse_date_str(date_str: str) -> str:
@@ -42,17 +53,23 @@ def parse_date_str(date_str: str) -> str:
         mon_num = MONTH_MAP.get(mon.lower(), "")
         if mon_num:
             year_full = f"20{yr}" if len(yr) == 2 else yr
-            return _fmt_date(day, mon_num, year_full, time_part)
+            formatted = _fmt_date(day, mon_num, year_full, time_part)
+            if formatted is not None:
+                return formatted
 
     m = _RE_ISO.match(date_str)
     if m:
         yr, mon, day, time_part = m.groups()
-        return _fmt_date(day, mon, yr, time_part)
+        formatted = _fmt_date(day, mon, yr, time_part)
+        if formatted is not None:
+            return formatted
 
     m = _RE_DMY.match(date_str)
     if m:
         day, mon, yr, time_part = m.groups()
-        return _fmt_date(day, mon, yr, time_part)
+        formatted = _fmt_date(day, mon, yr, time_part)
+        if formatted is not None:
+            return formatted
 
     return date_str
 
