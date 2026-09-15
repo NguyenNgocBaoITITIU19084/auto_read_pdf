@@ -25,3 +25,9 @@ E: all tasks complete as of 2026-09-15. Full suite green: pytest backend/tests (
 
 D2 (khớp voyage gần đúng): confirmed dropped by user 2026-09-15 (re-confirmed after audit flagged missing written record) — exact match stays as-is, no further action.
 D1 (OCR offline spike/integration): still not started — out of scope for this round per user's explicit prioritization (only chose E Task 2-4/6-8/9-10). Still blocked on real booking images + a Windows machine to test Windows OCR API.
+
+## Post-audit follow-up requests (2026-09-15, same day)
+Task 11 (standalone "Logs" tab in main nav, replacing modal-only access): complete (1af6973) — extracted LogViewerModal into shared LogViewerPanel, added full-page LogsTab, BackupModal's "Xem nhật ký" now navigates to the tab instead of opening a modal; old LogViewerModal removed.
+Task 12 (auto-purge logs older than 3 days): complete (e8d80bc) — `purge_old_logs()` in logging_setup.py deletes stale rotated backups by mtime and trims stale timestamped blocks (incl. multi-line tracebacks) from the active app.log/errors.log; registered as a daily AsyncIOScheduler job (`id="log_retention"`) plus a delayed startup kick, on top of the existing size-based rotation (5MB×5 / 2MB×3).
+Task 13 (bulk vessel lookup — pick a port instead of only auto-guessing): complete (c9706be) — "Tra tàu các booking đã chọn" now opens BulkVesselLookupModal with "Tự động theo bãi trả rỗng" (old default behavior, unchanged) vs "Chọn 1 cảng cho tất cả" (applies one PORT_OPTIONS site to every selected row, skips per-row depot guessing).
+Verified together: pytest backend/tests (94) + tests (145) + frontend vitest (45) + npm run build all pass; manually walked through all three in the running app (Logs tab, log entries with request-id, bulk lookup port picker).
