@@ -558,6 +558,48 @@ def insert_booking(col_id: int, data: dict) -> int:
         return _insert_booking_row(conn.cursor(), col_id, data)
 
 
+BOOKING_FIELD_MAP = {
+    "Tên file PDF": "pdf_name", "Booking No": "booking_no", "Carrier": "carrier",
+    "Port of Discharging": "port_of_discharging", "Place of Delivery": "place_of_delivery", "Block": "block_val",
+    "T/S Port": "ts_port", "Equipment Type": "equipment_type", "Q'ty": "qty", "Empty Pick Up CY": "empty_pickup_cy",
+    "Full return CY": "full_return_cy", "Port Cargo Cut-off": "cutoff_time", "Vessel": "vessel", "ETD": "etd",
+}
+
+
+def update_booking(booking_id: int, data: dict) -> dict | None:
+    columns = set(BOOKING_FIELD_MAP.values())
+    updates: dict[str, str] = {}
+    for key, value in (data or {}).items():
+        col = BOOKING_FIELD_MAP.get(key, key if key in columns else None)
+        if col:
+            updates[col] = "" if value is None else str(value)
+    with get_connection() as conn:
+        if not conn.execute("SELECT 1 FROM bookings WHERE id = ?;", (booking_id,)).fetchone():
+            return None
+        if updates:
+            assignments = ", ".join(f"{c} = ?" for c in updates)
+            conn.execute(f"UPDATE bookings SET {assignments} WHERE id = ?;", (*updates.values(), booking_id))
+    rows = get_bookings_by_ids([booking_id])
+    return rows[0] if rows else None
+
+
+def find_duplicate_booking_ids(col_id: int, booking_no: str, exclude_id: int | None = None) -> list[int]:
+    key = (booking_no or "").strip().upper()
+    if not key:
+        return []
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id FROM bookings WHERE collection_id = ? AND UPPER(TRIM(booking_no)) = ? AND id != ? ORDER BY id;",
+            (col_id, key, exclude_id if exclude_id is not None else -1)).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_booking_collection_id(booking_id: int) -> int | None:
+    with get_connection() as conn:
+        row = conn.execute("SELECT collection_id FROM bookings WHERE id = ?;", (booking_id,)).fetchone()
+    return row[0] if row else None
+
+
 BOOKING_SEARCH_COLUMNS = {
     "pdf_name", "booking_no", "carrier", "port_of_discharging", "place_of_delivery", "block_val",
     "ts_port", "equipment_type", "qty", "empty_pickup_cy", "full_return_cy", "cutoff_time", "vessel", "etd"
