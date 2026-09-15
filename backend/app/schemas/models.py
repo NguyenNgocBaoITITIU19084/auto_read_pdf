@@ -1,5 +1,5 @@
-from typing import Optional, List, Any
-from pydantic import BaseModel
+from typing import Optional, List, Any, Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 class CollectionCreate(BaseModel):
     name: str
@@ -7,11 +7,18 @@ class CollectionCreate(BaseModel):
 class CollectionUpdateSettings(BaseModel):
     settings: str
 
+class CollectionRename(BaseModel):
+    name: str
+
 class CollectionResponse(BaseModel):
     id: int
     name: str
     created_at: str
     settings: Optional[str] = None
+    booking_count: Optional[int] = None
+    vessel_count: Optional[int] = None
+    container_count: Optional[int] = None
+    watchlist_count: Optional[int] = None
 
 class BookingItem(BaseModel):
     id: Optional[int] = None
@@ -34,6 +41,11 @@ class VesselSearchRequest(BaseModel):
     site_id: str
     vessel_name: str
     voyage: Optional[str] = None
+    save: Optional[bool] = True
+
+class VesselSaveResultsRequest(BaseModel):
+    collection_id: int
+    items: List[dict]
 
 class VesselWatchlistAddRequest(BaseModel):
     collection_id: int
@@ -61,9 +73,52 @@ class ExportExcelRequest(BaseModel):
 class AutoSyncToggleRequest(BaseModel):
     enable: bool
     interval_minutes: Optional[int] = 10
+    mode: Optional[Literal["interval", "times"]] = None
+    times: Optional[List[str]] = None
 
 class BatchDeleteRequest(BaseModel):
     ids: List[int]
+
+class BatchIdsRequest(BaseModel):
+    ids: List[int]
+
+class VesselWatchlistItem(BaseModel):
+    site_id: Optional[str] = ""
+    vessel_name: str
+    voyage: Optional[str] = ""
+
+class VesselWatchlistBatchAddRequest(BaseModel):
+    collection_id: int
+    items: List[VesselWatchlistItem]
+
+class ContainerWatchlistItem(BaseModel):
+    site_id: Optional[str] = ""
+    container_no: str
+    event_type: Optional[str] = ""
+
+class ContainerWatchlistBatchAddRequest(BaseModel):
+    collection_id: int
+    items: List[ContainerWatchlistItem]
+
+class ResyncRequest(BaseModel):
+    ids: List[int]
+
+class ContainerResyncRequest(ResyncRequest):
+    all_events: Optional[bool] = False
+
+class ResyncResponse(BaseModel):
+    status: str
+    updated: int
+    not_found: List[str]
+    errors: List[str]
+
+class MoveItemsRequest(BaseModel):
+    entity: Literal["bookings", "vessels", "containers"]
+    ids: List[int]
+    target_collection_id: int
+    # JSON key is "copy"; renamed in Python to avoid shadowing BaseModel.copy
+    copy_items: Optional[bool] = Field(default=False, alias="copy")
+    model_config = ConfigDict(populate_by_name=True)
 
 class ColorRuleCreate(BaseModel):
     target_table: Optional[str] = "all"

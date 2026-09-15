@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Palette, Plus, Edit2, Trash2, RotateCcw, 
   Check, Eye, Sparkles, Filter, X
@@ -8,6 +8,16 @@ import { useApp } from '../../context/AppContext';
 import { ColorRule, MatchType, TargetTable } from '../../types';
 import { COLOR_PRESETS, getColorPreset } from '../../utils/colorPresets';
 import { Tooltip } from './Tooltip';
+
+const RULES_PAGE_SIZE = 40;
+
+const LIST_FILTERS: { value: TargetTable | 'every'; label: string }[] = [
+  { value: 'every', label: 'Tất cả' },
+  { value: 'container', label: 'Container' },
+  { value: 'booking', label: 'Booking' },
+  { value: 'vessel', label: 'Lịch tàu' },
+  { value: 'all', label: 'Mọi bảng' },
+];
 
 interface ColorConfigModalProps {
   isOpen: boolean;
@@ -56,6 +66,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
     ],
     container: [
       { key: 'all', label: t.common.allColumns },
+      { key: 'customs_status', label: (t.container.columns as Record<string, string>)['customs_status'] || t.common.customsStatus || 'Tình trạng thông quan' },
       { key: 'custom_clearance_status', label: t.container.columns['custom_clearance_status'] || 'Trạng thái HQ' },
       { key: 'infras_fee_status', label: t.container.columns['infras_fee_status'] || 'Phí hạ tầng' },
       { key: 'event_type', label: t.container.columns['event_type'] || 'Tác nghiệp' },
@@ -67,7 +78,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
       { key: 'location', label: t.container.columns['location'] || 'Vị trí bãi' },
       { key: 'im_exp', label: t.container.columns['im_exp'] || 'Nhập/Xuất' },
       { key: 'category', label: t.container.columns['category'] || 'Phân loại' },
-      { key: 'cust', label: t.container.columns['cust'] || 'Khách hàng' },
+      { key: 'cust', label: t.container.columns['cust'] || 'Giám sát HQ' },
       { key: 'stack', label: t.container.columns['stack'] || 'Stack' },
       { key: 'temp', label: t.container.columns['temp'] || 'Nhiệt độ' },
       { key: 'haz', label: t.container.columns['haz'] || 'Hàng nguy hiểm' },
@@ -103,6 +114,29 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
   const sortedRules = useMemo(() => {
     return [...colorRules].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
   }, [colorRules]);
+
+  // Long lists: filter by table group and render in pages ("show more") to keep the modal responsive
+  const [listFilter, setListFilter] = useState<TargetTable | 'every'>('every');
+  const [visibleCount, setVisibleCount] = useState(RULES_PAGE_SIZE);
+
+  const ruleCountsByTable = useMemo(() => {
+    const counts: Record<string, number> = {};
+    sortedRules.forEach((r) => {
+      counts[r.target_table] = (counts[r.target_table] || 0) + 1;
+    });
+    return counts;
+  }, [sortedRules]);
+
+  const filteredRules = useMemo(
+    () => (listFilter === 'every' ? sortedRules : sortedRules.filter((r) => r.target_table === listFilter)),
+    [sortedRules, listFilter]
+  );
+
+  useEffect(() => {
+    setVisibleCount(RULES_PAGE_SIZE);
+  }, [listFilter, isOpen]);
+
+  const visibleRules = filteredRules.length > visibleCount ? filteredRules.slice(0, visibleCount) : filteredRules;
 
   const handleStartEdit = (rule: ColorRule) => {
     setEditingId(rule.id || null);
@@ -476,13 +510,39 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
             </button>
           </div>
 
-          {sortedRules.length === 0 ? (
+          {sortedRules.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <Filter className="w-3 h-3 text-slate-400 mr-0.5" />
+              {LIST_FILTERS.map((f) => {
+                const n = f.value === 'every' ? sortedRules.length : ruleCountsByTable[f.value] || 0;
+                if (f.value !== 'every' && n === 0) return null;
+                const active = listFilter === f.value;
+                return (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => setListFilter(f.value)}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-colors ${
+                      active
+                        ? 'bg-primary-50 dark:bg-primary-950/60 text-primary-700 dark:text-primary-300 border-primary-300 dark:border-primary-700'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {f.label} <span className="opacity-60">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {filteredRules.length === 0 ? (
             <div className="text-center py-8 text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl">
               {t.common.noRulesFound}
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto pr-1">
-              {sortedRules.map((rule) => {
+            <div className="max-h-[300px] overflow-y-auto pr-1 space-y-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {visibleRules.map((rule, ruleIdx) => {
                 const preset = getColorPreset(rule.preset_id);
                 const badgeStyle = rule.custom_bg
                   ? {
@@ -505,7 +565,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
 
                 return (
                   <div
-                    key={rule.id}
+                    key={rule.id ?? `rule-${ruleIdx}`}
                     className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-all ${
                       rule.is_enabled
                         ? 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-2xs'
@@ -578,6 +638,21 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
                   </div>
                 );
               })}
+            </div>
+            {filteredRules.length > visibleRules.length && (
+              <div className="flex items-center justify-center gap-2 pt-1">
+                <span className="text-[11px] text-slate-400">
+                  {visibleRules.length}/{filteredRules.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount((c) => c + RULES_PAGE_SIZE)}
+                  className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                >
+                  {t.common.showMore}
+                </button>
+              </div>
+            )}
             </div>
           )}
         </div>

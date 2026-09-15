@@ -1,19 +1,27 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Collection, ColorRule } from '../types';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AutoSyncSchedule, AutoSyncStatus, Collection, ColorRule, RunSyncNowStatus } from '../types';
 import { Language, translations } from '../i18n/translations';
-import { 
-  getCollections, createCollection, deleteCollection,
-  getAutoSyncStatus, toggleAutoSyncApi,
-  getColorRulesApi, createColorRuleApi, updateColorRuleApi, deleteColorRuleApi, resetColorRulesApi
+import {
+  getCollections, createCollection, deleteCollection, renameCollectionApi,
+  getAutoSyncStatus, toggleAutoSyncApi, runSyncNowApi,
+  getColorRulesApi, createColorRuleApi, updateColorRuleApi, deleteColorRuleApi, resetColorRulesApi,
 } from '../services/api';
+import { buildColorRuleIndex, ColorRuleIndex, dedupeColorRules } from '../utils/colorPresets';
+import { useToastActions, ToastMessage, ToastType } from './ToastContext';
+import { tf } from '../services/i18nFormat';
+import { describeAutoSyncSchedule, normalizeSyncTimes } from '../services/autoSync';
 
-interface ToastMessage {
-  id: string;
-  type: 'success' | 'error' | 'info';
-  text: string;
+export type { ToastMessage, ToastType } from './ToastContext';
+
+const AUTO_SYNC_POLL_MS = 30000;
+const AUTO_SYNC_POLL_RUNNING_MS = 5000;
+
+export interface UpdateAutoSyncScheduleOptions {
+  /** Do not show the success toast (errors are still shown). */
+  silent?: boolean;
 }
 
-interface AppContextType {
+export interface AppContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: typeof translations.vi;
@@ -23,18 +31,32 @@ interface AppContextType {
   activeCollection: Collection | null;
   setActiveCollection: (col: Collection | null) => void;
   refreshCollections: () => Promise<void>;
-  handleCreateCollection: (name: string) => Promise<void>;
+  handleCreateCollection: (name: string) => Promise<Collection | null>;
   handleDeleteCollection: (id: number) => Promise<void>;
-  toasts: ToastMessage[];
-  addToast: (text: string, type?: 'success' | 'error' | 'info') => void;
+  handleRenameCollection: (id: number, name: string) => Promise<boolean>;
+  /** Stable reference (toasts state lives in ToastContext — use `useToast()` to read it). */
+  addToast: (text: string, type?: ToastType) => void;
+  /** Stable reference. */
   removeToast: (id: string) => void;
-  // Shared Auto Sync State
+  // Shared Auto Sync State (backend is the source of truth)
+  autoSyncStatus: AutoSyncStatus | null;
+  /** Derived from autoSyncStatus.enabled */
   autoSyncEnabled: boolean;
+  /** Derived from autoSyncStatus.interval_minutes */
   syncInterval: number;
+  refreshAutoSyncStatus: () => Promise<AutoSyncStatus | null>;
   toggleAutoSync: (enable?: boolean, interval?: number) => Promise<void>;
   updateSyncInterval: (newInterval: number) => Promise<void>;
+  updateAutoSyncSchedule: (
+    schedule: AutoSyncSchedule,
+    options?: UpdateAutoSyncScheduleOptions
+  ) => Promise<AutoSyncStatus | null>;
+  runSyncNow: () => Promise<RunSyncNowStatus | null>;
   // Color Rules State & Actions
+  /** Deduplicated rules */
   colorRules: ColorRule[];
+  /** Map-based lookup: active rules for a table/column (includes 'all' table/column rules). */
+  getRulesFor: (table: string, column: string) => ColorRule[];
   refreshColorRules: () => Promise<void>;
   saveColorRule: (rule: Partial<ColorRule>) => Promise<void>;
   deleteColorRuleById: (id: number) => Promise<void>;
@@ -44,7 +66,20 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
+// Separate, narrow context so cell components (ValueBadge) only re-render when rules change.
+const ColorRuleIndexContext = createContext<ColorRuleIndex | null>(null);
+
+const errorMessage = (e: any, fallback: string): string =>
+  (e?.response?.data?.detail && typeof e.response.data.detail === 'string' ? e.response.data.detail : '') ||
+  e?.message ||
+  fallback;
+
+const sameStatus = (a: AutoSyncStatus | null, b: AutoSyncStatus | null) =>
+  a === b || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { addToast, removeToast } = useToastActions();
+
   const [language, setLanguageState] = useState<Language>(() => {
     return (localStorage.getItem('app_lang') as Language) || 'vi';
   });
@@ -57,16 +92,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [collections, setCollections] = useState<Collection[]>([]);
   const [activeCollection, setActiveCollection] = useState<Collection | null>(null);
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
-  // Auto Sync state shared across all components (Header, Watchlist Modals, Settings)
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(false);
-  const [syncInterval, setSyncInterval] = useState<number>(() => {
-    const saved = localStorage.getItem('auto_sync_interval');
-    return saved && !isNaN(Number(saved)) ? Number(saved) : 10;
-  });
 
   const t = translations[language];
+  const tRef = useRef(t);
+  tRef.current = t;
 
   useEffect(() => {
     if (isDark) {
@@ -78,133 +107,257 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [isDark]);
 
-  // Fetch initial auto sync status on startup
-  useEffect(() => {
-    getAutoSyncStatus()
-      .then((res) => {
-        setAutoSyncEnabled(res.enabled);
-        if (res.interval_minutes) {
-          setSyncInterval(res.interval_minutes);
-          localStorage.setItem('auto_sync_interval', String(res.interval_minutes));
-        }
-      })
-      .catch(console.error);
-  }, []);
-
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
     localStorage.setItem('app_lang', lang);
-  };
+  }, []);
 
-  const setIsDark = (dark: boolean) => {
+  const setIsDark = useCallback((dark: boolean) => {
     setIsDarkState(dark);
-  };
+  }, []);
 
-  const addToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, type, text }]);
-    setTimeout(() => {
-      removeToast(id);
-    }, 4000);
-  };
-
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const refreshCollections = async () => {
+  // ---------------------------------------------------------------------------
+  // Collections
+  // ---------------------------------------------------------------------------
+  const refreshCollections = useCallback(async () => {
     try {
-      const cols = await getCollections();
+      const cols = await getCollections(true);
       setCollections(cols);
-      if (cols.length > 0) {
-        if (!activeCollection || !cols.some((c) => c.id === activeCollection.id)) {
-          setActiveCollection(cols[0]);
-        }
-      } else {
-        setActiveCollection(null);
-      }
+      setActiveCollection((prev) => {
+        if (cols.length === 0) return null;
+        const next = prev ? cols.find((c) => c.id === prev.id) : undefined;
+        if (!next) return cols[0];
+        return next.name === prev!.name && next.settings === prev!.settings ? prev : next;
+      });
     } catch (e: any) {
       console.error('Failed to load collections:', e);
     }
-  };
+  }, []);
 
-  const handleCreateCollection = async (name: string) => {
+  const handleCreateCollection = useCallback(async (name: string): Promise<Collection | null> => {
     try {
-      await createCollection(name);
-      addToast(t.common.success, 'success');
+      const created = await createCollection(name);
+      addToast(tRef.current.common.success, 'success');
       await refreshCollections();
+      return { id: created.id, name: created.name, created_at: '' };
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
+      return null;
     }
-  };
+  }, [addToast, refreshCollections]);
 
-  const handleDeleteCollection = async (id: number) => {
+  const handleDeleteCollection = useCallback(async (id: number) => {
     try {
       await deleteCollection(id);
-      addToast(t.common.success, 'success');
+      addToast(tRef.current.common.success, 'success');
       await refreshCollections();
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
     }
-  };
+  }, [addToast, refreshCollections]);
 
-  // Toggle Auto Sync handler
-  const toggleAutoSync = async (enable?: boolean, interval?: number) => {
+  const handleRenameCollection = useCallback(async (id: number, name: string): Promise<boolean> => {
     try {
-      const nextEnable = enable !== undefined ? enable : !autoSyncEnabled;
-      const targetInterval = interval !== undefined ? interval : syncInterval;
-      
-      const res = await toggleAutoSyncApi(nextEnable, targetInterval);
-      setAutoSyncEnabled(res.enabled);
-      setSyncInterval(targetInterval);
-      localStorage.setItem('auto_sync_interval', String(targetInterval));
+      await renameCollectionApi(id, name);
+      addToast(tRef.current.collections.renameSuccess, 'success');
+      await refreshCollections();
+      return true;
+    } catch (e: any) {
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
+      return false;
+    }
+  }, [addToast, refreshCollections]);
 
+  // ---------------------------------------------------------------------------
+  // Auto sync (backend is the source of truth; polled while the app is visible)
+  // ---------------------------------------------------------------------------
+  const [autoSyncStatus, setAutoSyncStatus] = useState<AutoSyncStatus | null>(null);
+  const autoSyncStatusRef = useRef<AutoSyncStatus | null>(null);
+  const statusRequestRef = useRef<Promise<AutoSyncStatus | null> | null>(null);
+
+  const applyAutoSyncStatus = useCallback((next: AutoSyncStatus | null) => {
+    if (next) {
+      next = { ...next, times: normalizeSyncTimes(next.times) };
+    }
+    const prev = autoSyncStatusRef.current;
+    if (sameStatus(prev, next)) return;
+    autoSyncStatusRef.current = next;
+    setAutoSyncStatus(next);
+  }, []);
+
+  const refreshAutoSyncStatus = useCallback((): Promise<AutoSyncStatus | null> => {
+    // Skip if a request is already in flight — reuse it.
+    if (statusRequestRef.current) return statusRequestRef.current;
+    const req = getAutoSyncStatus()
+      .then((status) => {
+        applyAutoSyncStatus(status);
+        return status;
+      })
+      .catch((e) => {
+        console.error('Failed to load auto sync status:', e);
+        return null;
+      })
+      .finally(() => {
+        statusRequestRef.current = null;
+      });
+    statusRequestRef.current = req;
+    return req;
+  }, [applyAutoSyncStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Bumped on visibility change so an in-flight tick from the previous chain doesn't reschedule
+    let generation = 0;
+
+    const schedule = () => {
+      if (cancelled || document.hidden) return;
+      const delay = autoSyncStatusRef.current?.running ? AUTO_SYNC_POLL_RUNNING_MS : AUTO_SYNC_POLL_MS;
+      timer = setTimeout(tick, delay);
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+      const gen = generation;
+      if (!document.hidden) {
+        await refreshAutoSyncStatus();
+      }
+      if (gen !== generation) return;
+      schedule();
+    };
+
+    const onVisibilityChange = () => {
+      generation += 1;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      if (!document.hidden) tick();
+    };
+
+    tick();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [refreshAutoSyncStatus]);
+
+  const autoSyncEnabled = autoSyncStatus?.enabled ?? false;
+  const syncInterval = autoSyncStatus?.interval_minutes ?? 10;
+
+  // Tell Electron main process whether closing the window should hide to tray.
+  useEffect(() => {
+    if (autoSyncStatus === null) return;
+    try {
+      window.electronAPI?.setAutoSyncActive?.(autoSyncEnabled);
+    } catch (e) {
+      console.warn('setAutoSyncActive failed:', e);
+    }
+  }, [autoSyncEnabled, autoSyncStatus === null]);
+
+  const toggleAutoSync = useCallback(async (enable?: boolean, interval?: number) => {
+    const tt = tRef.current;
+    const cur = autoSyncStatusRef.current;
+    const nextEnable = enable !== undefined ? enable : !(cur?.enabled ?? false);
+    const targetInterval = interval !== undefined && interval > 0 ? interval : cur?.interval_minutes ?? 10;
+    const mode = cur?.mode ?? 'interval';
+    const times = cur?.times ?? [];
+    try {
+      const res = await toggleAutoSyncApi(nextEnable, targetInterval, { mode, times });
+      applyAutoSyncStatus(res);
+      const fresh = await refreshAutoSyncStatus();
+      const effective = fresh || res;
       addToast(
-        nextEnable
-          ? `Đã BẬT tự động đồng bộ (Đang chạy đồng bộ ngay và lặp lại mỗi ${targetInterval} phút)`
-          : `Đã TẮT tự động đồng bộ`,
-        nextEnable ? 'success' : 'info'
+        effective.enabled
+          ? tf(tt.autoSync.enabledToast, {
+              schedule: describeAutoSyncSchedule(effective, tt.autoSync),
+            })
+          : tt.autoSync.disabledToast,
+        effective.enabled ? 'success' : 'info'
       );
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tt.common.error), 'error');
     }
-  };
+  }, [addToast, applyAutoSyncStatus, refreshAutoSyncStatus]);
 
-  // Update interval handler
-  const updateSyncInterval = async (newInterval: number) => {
+  const updateAutoSyncSchedule = useCallback(async (
+    schedule: AutoSyncSchedule,
+    options: UpdateAutoSyncScheduleOptions = {}
+  ): Promise<AutoSyncStatus | null> => {
+    const tt = tRef.current;
+    const cur = autoSyncStatusRef.current;
+    const intervalMinutes = Math.round(Number(schedule.interval_minutes));
+    const times = normalizeSyncTimes(schedule.times);
+
+    if (schedule.mode === 'interval' && (!Number.isFinite(intervalMinutes) || intervalMinutes < 1)) {
+      addToast(tt.autoSync.invalidInterval, 'error');
+      return null;
+    }
+    if (schedule.mode === 'times' && times.length === 0) {
+      addToast(tt.autoSync.invalidTimes, 'error');
+      return null;
+    }
+
+    try {
+      const res = await toggleAutoSyncApi(
+        cur?.enabled ?? false,
+        Number.isFinite(intervalMinutes) && intervalMinutes >= 1 ? intervalMinutes : cur?.interval_minutes ?? 10,
+        { mode: schedule.mode, times }
+      );
+      applyAutoSyncStatus(res);
+      const fresh = await refreshAutoSyncStatus();
+      if (!options.silent) addToast(tt.autoSync.saved, 'success');
+      return fresh || res;
+    } catch (e: any) {
+      addToast(errorMessage(e, tt.common.error), 'error');
+      return null;
+    }
+  }, [addToast, applyAutoSyncStatus, refreshAutoSyncStatus]);
+
+  const updateSyncInterval = useCallback(async (newInterval: number) => {
     if (isNaN(newInterval) || newInterval < 1) {
-      addToast('Vui lòng nhập số phút hợp lệ (tối thiểu 1 phút)', 'info');
+      addToast(tRef.current.autoSync.invalidInterval, 'info');
       return;
     }
+    const cur = autoSyncStatusRef.current;
+    await updateAutoSyncSchedule({ mode: 'interval', interval_minutes: newInterval, times: cur?.times ?? [] });
+  }, [addToast, updateAutoSyncSchedule]);
 
-    setSyncInterval(newInterval);
-    localStorage.setItem('auto_sync_interval', String(newInterval));
-
-    if (autoSyncEnabled) {
-      try {
-        await toggleAutoSyncApi(true, newInterval);
-        addToast(`Đã đổi chu kỳ tự động đồng bộ: mỗi ${newInterval} phút!`, 'success');
-      } catch (e: any) {
-        addToast(e.message || 'Lỗi cập nhật chu kỳ', 'error');
-      }
-    } else {
-      addToast(`Đã lưu chu kỳ: ${newInterval} phút (sẽ áp dụng khi bật Auto Sync)`, 'info');
+  const runSyncNow = useCallback(async (): Promise<RunSyncNowStatus | null> => {
+    const tt = tRef.current;
+    try {
+      const res = await runSyncNowApi();
+      const status: RunSyncNowStatus = res?.status === 'already_running' ? 'already_running' : 'started';
+      addToast(status === 'started' ? tt.autoSync.runStarted : tt.autoSync.alreadyRunning, status === 'started' ? 'success' : 'info');
+      const cur = autoSyncStatusRef.current;
+      if (cur && !cur.running) applyAutoSyncStatus({ ...cur, running: true });
+      setTimeout(() => {
+        refreshAutoSyncStatus();
+      }, 1500);
+      return status;
+    } catch (e: any) {
+      addToast(errorMessage(e, tt.common.error), 'error');
+      return null;
     }
-  };
+  }, [addToast, applyAutoSyncStatus, refreshAutoSyncStatus]);
 
-  // Color Rules state & handlers
+  // ---------------------------------------------------------------------------
+  // Color rules
+  // ---------------------------------------------------------------------------
   const [colorRules, setColorRules] = useState<ColorRule[]>([]);
+  const colorRuleIndex = useMemo(() => buildColorRuleIndex(colorRules), [colorRules]);
+  const getRulesFor = colorRuleIndex.getRulesFor;
 
-  const refreshColorRules = async () => {
+  const refreshColorRules = useCallback(async () => {
     try {
       const rules = await getColorRulesApi();
-      setColorRules(rules);
+      setColorRules(dedupeColorRules(Array.isArray(rules) ? rules : []));
     } catch (e) {
       console.error('Failed to load color rules:', e);
     }
-  };
+  }, []);
 
-  const saveColorRule = async (rule: Partial<ColorRule>) => {
+  const saveColorRule = useCallback(async (rule: Partial<ColorRule>) => {
     try {
       if (rule.id) {
         await updateColorRuleApi(rule.id, rule);
@@ -212,78 +365,94 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await createColorRuleApi(rule);
       }
       await refreshColorRules();
-      addToast(t.common.success, 'success');
+      addToast(tRef.current.common.success, 'success');
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
     }
-  };
+  }, [addToast, refreshColorRules]);
 
-  const deleteColorRuleById = async (id: number) => {
+  const deleteColorRuleById = useCallback(async (id: number) => {
     try {
       await deleteColorRuleApi(id);
       await refreshColorRules();
-      addToast(t.common.success, 'success');
+      addToast(tRef.current.common.success, 'success');
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
     }
-  };
+  }, [addToast, refreshColorRules]);
 
-  const toggleColorRule = async (id: number, enabled: boolean) => {
+  const toggleColorRule = useCallback(async (id: number, enabled: boolean) => {
     try {
       await updateColorRuleApi(id, { is_enabled: enabled });
       setColorRules((prev) =>
         prev.map((r) => (r.id === id ? { ...r, is_enabled: enabled } : r))
       );
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
     }
-  };
+  }, [addToast]);
 
-  const resetColorRulesDefault = async () => {
+  const resetColorRulesDefault = useCallback(async () => {
     try {
       const reset = await resetColorRulesApi();
-      setColorRules(reset);
-      addToast(t.common.success, 'success');
+      setColorRules(dedupeColorRules(Array.isArray(reset) ? reset : []));
+      addToast(tRef.current.common.success, 'success');
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, tRef.current.common.error), 'error');
     }
-  };
+  }, [addToast]);
 
   useEffect(() => {
     refreshCollections();
     refreshColorRules();
-  }, []);
+  }, [refreshCollections, refreshColorRules]);
+
+  const value = useMemo<AppContextType>(() => ({
+    language,
+    setLanguage,
+    t,
+    isDark,
+    setIsDark,
+    collections,
+    activeCollection,
+    setActiveCollection,
+    refreshCollections,
+    handleCreateCollection,
+    handleDeleteCollection,
+    handleRenameCollection,
+    addToast,
+    removeToast,
+    autoSyncStatus,
+    autoSyncEnabled,
+    syncInterval,
+    refreshAutoSyncStatus,
+    toggleAutoSync,
+    updateSyncInterval,
+    updateAutoSyncSchedule,
+    runSyncNow,
+    colorRules,
+    getRulesFor,
+    refreshColorRules,
+    saveColorRule,
+    deleteColorRuleById,
+    toggleColorRule,
+    resetColorRulesDefault,
+  }), [
+    language, setLanguage, t, isDark, setIsDark,
+    collections, activeCollection, refreshCollections, handleCreateCollection, handleDeleteCollection,
+    handleRenameCollection,
+    addToast, removeToast,
+    autoSyncStatus, autoSyncEnabled, syncInterval, refreshAutoSyncStatus, toggleAutoSync,
+    updateSyncInterval, updateAutoSyncSchedule, runSyncNow,
+    colorRules, getRulesFor, refreshColorRules, saveColorRule, deleteColorRuleById, toggleColorRule,
+    resetColorRulesDefault,
+  ]);
 
   return (
-    <AppContext.Provider
-      value={{
-        language,
-        setLanguage,
-        t,
-        isDark,
-        setIsDark,
-        collections,
-        activeCollection,
-        setActiveCollection,
-        refreshCollections,
-        handleCreateCollection,
-        handleDeleteCollection,
-        toasts,
-        addToast,
-        removeToast,
-        autoSyncEnabled,
-        syncInterval,
-        toggleAutoSync,
-        updateSyncInterval,
-        colorRules,
-        refreshColorRules,
-        saveColorRule,
-        deleteColorRuleById,
-        toggleColorRule,
-        resetColorRulesDefault,
-      }}
-    >
-      {children}
+    <AppContext.Provider value={value}>
+      <ColorRuleIndexContext.Provider value={colorRuleIndex}>
+        {children}
+      </ColorRuleIndexContext.Provider>
     </AppContext.Provider>
   );
 };
@@ -294,4 +463,16 @@ export const useApp = () => {
     throw new Error('useApp must be used within an AppProvider');
   }
   return context;
+};
+
+/**
+ * Narrow subscription to the color rule Map lookup. Components using only this hook
+ * re-render when rules change — not on collection/auto-sync/language changes.
+ */
+export const useColorRuleLookup = (): ((table: string, column: string) => ColorRule[]) => {
+  const index = useContext(ColorRuleIndexContext);
+  if (!index) {
+    throw new Error('useColorRuleLookup must be used within an AppProvider');
+  }
+  return index.getRulesFor;
 };

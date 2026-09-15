@@ -1,8 +1,7 @@
-import React from 'react';
-import { ColumnDef } from './ColumnConfigModal';
+import type { ColumnDef } from './ColumnConfigModal';
 
 interface TableSkeletonProps {
-  columns: ColumnDef[];
+  columns?: ColumnDef[];
   columnWidths?: Record<string, number>;
   rowCount?: number;
   hasCheckbox?: boolean;
@@ -10,8 +9,14 @@ interface TableSkeletonProps {
   actionColClass?: string;
 }
 
+const DEFAULT_SKELETON_COLS: ColumnDef[] = Array.from({ length: 8 }, (_, i) => ({
+  key: `col_${i}`,
+  label: '',
+  visible: true,
+}));
+
 export const TableSkeleton: React.FC<TableSkeletonProps> = ({
-  columns,
+  columns = DEFAULT_SKELETON_COLS,
   columnWidths = {},
   rowCount = 8,
   hasCheckbox = false,

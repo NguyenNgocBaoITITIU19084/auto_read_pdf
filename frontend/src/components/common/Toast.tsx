@@ -1,14 +1,14 @@
 import React from 'react';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { useToast } from '../../context/ToastContext';
 
 export const ToastContainer: React.FC = () => {
-  const { toasts, removeToast } = useApp();
+  const { toasts, removeToast } = useToast();
 
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none">
+    <div className="fixed bottom-5 right-5 z-[70] flex flex-col gap-2 pointer-events-none" role="status" aria-live="polite">
       {toasts.map((toast) => (
         <div
           key={toast.id}

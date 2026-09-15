@@ -1,10 +1,13 @@
 import React from 'react';
-import { Copy, Check, Box, Clock, CheckCircle2, MapPin, Anchor } from 'lucide-react';
+import { Copy, Check, Box, Clock, CheckCircle2, MapPin, Anchor, ShieldCheck, ChevronRight, AlertTriangle } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { ContainerInfo } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { formatTimeAgo, isRecentUpdate } from '../../utils/formatters';
 import { getPortDisplayName } from '../../utils/ports';
+import { ValueBadge } from '../common/ValueBadge';
+import { copyTextToClipboard } from '../../utils/formatters';
+import { CustomsStatusBadge, ImdgLink, getCustomsStatus, getImdgInfo, sanitizeDisplayValue } from './customs';
 
 interface ContainerDetailModalProps {
   isOpen: boolean;
@@ -24,11 +27,31 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
 
   const copyField = (val: string, keyName: string) => {
     if (!val || val === 'null') return;
-    navigator.clipboard.writeText(val);
-    setCopiedKey(keyName);
-    addToast(t.common.copySuccess, 'success');
-    setTimeout(() => setCopiedKey(null), 1500);
+    copyTextToClipboard(val).then((ok) => {
+      if (!ok) {
+        addToast(t.common.error, 'error');
+        return;
+      }
+      setCopiedKey(keyName);
+      addToast(t.common.copySuccess, 'success');
+      setTimeout(() => setCopiedKey(null), 1500);
+    });
   };
+
+  const renderCopyButton = (value: string, keyName: string, title?: string) => (
+    <button
+      type="button"
+      onClick={() => copyField(value, keyName)}
+      className="text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 p-0.5 rounded transition-colors"
+      title={title || t.common.copy}
+    >
+      {copiedKey === keyName ? (
+        <Check className="w-3.5 h-3.5 text-emerald-500" />
+      ) : (
+        <Copy className="w-3.5 h-3.5" />
+      )}
+    </button>
+  );
 
   const isRecent = isRecentUpdate(container.queried_at, 45);
   const portName = getPortDisplayName(container.site_id, language);
@@ -48,7 +71,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
     },
     {
       title: "Hải quan & Phí hạ tầng",
-      fields: ["custom_clearance_status", "cust_approval_date", "cust", "infras_fee_status"]
+      fields: ["customs_status", "infras_fee_status"]
     },
     {
       title: "Thời gian & Ghi chú",
@@ -144,8 +167,72 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
                   {section.fields.map((key) => {
                     const label = (t.container.columns as Record<string, string>)[key] || key;
-                    let val = container[key] !== undefined && container[key] !== null ? container[key] : 'null';
-                    
+
+                    // Merged customs status: "Tình trạng thông quan" (badge + approval date)
+                    if (key === 'customs_status') {
+                      const status = getCustomsStatus(container);
+                      const approval = container.cust_approval_date && container.cust_approval_date !== 'null'
+                        ? String(container.cust_approval_date)
+                        : '';
+                      return (
+                        <div
+                          key={key}
+                          className={`col-span-2 p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                            status
+                              ? 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-xs'
+                              : 'bg-slate-50/50 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                              <ShieldCheck className="w-3 h-3" />
+                              {label}
+                            </span>
+                            {status && renderCopyButton(approval ? `${status} (${approval})` : status, key)}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                            <CustomsStatusBadge row={container} showDate={false} />
+                            {approval && (
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                                {t.container.approvalDate}: <strong className="text-slate-700 dark:text-slate-200">{approval}</strong>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Dangerous goods: text + IMDG lookup link (never raw HTML)
+                    if (key === 'haz') {
+                      const { text, url } = getImdgInfo(container);
+                      const hasValue = !!(text || url);
+                      return (
+                        <div
+                          key={key}
+                          className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                            hasValue
+                              ? 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-xs'
+                              : 'bg-slate-50/50 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                              {url && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+                              {label}
+                            </span>
+                            {hasValue && renderCopyButton(url || text, key, url ? t.container.copyLink : undefined)}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+                            {text && <span className="text-slate-900 dark:text-slate-100 break-words">{text}</span>}
+                            {url && <ImdgLink url={url} label={t.container.imdgLookup} />}
+                            {!hasValue && <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">null</span>}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    let val = container[key] !== undefined && container[key] !== null ? sanitizeDisplayValue(container[key]) : 'null';
+
                     // Special display for site_id to include full port name
                     if (key === 'site_id' && val && val !== 'null') {
                       val = `${val} - ${portName}`;
@@ -169,30 +256,40 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                           <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
                             {label}
                           </span>
-                          {!isNull && (
-                            <button
-                              type="button"
-                              onClick={() => copyField(String(val), key)}
-                              className="text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 p-0.5 rounded transition-colors"
-                              title={t.common.copy}
-                            >
-                              {copiedKey === key ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-500" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          )}
+                          {!isNull && renderCopyButton(String(val), key)}
                         </div>
                         <div className={`text-xs font-semibold break-words whitespace-pre-line ${
                           isNull ? 'text-slate-400 dark:text-slate-500 italic text-[11px]' : 'text-slate-900 dark:text-slate-100'
                         }`}>
-                          {String(val)}
+                          {key === 'infras_fee_status' && !isNull ? (
+                            <ValueBadge table="container" columnKey={key} value={val} fallbackText="null" />
+                          ) : (
+                            String(val)
+                          )}
                         </div>
                       </div>
                     );
                   })}
                 </div>
+                {section.fields.includes('customs_status') && (
+                  <details className="group text-[11px] text-slate-500 dark:text-slate-400">
+                    <summary className="inline-flex items-center gap-1 cursor-pointer select-none font-semibold hover:text-slate-700 dark:hover:text-slate-200 list-none [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+                      {t.container.rawCustomsDetails}
+                    </summary>
+                    <div className="mt-1 ml-4 flex flex-wrap gap-x-4 gap-y-0.5 font-mono">
+                      {(['custom_clearance_status', 'cust', 'cust_approval_date'] as const).map((rawKey) => {
+                        const rawVal = container[rawKey];
+                        const shown = rawVal === undefined || rawVal === null || rawVal === '' ? 'null' : String(sanitizeDisplayValue(rawVal));
+                        return (
+                          <span key={rawKey}>
+                            {(t.container.columns as Record<string, string>)[rawKey] || rawKey}: <strong className="text-slate-700 dark:text-slate-300">{shown}</strong>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
               </div>
             );
           })}

@@ -159,9 +159,11 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
 ];
 
+const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));
+
 export function getColorPreset(presetId?: string): ColorPreset | undefined {
   if (!presetId) return undefined;
-  return COLOR_PRESETS.find((p) => p.id === presetId);
+  return PRESET_BY_ID.get(presetId);
 }
 
 /**
@@ -266,4 +268,102 @@ export function findMatchingColorRule(
   });
 
   return matchingCandidates[0].rule;
+}
+
+// ---------------------------------------------------------------------------
+// Fast lookup index (avoid scanning every rule for every table cell)
+// ---------------------------------------------------------------------------
+
+const ruleIdentity = (rule: ColorRule): string =>
+  [
+    rule.target_table,
+    rule.column_key,
+    (rule.match_value || '').trim().toUpperCase(),
+    rule.match_type || 'exact',
+  ].join('|');
+
+/**
+ * Removes duplicated rules (same target_table / column_key / match_value / match_type).
+ * The newest rule (highest id, or latest position) is kept because it is the one that
+ * would win in `findMatchingColorRule` anyway. Original relative order is preserved.
+ */
+export function dedupeColorRules(rules: ColorRule[]): ColorRule[] {
+  if (!Array.isArray(rules) || rules.length === 0) return [];
+  const winner = new Map<string, { rule: ColorRule; order: number; enabled: boolean }>();
+  rules.forEach((rule, idx) => {
+    if (!rule) return;
+    const key = ruleIdentity(rule);
+    const order = typeof rule.id === 'number' ? rule.id : idx;
+    const enabled = Boolean(rule.is_enabled);
+    const current = winner.get(key);
+    // Prefer an enabled duplicate over a disabled one, then the newest
+    if (!current || (enabled && !current.enabled) || (enabled === current.enabled && order >= current.order)) {
+      winner.set(key, { rule, order, enabled });
+    }
+  });
+  if (winner.size === rules.length) return rules;
+  const keep = new Set<ColorRule>();
+  winner.forEach(({ rule }) => keep.add(rule));
+  return rules.filter((r) => keep.has(r));
+}
+
+export interface ColorRuleIndex {
+  /** Active (enabled) rules applicable to a cell of `table`/`column`, including 'all' table/column rules. */
+  getRulesFor: (table: string, column: string) => ColorRule[];
+  /** Total active rules in the index */
+  size: number;
+}
+
+const bucketKey = (table: string, column: string) => `${table}|${column}`;
+
+/**
+ * Builds a Map keyed `${table}|${column}` once. `getRulesFor` merges the specific bucket
+ * with the 'all' table / 'all' column buckets and caches the merged array per key, so each
+ * cell lookup is O(1) + O(rules for that column).
+ */
+export function buildColorRuleIndex(rules: ColorRule[]): ColorRuleIndex {
+  const buckets = new Map<string, ColorRule[]>();
+  const position = new Map<ColorRule, number>();
+  let size = 0;
+
+  rules.forEach((rule, idx) => {
+    if (!rule || !rule.is_enabled) return;
+    position.set(rule, idx);
+    const key = bucketKey(rule.target_table || 'all', rule.column_key || 'all');
+    const list = buckets.get(key);
+    if (list) list.push(rule);
+    else buckets.set(key, [rule]);
+    size += 1;
+  });
+
+  const merged = new Map<string, ColorRule[]>();
+  const EMPTY: ColorRule[] = [];
+
+  const getRulesFor = (table: string, column: string): ColorRule[] => {
+    const key = bucketKey(table, column);
+    const cached = merged.get(key);
+    if (cached) return cached;
+
+    const keys = new Set<string>([
+      bucketKey(table, column),
+      bucketKey(table, 'all'),
+      bucketKey('all', column),
+      bucketKey('all', 'all'),
+    ]);
+    let result: ColorRule[] = [];
+    keys.forEach((k) => {
+      const list = buckets.get(k);
+      if (list) result = result.concat(list);
+    });
+    if (result.length === 0) {
+      result = EMPTY;
+    } else if (keys.size > 1) {
+      // Preserve original order so index-based tie-breaking stays identical
+      result.sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0));
+    }
+    merged.set(key, result);
+    return result;
+  };
+
+  return { getRulesFor, size };
 }
