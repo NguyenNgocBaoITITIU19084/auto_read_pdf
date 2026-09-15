@@ -1,30 +1,70 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Upload, Sparkles, RefreshCw, Check, X, RotateCw, ZoomIn, ZoomOut, 
-  Maximize2, Image as ImageIcon, AlertCircle, FileText, ChevronDown, ChevronUp, Key, Settings
+  Maximize2, Image as ImageIcon, AlertCircle, AlertTriangle, FileText, ChevronDown, ChevronUp, Key, Settings,
+  ClipboardPaste, Loader2, Ship
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
-import { Booking } from '../../types';
-import { extractBookingImageApi, saveManualBookingApi } from '../../services/api';
+import { useToastActions } from '../../context/ToastContext';
+import { Booking, ImageExtractEngine } from '../../types';
+import { extractBookingImageDetailedApi, saveManualBookingApi } from '../../services/api';
 import { AISettingsCard } from '../common/AISettingsCard';
+import { tf } from '../../services/i18nFormat';
+import { getCarrierBadgeClass } from './carriers';
+import { isImageFile, isPdfFile, readClipboardImageFile } from './clipboard';
+import { QuickVesselSearch } from './QuickVesselSearch';
+import { getBookingVesselCandidates } from '../../utils/vessel';
 
 interface ImageBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialImageFile?: File | null;
-  initialImageBlob?: Blob | null;
+  /** File to preview + extract immediately (e.g. pasted from clipboard / dropped). A new File object re-triggers extraction. */
+  initialFile?: File | null;
   onSavedSuccess?: (savedBooking: Booking) => void;
+  /** PDFs picked / dropped inside the modal are handed back to the parent for normal upload */
+  onPdfFiles?: (files: File[]) => void;
 }
+
+const EMPTY_FIELDS: Partial<Booking> = {
+  "Tên file PDF": "",
+  "Booking No": "",
+  "Carrier": "",
+  "Port of Discharging": "",
+  "Place of Delivery": "",
+  "Block": "",
+  "T/S Port": "",
+  "Equipment Type": "",
+  "Q'ty": "",
+  "Empty Pick Up CY": "",
+  "Full return CY": "",
+  "Port Cargo Cut-off": "",
+  "Pre Carrier": "",
+  "ETD_Pre": "",
+  "Trunk Vessel": "",
+  "ETD_Trunk": "",
+  "Vessel": "",
+  "ETD": ""
+};
+
+/** Fields that indicate a real extraction (Carrier alone is not enough — it can be guessed from noise). */
+const KEY_FIELDS = [
+  "Booking No", "Vessel", "Pre Carrier", "Trunk Vessel", "ETD", "Port of Discharging",
+  "Place of Delivery", "Equipment Type", "Q'ty", "Empty Pick Up CY", "Full return CY", "Port Cargo Cut-off",
+];
+
+const hasValue = (v: unknown) =>
+  v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim().toLowerCase() !== 'null';
 
 export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
   isOpen,
   onClose,
-  initialImageFile,
-  initialImageBlob,
-  onSavedSuccess
+  initialFile,
+  onSavedSuccess,
+  onPdfFiles,
 }) => {
-  const { t, activeCollection, addToast } = useApp();
+  const { t, activeCollection } = useApp();
+  const { addToast } = useToastActions();
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   
@@ -37,103 +77,136 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
   const [saving, setSaving] = useState<boolean>(false);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [showAISettings, setShowAISettings] = useState<boolean>(false);
+  const [engineUsed, setEngineUsed] = useState<ImageExtractEngine | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [readingClipboard, setReadingClipboard] = useState<boolean>(false);
+  const [quickVesselBooking, setQuickVesselBooking] = useState<Partial<Booking> | null>(null);
   
   // Form fields
-  const [fields, setFields] = useState<Partial<Booking>>({
-    "Tên file PDF": "",
-    "Booking No": "",
-    "Carrier": "",
-    "Port of Discharging": "",
-    "Place of Delivery": "",
-    "Block": "",
-    "T/S Port": "",
-    "Equipment Type": "",
-    "Q'ty": "",
-    "Empty Pick Up CY": "",
-    "Full return CY": "",
-    "Port Cargo Cut-off": "",
-    "Pre Carrier": "",
-    "ETD_Pre": "",
-    "Trunk Vessel": "",
-    "ETD_Trunk": "",
-    "Vessel": "",
-    "ETD": ""
-  });
+  const [fields, setFields] = useState<Partial<Booking>>(EMPTY_FIELDS);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Incremented for every extraction / reset so stale responses are ignored */
+  const requestIdRef = useRef(0);
 
-  // Initialize or reset when modal opens or initial file changes
+  // Object URL lifecycle: create for the current file, revoke the previous one and on unmount
   useEffect(() => {
-    if (isOpen) {
-      if (initialImageFile) {
-        processFile(initialImageFile);
-      } else if (initialImageBlob) {
-        const file = new File([initialImageBlob], `pasted_booking_${Date.now()}.png`, { type: initialImageBlob.type || 'image/png' });
-        processFile(file);
-      } else {
-        resetState();
-      }
-    } else {
-      resetState();
+    if (!imageFile) {
+      setImagePreviewUrl(null);
+      return;
     }
-  }, [isOpen, initialImageFile, initialImageBlob]);
+    const url = URL.createObjectURL(imageFile);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageFile]);
 
-  const resetState = () => {
+  // Invalidate in-flight extraction on unmount
+  useEffect(() => () => {
+    requestIdRef.current += 1;
+  }, []);
+
+  const resetState = useCallback(() => {
+    requestIdRef.current += 1;
     setImageFile(null);
-    if (imagePreviewUrl) {
-      URL.revokeObjectURL(imagePreviewUrl);
-    }
-    setImagePreviewUrl(null);
     setZoom(1);
     setRotation(0);
     setExtracting(false);
     setSaving(false);
-    setFields({
-      "Tên file PDF": "",
-      "Booking No": "",
-      "Carrier": "",
-      "Port of Discharging": "",
-      "Place of Delivery": "",
-      "Block": "",
-      "T/S Port": "",
-      "Equipment Type": "",
-      "Q'ty": "",
-      "Empty Pick Up CY": "",
-      "Full return CY": "",
-      "Port Cargo Cut-off": "",
-      "Pre Carrier": "",
-      "ETD_Pre": "",
-      "Trunk Vessel": "",
-      "ETD_Trunk": "",
-      "Vessel": "",
-      "ETD": ""
-    });
-  };
-
-  const processFile = async (file: File) => {
-    setImageFile(file);
-    const url = URL.createObjectURL(file);
-    setImagePreviewUrl(url);
-    setZoom(1);
-    setRotation(0);
-    await triggerExtraction(file);
-  };
+    setEngineUsed(null);
+    setWarnings([]);
+    setQuickVesselBooking(null);
+    setFields(EMPTY_FIELDS);
+  }, []);
 
   const triggerExtraction = async (fileToExtract: File) => {
+    const reqId = ++requestIdRef.current;
+    setExtracting(true);
+    setEngineUsed(null);
+    setWarnings([]);
     try {
-      setExtracting(true);
-      const data = await extractBookingImageApi(fileToExtract);
-      setFields((prev) => ({
-        ...prev,
+      const result = await extractBookingImageDetailedApi(fileToExtract);
+      if (reqId !== requestIdRef.current) return; // a newer paste / reset superseded this response
+      const data = result.data || {};
+      const resultWarnings = (result.warnings || []).filter((w) => typeof w === 'string' && w.trim());
+      setEngineUsed(result.engine_used);
+      setWarnings(resultWarnings);
+      setFields({
+        ...EMPTY_FIELDS,
         ...data,
-        "Tên file PDF": fileToExtract.name || prev["Tên file PDF"] || "booking_image.jpg"
-      }));
-      addToast(t.booking.imageModal.extractSuccess, 'success');
+        "Tên file PDF": fileToExtract.name || "booking_image.jpg"
+      });
+      const extractedSomething = KEY_FIELDS.some((k) => hasValue((data as Record<string, unknown>)[k]));
+      if (!extractedSomething) {
+        addToast(resultWarnings[0] || t.booking.paste.extractEmpty, 'error');
+      } else if (resultWarnings.length > 0) {
+        addToast(t.booking.paste.extractWithWarnings, 'info');
+      } else {
+        addToast(t.booking.imageModal.extractSuccess, 'success');
+      }
     } catch (e: any) {
+      if (reqId !== requestIdRef.current) return;
       console.error(e);
-      addToast(e.message || t.booking.imageModal.extractError, 'error');
+      const detail = e?.response?.data?.detail;
+      const msg = (typeof detail === 'string' && detail) || e?.message || t.booking.imageModal.extractError;
+      setEngineUsed('none');
+      setWarnings([msg]);
+      addToast(msg, 'error');
     } finally {
-      setExtracting(false);
+      if (reqId === requestIdRef.current) setExtracting(false);
+    }
+  };
+
+  const processFile = (file: File) => {
+    if (isPdfFile(file)) {
+      if (onPdfFiles) {
+        addToast(t.booking.paste.pdfInImageModal, 'info');
+        onPdfFiles([file]);
+        onClose();
+      } else {
+        addToast(t.booking.paste.unsupportedFile, 'error');
+      }
+      return;
+    }
+    if (!isImageFile(file)) {
+      addToast(t.booking.paste.unsupportedFile, 'error');
+      return;
+    }
+    setImageFile(file); // preview shows immediately (object URL effect)
+    setZoom(1);
+    setRotation(0);
+    setShowAISettings(false);
+    setQuickVesselBooking(null);
+    void triggerExtraction(file);
+  };
+
+  // Initialize or reset when modal opens or a new initial file arrives
+  useEffect(() => {
+    if (!isOpen) {
+      resetState();
+      return;
+    }
+    if (initialFile) {
+      processFile(initialFile);
+    } else {
+      resetState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialFile]);
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      setReadingClipboard(true);
+      const file = await readClipboardImageFile();
+      if (file) {
+        processFile(file);
+      } else {
+        addToast(t.booking.paste.clipboardNoImage, 'info');
+      }
+    } catch (e) {
+      console.warn('Clipboard read failed', e);
+      addToast(t.booking.paste.clipboardReadError, 'error');
+    } finally {
+      setReadingClipboard(false);
     }
   };
 
@@ -192,24 +265,17 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
     }
   };
 
-  const handlePaste = (e: React.ClipboardEvent) => {
-    if (e.clipboardData.files && e.clipboardData.files[0]) {
-      const file = e.clipboardData.files[0];
-      processFile(file);
-    }
-  };
+  const closeQuickVessel = useCallback(() => setQuickVesselBooking(null), []);
+  const hasVesselForLookup = getBookingVesselCandidates(fields).length > 0;
 
-  const getCarrierColor = (carrier?: string) => {
-    const c = (carrier || '').toUpperCase();
-    if (c.includes('DONGJIN')) return 'bg-cyan-100 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800';
-    if (c.includes('PIL')) return 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800';
-    if (c.includes('ONE')) return 'bg-fuchsia-100 dark:bg-fuchsia-950/80 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-300 dark:border-fuchsia-800';
-    if (c.includes('SITC')) return 'bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800';
-    if (c.includes('COSCO')) return 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800';
-    if (c.includes('MAERSK')) return 'bg-sky-100 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800';
-    if (c.includes('EVERGREEN')) return 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800';
-    return 'bg-purple-100 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800';
-  };
+  const engineBadge =
+    engineUsed === 'gemini'
+      ? { label: t.booking.paste.engineGemini, cls: 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800' }
+      : engineUsed === 'ocr'
+      ? { label: t.booking.paste.engineOcr, cls: 'bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800' }
+      : engineUsed === 'none'
+      ? { label: t.booking.paste.engineNone, cls: 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800' }
+      : null;
 
   return (
     <Modal
@@ -218,10 +284,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
       title={t.booking.imageModal.title}
       maxWidth="max-w-5xl"
     >
-      <div 
-        onPaste={handlePaste}
-        className="flex flex-col md:flex-row gap-4 h-[75vh] max-h-[720px] select-none outline-none"
-      >
+      <div className="flex flex-col md:flex-row gap-4 h-[75vh] max-h-[720px] select-none outline-none">
         {/* Left Side: Image Preview & Manipulation */}
         <div data-tour="ocr-controls" className="w-full md:w-1/2 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">
           {imagePreviewUrl ? (
@@ -267,6 +330,16 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
                   >
                     <RotateCw className="w-3.5 h-3.5" />
                     <span>{rotation}°</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePasteFromClipboard}
+                    disabled={readingClipboard}
+                    title={t.booking.paste.pasteImageButton}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition-colors disabled:opacity-50"
+                  >
+                    {readingClipboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardPaste className="w-3.5 h-3.5" />}
                   </button>
 
                   <button
@@ -327,12 +400,26 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
               <p className="text-xs text-slate-400 max-w-xs mb-4">
                 Hỗ trợ các định dạng PNG, JPG, JPEG, WEBP hoặc chụp màn hình rồi nhấn Ctrl+V.
               </p>
-              <button
-                type="button"
-                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-all shadow-md shadow-purple-500/20"
-              >
-                {t.booking.imageModal.selectAnother}
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handlePasteFromClipboard();
+                  }}
+                  disabled={readingClipboard}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50"
+                >
+                  {readingClipboard ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPaste className="w-4 h-4" />}
+                  {t.booking.paste.pasteImageButton}
+                </button>
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-all shadow-md shadow-purple-500/20"
+                >
+                  {t.booking.imageModal.selectAnother}
+                </button>
+              </div>
             </div>
           )}
 
@@ -341,7 +428,11 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
             type="file"
             accept="image/*,.pdf"
             className="hidden"
-            onChange={(e) => e.target.files?.[0] && processFile(e.target.files[0])}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) processFile(file);
+            }}
           />
         </div>
 
@@ -353,9 +444,17 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 {t.booking.imageModal.detectedCarrier}
               </span>
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${getCarrierColor(fields["Carrier"])}`}>
+              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${getCarrierBadgeClass(fields["Carrier"])}`}>
                 {fields["Carrier"] && fields["Carrier"] !== 'null' ? fields["Carrier"] : 'Chưa nhận diện'}
               </span>
+              {engineBadge && !extracting && (
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${engineBadge.cls}`}
+                  title={t.booking.paste.engineLabel}
+                >
+                  {engineBadge.label}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -402,6 +501,20 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
               </div>
             ) : (
               <>
+                {warnings.length > 0 && (
+                  <div role="alert" className="p-2.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300">
+                    <div className="flex items-center gap-1.5 font-bold text-[11px] mb-1">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      {t.booking.paste.warningsTitle}
+                    </div>
+                    <ul className="list-disc pl-5 space-y-0.5 text-[11px]">
+                      {warnings.map((w, i) => (
+                        <li key={i} className="break-words">{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
                   {t.booking.imageModal.editHint}
                 </p>
@@ -429,7 +542,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
                       type="text"
                       value={fields["Carrier"] || ''}
                       onChange={(e) => handleFieldChange("Carrier", e.target.value)}
-                      placeholder="VD: PIL, DONGJIN..."
+                      placeholder="VD: PIL, DONGJIN, CULINES..."
                       className="w-full px-2.5 py-1.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none"
                     />
                   </div>
@@ -438,9 +551,22 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
                 {/* Vessel & ETD */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      {t.booking.columns["Vessel"]}
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        {t.booking.columns["Vessel"]}
+                      </label>
+                      {hasVesselForLookup && (
+                        <button
+                          type="button"
+                          onClick={() => setQuickVesselBooking({ ...fields })}
+                          title={t.booking.quickVessel.rowTooltip}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-primary-700 dark:text-primary-300 bg-primary-50 dark:bg-primary-950/50 hover:bg-primary-100 dark:hover:bg-primary-900/60 border border-primary-200 dark:border-primary-800"
+                        >
+                          <Ship className="w-3 h-3" />
+                          {t.booking.quickVessel.button}
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={fields["Vessel"] || ''}
@@ -675,6 +801,11 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
           </div>
         </div>
       </div>
+      <QuickVesselSearch
+        isOpen={isOpen && !!quickVesselBooking}
+        onClose={closeQuickVessel}
+        booking={quickVesselBooking}
+      />
     </Modal>
   );
 };

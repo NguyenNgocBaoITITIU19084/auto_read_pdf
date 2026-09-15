@@ -77,6 +77,25 @@ export function formatRowForCopy(
 }
 
 /**
+ * Format multiple rows as tab-separated values (visible columns only), ready to paste into Excel.
+ * Tabs / line breaks inside cells are replaced with spaces; "null" becomes an empty cell.
+ */
+export function formatRowsAsTsv(
+  items: Record<string, any>[],
+  columns: FormattableColumn[],
+  includeHeader: boolean = true
+): string {
+  const visible = columns.filter((col) => col.visible);
+  const clean = (v: unknown) =>
+    v === undefined || v === null || v === 'null' ? '' : String(v).replace(/[\t\r\n]+/g, ' ').trim();
+  const lines = items.map((item) => visible.map((col) => clean(item[col.key])).join('\t'));
+  if (includeHeader) {
+    lines.unshift(visible.map((col) => clean(col.label)).join('\t'));
+  }
+  return lines.join('\n');
+}
+
+/**
  * Robust clipboard copy with fallback
  */
 export async function copyTextToClipboard(text: string): Promise<boolean> {
