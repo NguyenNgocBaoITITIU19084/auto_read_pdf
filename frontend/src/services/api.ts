@@ -331,8 +331,11 @@ export const getBackupDb = async (): Promise<any> => {
   return res.data;
 };
 
-export const restoreBackupDb = async (backupData: any): Promise<any> => {
-  const res = await apiClient.post('/restore', backupData);
+export type RestoreMode = 'merge' | 'replace';
+
+export const restoreBackupDb = async (backupData: unknown, mode: RestoreMode = 'merge') => {
+  const res = await apiClient.post<{ status: string; message: string; mode: RestoreMode }>(
+    '/restore', backupData, { params: { mode }, timeout: LONG_TIMEOUT });
   return res.data;
 };
 
