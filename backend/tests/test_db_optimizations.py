@@ -91,7 +91,7 @@ def test_restore_keeps_last_duplicate_from_backup(fresh_db):
     backup = db.export_backup_data()
     rule = {"target_table": "all", "column_key": "site_id", "match_value": "CTL", "match_type": "exact", "is_enabled": 1}
     backup["color_rules"] = [dict(rule, preset_id="blue"), dict(rule, preset_id="rose")]
-    db.import_backup_data(backup)
+    db.import_backup_data(backup, mode="replace")
     rules = db.get_color_rules()
     assert len(rules) == 1 and rules[0]["preset_id"] == "rose"
 

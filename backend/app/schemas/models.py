@@ -34,6 +34,11 @@ class VesselSearchRequest(BaseModel):
     site_id: str
     vessel_name: str
     voyage: Optional[str] = None
+    save: Optional[bool] = True
+
+class VesselSaveResultsRequest(BaseModel):
+    collection_id: int
+    items: List[dict]
 
 class VesselWatchlistAddRequest(BaseModel):
     collection_id: int

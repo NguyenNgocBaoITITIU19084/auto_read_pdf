@@ -350,7 +350,7 @@ export const translations = {
         searching: "Đang tra cứu...",
         nameRequired: "Vui lòng nhập tên tàu",
         noCollection: "Vui lòng chọn bộ sưu tập",
-        found: "Tìm thấy {count} lịch tàu (đã lưu vào tab Tàu)",
+        found: "Tìm thấy {count} lịch tàu",
         notFound: "Không tìm thấy lịch tàu khớp trên ePort",
         agent: "Hãng khai thác",
         berth: "ETA / Cập cảng",
@@ -363,7 +363,10 @@ export const translations = {
         watchSuccess: "Đã thêm {name} vào danh sách theo dõi",
         watched: "Đã theo dõi",
         openVesselTab: "Mở tab Tàu",
-        savedHint: "Kết quả tra cứu được lưu vào tab Tàu của bộ sưu tập hiện tại."
+        savedHint: "Kết quả chưa được lưu. Bấm \"Lưu vào tab Tàu\" hoặc \"Theo dõi\" để lưu.",
+        save: "Lưu vào tab Tàu",
+        saved: "Đã lưu",
+        saveSuccess: "Đã lưu {count} lịch tàu vào tab Tàu"
       }
     },
     vessel: {
@@ -1024,7 +1027,7 @@ export const translations = {
         searching: "Searching...",
         nameRequired: "Please enter a vessel name",
         noCollection: "Please select a collection",
-        found: "Found {count} schedule(s) (saved to the Vessels tab)",
+        found: "Found {count} schedule(s)",
         notFound: "No matching schedule found on ePort",
         agent: "Operator",
         berth: "ETA / Berthing",
@@ -1037,7 +1040,10 @@ export const translations = {
         watchSuccess: "Added {name} to the watchlist",
         watched: "Watching",
         openVesselTab: "Open Vessels tab",
-        savedHint: "Results are saved to the Vessels tab of the current collection."
+        savedHint: "Results are not saved yet. Click \"Save to Vessels tab\" or \"Watch\" to keep them.",
+        save: "Save to Vessels tab",
+        saved: "Saved",
+        saveSuccess: "Saved {count} schedule(s) to the Vessels tab"
       }
     },
     vessel: {

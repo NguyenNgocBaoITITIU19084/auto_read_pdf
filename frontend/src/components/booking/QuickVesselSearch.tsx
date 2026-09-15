@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Ship, Search, X, Loader2, Eye, Check, ExternalLink, AlertCircle, Info } from 'lucide-react';
+import { Ship, Search, X, Loader2, Eye, Check, ExternalLink, AlertCircle, Info, Save } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { Booking } from '../../types';
-import { searchVesselsApi, addVesselWatchlist } from '../../services/api';
+import { searchVesselsApi, addVesselWatchlist, saveVesselResultsApi } from '../../services/api';
 import { PORT_OPTIONS } from '../../utils/ports';
 import {
   splitVesselVoyage,
@@ -65,6 +65,8 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
   const [error, setError] = useState('');
   const [watchedKeys, setWatchedKeys] = useState<Set<string>>(() => new Set());
   const [watchingKey, setWatchingKey] = useState<string | null>(null);
+  const [savedKeys, setSavedKeys] = useState<Set<string>>(() => new Set());
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,6 +93,8 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
     setSearching(false);
     setWatchedKeys(new Set());
     setWatchingKey(null);
+    setSavedKeys(new Set());
+    setSavingKey(null);
     window.setTimeout(() => nameInputRef.current?.focus(), 0);
   }, [isOpen, candidates, guessedSite, applyCandidate]);
 
@@ -126,13 +130,14 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
     setSearching(true);
     setError('');
     setMessage('');
+    setSavedKeys(new Set());
     try {
       localStorage.setItem(LAST_SITE_KEY, site);
     } catch {
       /* ignore */
     }
     try {
-      const res = await searchVesselsApi(activeCollection.id, site, vesselName, voyage.trim());
+      const res = await searchVesselsApi(activeCollection.id, site, vesselName, voyage.trim(), { save: false });
       if (reqId !== requestIdRef.current) return;
       const items: Record<string, any>[] = Array.isArray(res?.items) ? res.items : [];
       setResults(items);
@@ -146,13 +151,28 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
     }
   };
 
-  const handleWatch = async (siteId: string, vesselName: string, voy: string) => {
+  const saveRow = async (row: Record<string, any>, key: string, silent = false) => {
+    if (!activeCollection || savedKeys.has(key)) return;
+    setSavingKey(key);
+    try {
+      await saveVesselResultsApi(activeCollection.id, [row]);
+      setSavedKeys((prev) => new Set(prev).add(key));
+      if (!silent) addToast(tf(qv.saveSuccess, { count: 1 }), 'success');
+    } catch (err: any) {
+      addToast(errorText(err, t.common.error), 'error');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const handleWatch = async (siteId: string, vesselName: string, voy: string, row?: Record<string, any>) => {
     if (!activeCollection || !vesselName) return;
     const key = vesselLookupKey(siteId, vesselName, voy);
     try {
       setWatchingKey(key);
       await addVesselWatchlist(activeCollection.id, siteId, vesselName, voy);
       setWatchedKeys((prev) => new Set(prev).add(key));
+      if (row) await saveRow(row, key, true);
       addToast(tf(qv.watchSuccess, { name: voy ? `${vesselName} ${voy}` : vesselName }), 'success');
     } catch (err: any) {
       addToast(errorText(err, t.common.error), 'error');
@@ -315,8 +335,17 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
+                          disabled={savedKeys.has(key) || savingKey === key}
+                          onClick={() => saveRow(row, key)}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 disabled:opacity-60"
+                        >
+                          {savingKey === key ? <Loader2 className="w-3 h-3 animate-spin" /> : savedKeys.has(key) ? <Check className="w-3 h-3" /> : <Save className="w-3 h-3" />}
+                          {savedKeys.has(key) ? qv.saved : qv.save}
+                        </button>
+                        <button
+                          type="button"
                           disabled={watchedKeys.has(key) || watchingKey === key}
-                          onClick={() => handleWatch(rSite, rName, rVoy)}
+                          onClick={() => handleWatch(rSite, rName, rVoy, row)}
                           className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold border border-primary-300 dark:border-primary-800 text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/50 disabled:opacity-60"
                         >
                           {watchingKey === key ? <Loader2 className="w-3 h-3 animate-spin" /> : watchedKeys.has(key) ? <Check className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
@@ -351,7 +380,7 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
                 );
               })}
 
-              {results.length > 0 && !onNavigateTab && (
+              {results.length > 0 && (
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">{qv.savedHint}</p>
               )}
             </div>

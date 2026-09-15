@@ -27,7 +27,7 @@ import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
-import { subscribeTourActions } from '../../services/tourService';
+import { subscribeTourActions } from '../../services/tourEvents';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useVirtualRows } from '../../hooks/useVirtualRows';

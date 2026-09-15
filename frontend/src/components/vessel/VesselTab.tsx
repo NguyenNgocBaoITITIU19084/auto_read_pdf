@@ -27,7 +27,7 @@ import { Tooltip } from '../common/Tooltip';
 import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
-import { subscribeTourActions } from '../../services/tourService';
+import { subscribeTourActions } from '../../services/tourEvents';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useVirtualRows } from '../../hooks/useVirtualRows';

@@ -146,15 +146,22 @@ export const getVesselIds = async (collectionId: number, q: TableQuery): Promise
 export const getVesselsByIds = async (ids: number[]): Promise<VesselSchedule[]> =>
   (await apiClient.post<VesselSchedule[]>('/vessels/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
-export const searchVesselsApi = async (collectionId: number, siteId: string, vesselName: string, voyage?: string): Promise<any> => {
+export const searchVesselsApi = async (
+  collectionId: number, siteId: string, vesselName: string, voyage?: string, options: { save?: boolean } = {}
+): Promise<any> => {
   const res = await apiClient.post('/vessels/search', {
     collection_id: collectionId,
     site_id: siteId,
     vessel_name: vesselName,
     voyage: voyage || null,
+    save: options.save ?? true,
   });
   return res.data;
 };
+
+export const saveVesselResultsApi = async (collectionId: number, items: Record<string, any>[]) =>
+  (await apiClient.post<{ status: string; saved: number }>('/vessels/save', { collection_id: collectionId, items })).data;
+
 
 export const deleteVessel = async (id: number): Promise<void> => {
   await apiClient.delete(`/vessels/${id}`);

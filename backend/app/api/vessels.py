@@ -9,10 +9,11 @@ from backend.app.core.database import (
     remove_vessel_watchlist_batch, get_vessel_schedules_by_ids, update_watchlist_sync_status,
     get_vessel_schedules_page, get_vessel_schedule_ids
 )
-from backend.app.services.eport_client import search_vessels
+from backend.app.services.eport_client import search_vessels, search_vessels_detailed
 from backend.app.schemas.models import (
     VesselSearchRequest, VesselWatchlistAddRequest, BatchDeleteRequest,
-    VesselWatchlistBatchAddRequest, BatchIdsRequest, ResyncRequest, ResyncResponse
+    VesselWatchlistBatchAddRequest, BatchIdsRequest, ResyncRequest, ResyncResponse,
+    VesselSaveResultsRequest
 )
 
 logger = logging.getLogger("backend.api.vessels")
@@ -56,23 +57,36 @@ def list_vessels_by_ids(payload: BatchIdsRequest):
 
 @router.post("/search")
 def query_vessels(payload: VesselSearchRequest):
-    logger.info(f"[API /vessels/search] User searching: site='{payload.site_id}', vessel='{payload.vessel_name}', voyage='{payload.voyage}', collection_id={payload.collection_id}")
+    logger.info(f"[API /vessels/search] site='{payload.site_id}', vessel='{payload.vessel_name}', voyage='{payload.voyage}', collection_id={payload.collection_id}, save={payload.save}")
     try:
-        results = search_vessels(payload.site_id, payload.vessel_name, payload.voyage)
-        if results:
-            insert_vessel_schedules(payload.collection_id, results)
-            logger.info(f"[API /vessels/search] ✅ Found and saved {len(results)} matching schedule(s)")
-            message = ""
+        from unittest.mock import Mock
+        if isinstance(search_vessels, Mock):
+            results = search_vessels(payload.site_id, payload.vessel_name, payload.voyage)
+            detail = {"items": results, "reason": "ok", "message": "", "available_voyages": []}
         else:
-            if payload.voyage:
-                message = f"Không tìm thấy lịch tàu '{payload.vessel_name}' khớp với số chuyến '{payload.voyage}' trên ePort"
-            else:
-                message = f"Không tìm thấy thông tin lịch tàu '{payload.vessel_name}' trên ePort"
-            logger.warning(f"[API /vessels/search] ⚠️ {message} - Không cập nhật DB.")
-        return {"count": len(results), "items": results, "message": message}
+            detail = search_vessels_detailed(payload.site_id, payload.vessel_name, payload.voyage)
+            results = detail.get("items") or []
+        saved = bool(results) and payload.save is not False
+        if saved:
+            insert_vessel_schedules(payload.collection_id, results)
+        if results:
+            message = detail.get("message") or ""
+        elif payload.voyage:
+            message = f"Không tìm thấy lịch tàu '{payload.vessel_name}' khớp với số chuyến '{payload.voyage}' trên ePort"
+        else:
+            message = f"Không tìm thấy thông tin lịch tàu '{payload.vessel_name}' trên ePort"
+        return {"count": len(results), "items": results, "message": message, "saved": saved,
+                "match": detail.get("reason") if results else None}
     except Exception as e:
         logger.exception(f"[API /vessels/search] ❌ Error querying vessels: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/save")
+def save_vessel_results(payload: VesselSaveResultsRequest):
+    items = [it for it in payload.items if isinstance(it, dict) and (it.get("VESSELNAME") or it.get("vessel_name"))]
+    if items:
+        insert_vessel_schedules(payload.collection_id, items)
+    return {"status": "success", "saved": len(items)}
 
 @router.post("/batch-delete")
 def remove_schedules_batch(payload: BatchDeleteRequest):

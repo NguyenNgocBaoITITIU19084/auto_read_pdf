@@ -125,3 +125,23 @@ def test_container_watchlist_sync_records_status(client, monkeypatch):
     assert body["updated_count"] == 1
     statuses = {w["container_no"]: w["last_sync_status"] for w in db.get_container_watchlist(col)}
     assert statuses == {"AAAU1111111": "ok", "BBBU2222222": "not_found"}
+
+
+def test_vessel_search_save_flag_and_save_endpoint(client, monkeypatch):
+    col = db.create_collection("QV")
+    item = {"SITE_ID": "CTL", "VESSELNAME": "EVER MEMO", "IN_OUT_VOYAGE": "012E"}
+    monkeypatch.setattr(vessels_api, "search_vessels_detailed", lambda *a, **k: {
+        "items": [item], "reason": "ok", "message": "", "available_voyages": []})
+
+    res = client.post(f"{API}/vessels/search", json={"collection_id": col, "site_id": "CTL",
+                                                     "vessel_name": "EVER MEMO", "voyage": "012E", "save": False})
+    assert res.status_code == 200 and res.json()["count"] == 1 and res.json()["saved"] is False
+    assert db.get_vessel_schedules(col) == []
+
+    res = client.post(f"{API}/vessels/save", json={"collection_id": col, "items": [item]})
+    assert res.json() == {"status": "success", "saved": 1}
+    assert len(db.get_vessel_schedules(col)) == 1
+
+    res = client.post(f"{API}/vessels/search", json={"collection_id": col, "site_id": "CTL", "vessel_name": "EVER MEMO"})
+    assert res.json()["saved"] is True  # default stays backward compatible
+
