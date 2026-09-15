@@ -11,6 +11,17 @@ D4 (approximate voyage match): dropped by decision 2026-09-15 — exact match st
 D5 (quick-vessel no autosave): complete (b68b1e0)
 OCR spike (D global constraint): blocked — needs 10 real customer booking images (gitignored, not present) and Windows OCR API (not testable on macOS)
 
-E1-4 (rotating logs, VN timestamps, key masking): complete (27d62f4)
+E Task 1 (rotating logs, VN timestamps, key masking): complete (27d62f4) — NOTE: original commit message wrongly claimed "E Tasks 1-4"; verified 2026-09-15 audit that Tasks 2-4 were NOT actually implemented at that point (only Task 1's file logging existed).
+E Task 2 (per-request log line + X-Request-ID + 500 lookup code): complete (7e4b5dc)
+E Task 3 (logs API: client error ingestion, view, zip export + Electron open-folder): complete (39b85e5)
+E Task 4 (frontend clientLogger + LogViewerModal "Nhật ký hệ thống"): complete (7a34ab2)
 E Task 5 (bulk action bar: max 3 + "Thêm" menu): complete (598a7fd)
-E remaining: sửa booking (pencil edit), thêm booking thủ công, bộ sưu tập header popover redesign — not started
+E Task 6 (API sửa/thêm booking thủ công, validate, cảnh báo trùng): complete (a569d6c)
+E Task 7 (BookingFormModal): complete (c20556e)
+E Task 8 (gắn nút Thêm/Sửa vào BookingTab + BookingDetailModal): complete (ee53169)
+E Task 9 (API bộ sưu tập — đếm dòng + đổi tên; POST /collections duplicate name now 409 not 400): complete (e1643a9)
+E Task 10 (CollectionSwitcher popover, thay Header select + NewCollectionModal cũ): complete (25e751f)
+E: all tasks complete as of 2026-09-15. Full suite green: pytest backend/tests (86) + tests (145) + frontend vitest (34) + npm run build all pass.
+
+D2 (khớp voyage gần đúng): confirmed dropped by user 2026-09-15 (re-confirmed after audit flagged missing written record) — exact match stays as-is, no further action.
+D1 (OCR offline spike/integration): still not started — out of scope for this round per user's explicit prioritization (only chose E Task 2-4/6-8/9-10). Still blocked on real booking images + a Windows machine to test Windows OCR API.
