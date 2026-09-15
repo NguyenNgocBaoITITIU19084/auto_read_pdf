@@ -22,7 +22,8 @@ def _reset_state():
 def clean_scheduler_state():
     init_db()
     for k, v in [("auto_sync_enabled", "0"), ("auto_sync_mode", "interval"),
-                 ("auto_sync_interval", "10"), ("auto_sync_times", "[]")]:
+                 ("auto_sync_interval", "10"), ("auto_sync_times", "[]"),
+                 ("auto_sync_last_run_at", "")]:
         set_system_setting(k, v)
     _reset_state()
     yield
@@ -240,3 +241,43 @@ def test_container_sync_reports_status_per_item():
     mock_insert.assert_called_once()
     statuses = {c[1]: c[2] for c in calls}
     assert statuses == {1: "ok", 2: "not_found"}
+
+
+def test_missed_times_slot():
+    now = datetime(2026, 9, 15, 9, 0, tzinfo=VN)
+    times = ["08:00", "14:00"]
+    assert bt.missed_times_slot(times, None, now) is True
+    assert bt.missed_times_slot(times, "2026-09-15 08:05:00", now) is False   # already ran after 08:00
+    assert bt.missed_times_slot(times, "2026-09-15 07:59:00", now) is True    # 08:00 was missed
+    assert bt.missed_times_slot(times, "2026-09-14 14:30:00", datetime(2026, 9, 15, 7, 0, tzinfo=VN)) is False
+    assert bt.missed_times_slot(times, "2026-09-14 13:00:00", datetime(2026, 9, 15, 7, 0, tzinfo=VN)) is True
+    assert bt.missed_times_slot([], None, now) is False
+    assert bt.missed_times_slot(times, "garbage", now) is True
+
+
+@patch("backend.app.services.background_tasks.run_sync_all", new_callable=AsyncMock)
+@pytest.mark.parametrize("last_run,expect_kick", [("2099-01-01 00:00:00", False), ("2000-01-01 00:00:00", True)])
+def test_times_mode_startup_kicks_only_when_slot_missed(mock_sync, last_run, expect_kick):
+    set_system_setting("auto_sync_enabled", "1")
+    set_system_setting("auto_sync_mode", "times")
+    set_system_setting("auto_sync_times", '["08:00"]')
+    set_system_setting("auto_sync_last_run_at", last_run)
+
+    async def scenario():
+        await bt.restore_auto_sync()
+        return bt.scheduler.get_job(bt.AUTO_SYNC_KICK_JOB_ID)
+
+    kick = asyncio.run(scenario())
+    assert (kick is not None) is expect_kick
+    assert bt.get_auto_sync_status()["last_run_at"] == last_run
+
+
+def test_run_sync_all_persists_last_run_at():
+    async def empty():
+        return bt._empty_result()
+
+    with patch.object(bt, "sync_vessel_watchlists", empty), patch.object(bt, "sync_container_watchlists", empty):
+        asyncio.run(bt.run_sync_all())
+    assert get_system_setting("auto_sync_last_run_at", "") == bt._state["last_run_at"]
+    assert bt._state["last_run_at"]
+

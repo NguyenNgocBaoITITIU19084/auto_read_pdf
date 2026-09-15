@@ -65,8 +65,8 @@ def _empty_result() -> dict:
 # ---------------------------------------------------------------------------
 
 def normalize_times(times) -> list[str]:
-    """Validate a list of "HH:MM" strings; returns zero-padded, de-duplicated, sorted list."""
-    if times is None:
+    """Validate + canonicalize a list of 'HH:MM' strings (24h format). Deduplicated and sorted."""
+    if not times:
         return []
     if not isinstance(times, (list, tuple)):
         raise ValueError("times must be a list of 'HH:MM' strings")
@@ -77,6 +77,33 @@ def normalize_times(times) -> list[str]:
             raise ValueError(f"Invalid time '{t}', expected HH:MM (00:00-23:59)")
         result.add(f"{int(m.group(1)):02d}:{m.group(2)}")
     return sorted(result)
+
+
+def missed_times_slot(times: list[str], last_run_at: str | None, now: datetime) -> bool:
+    """True when the most recent fixed HH:MM slot (VN time, at or before `now`) happened after the last run."""
+    try:
+        slots = normalize_times(times)
+    except ValueError:
+        return False
+    if not slots:
+        return False
+    now = now.astimezone(VN_TZ)
+    candidates = []
+    for day_offset in (0, -1):
+        day = (now + timedelta(days=day_offset)).date()
+        for t in slots:
+            h, m = (int(x) for x in t.split(":"))
+            slot = datetime(day.year, day.month, day.day, h, m, tzinfo=VN_TZ)
+            if slot <= now:
+                candidates.append(slot)
+    if not candidates:
+        return False
+    latest_slot = max(candidates)
+    try:
+        last = datetime.strptime(last_run_at or "", DATETIME_FMT).replace(tzinfo=VN_TZ)
+    except ValueError:
+        return True
+    return last < latest_slot
 
 
 def load_settings() -> dict:
@@ -95,8 +122,9 @@ def load_settings() -> dict:
     except Exception:
         logger.exception("Invalid auto_sync_times in system_settings, ignoring")
         times = []
+    last_run_at = get_system_setting("auto_sync_last_run_at", "") or None
     _state.update({"loaded": True, "enabled": enabled, "mode": mode,
-                   "interval_minutes": interval, "times": times})
+                   "interval_minutes": interval, "times": times, "last_run_at": last_run_at})
     return dict(_state)
 
 
@@ -275,6 +303,10 @@ async def run_sync_all() -> str:
         finally:
             _state["last_run_at"] = _now_str()
             _state["last_run_result"] = total
+            try:
+                await asyncio.to_thread(set_system_setting, "auto_sync_last_run_at", _state["last_run_at"])
+            except Exception:
+                logger.exception("Could not persist auto_sync_last_run_at")
         logger.info(f"==================== Auto-Sync Cycle Finished {total} ====================")
         return "completed"
 
@@ -359,10 +391,17 @@ def apply_schedule(kick_delay_seconds: float | None = None):
 
 
 async def restore_auto_sync(startup_delay_seconds: float = STARTUP_DELAY_SECONDS):
-    """Called from app lifespan: restore persisted settings and register jobs."""
+    """Called from app lifespan: restore persisted settings and register jobs.
+    Interval mode catches up after a short delay; fixed-times mode only when a slot was actually missed."""
     try:
         await asyncio.to_thread(load_settings)
-        apply_schedule(kick_delay_seconds=startup_delay_seconds if _state["enabled"] else None)
+        kick = None
+        if _state["enabled"]:
+            if _state["mode"] != "times" or missed_times_slot(_state["times"], _state["last_run_at"], datetime.now(VN_TZ)):
+                kick = startup_delay_seconds
+            else:
+                logger.info("Fixed-times auto-sync: no slot missed since last run, skipping catch-up")
+        apply_schedule(kick_delay_seconds=kick)
     except Exception:
         logger.exception("Could not restore auto-sync schedule")
 
