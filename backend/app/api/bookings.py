@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import tempfile
 import shutil
 from typing import List, Optional, Dict, Any, Tuple
@@ -12,6 +13,8 @@ from backend.app.core.database import (
 from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
 from backend.app.services.image_extractor import extract_booking_from_image
+
+logger = logging.getLogger("backend.api.bookings")
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
@@ -128,6 +131,7 @@ async def upload_bookings(
         uploads.append((filename, await file.read()))
 
     extracted_results = await asyncio.to_thread(_process_uploads, collection_id, uploads)
+    logger.info(f"Upload {len(uploads)} file(s) to collection {collection_id} -> {len(extracted_results)} booking(s)")
     return {"count": len(extracted_results), "items": extracted_results}
 
 def _extract_preview(file_bytes: bytes, filename: str, file_ext: str, api_key: Optional[str]) -> dict:
@@ -177,9 +181,11 @@ async def extract_image_preview(
         raise HTTPException(status_code=400, detail="Empty file uploaded")
 
     try:
-        return await asyncio.to_thread(_extract_preview, file_bytes, filename, file_ext, api_key)
+        result = await asyncio.to_thread(_extract_preview, file_bytes, filename, file_ext, api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to extract image: {e}")
+    logger.info(f"Image extract engine={result['engine_used']} warnings={len(result['warnings'])}")
+    return result
 
 @router.post("/manual-save")
 def save_manual_booking(req: SaveBookingRequest):
@@ -194,6 +200,7 @@ def save_manual_booking(req: SaveBookingRequest):
 @router.post("/batch-delete")
 def batch_delete_bookings(req: BatchDeleteRequest):
     deleted = delete_bookings_batch(list(req.ids or []))
+    logger.info(f"Deleted {deleted} booking(s)")
     return {"status": "success", "deleted": deleted}
 
 @router.delete("/{booking_id}")
@@ -204,4 +211,5 @@ def remove_booking(booking_id: int):
 @router.delete("/clear/{collection_id}")
 def clear_all_bookings(collection_id: int):
     clear_bookings(collection_id)
+    logger.info(f"Cleared bookings of collection {collection_id}")
     return {"status": "success", "cleared_collection_id": collection_id}

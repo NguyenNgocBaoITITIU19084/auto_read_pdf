@@ -1,9 +1,8 @@
 import logging
 import sys
-import time
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from pathlib import Path
@@ -17,6 +16,7 @@ from backend.app.core.logging_setup import configure_logging
 configure_logging()
 logger = logging.getLogger("backend.main")
 
+from backend.app.core.request_logging import RequestLoggingMiddleware
 from backend.app.core.config import BACKEND_HOST, BACKEND_PORT
 from backend.app.core.database import init_db, get_collections, create_collection
 from backend.app.services.background_tasks import restore_auto_sync, shutdown_scheduler
@@ -55,16 +55,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Logs method, path, status code and elapsed time only — never request/response bodies."""
-    start = time.time()
-    response = await call_next(request)
-    elapsed_ms = int((time.time() - start) * 1000)
-    logger.info(f"{request.method} {request.url.path} -> {response.status_code} ({elapsed_ms}ms)")
-    return response
+# Per-request log line, X-Request-ID header, and JSON lookup code on unhandled 500s.
+app.add_middleware(RequestLoggingMiddleware)
 
 # Healthcheck accepting both GET and HEAD
 @app.api_route("/health", methods=["GET", "HEAD"])

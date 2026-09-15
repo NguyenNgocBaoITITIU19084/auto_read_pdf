@@ -9,6 +9,8 @@ from pathlib import Path
 from backend.app.core.config import DB_PATH
 from backend.app.core.timezone import VN_TZ
 
+APP_LOG = "app.log"
+ERROR_LOG = "errors.log"
 APP_LOG_MAX_BYTES = 5 * 1024 * 1024
 APP_LOG_BACKUP_COUNT = 5
 ERROR_LOG_MAX_BYTES = 2 * 1024 * 1024
@@ -33,6 +35,11 @@ def _mask_sensitive(text: str) -> str:
     return text
 
 
+# Public alias — other modules (e.g. request logging) redact strings before they ever
+# become a log message, on top of the SensitiveDataFilter safety net below.
+redact = _mask_sensitive
+
+
 class SensitiveDataFilter(logging.Filter):
     """Masks Gemini API keys and api_key/key params before any handler writes them out."""
 
@@ -51,6 +58,11 @@ class VnTimeFormatter(logging.Formatter):
     def formatTime(self, record: logging.LogRecord, datefmt: str = None) -> str:
         dt = datetime.fromtimestamp(record.created, tz=VN_TZ)
         return dt.strftime(datefmt or "%Y-%m-%d %H:%M:%S")
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Mask the fully formatted line (including any exception traceback), not just
+        # record.msg — a raised exception's own str() can carry a leaked secret too.
+        return _mask_sensitive(super().format(record))
 
 
 def get_log_dir() -> str:
@@ -80,7 +92,7 @@ def configure_logging() -> str:
     console_handler.setLevel(logging.INFO)
 
     app_handler = logging.handlers.RotatingFileHandler(
-        str(Path(log_dir) / "app.log"),
+        str(Path(log_dir) / APP_LOG),
         maxBytes=APP_LOG_MAX_BYTES,
         backupCount=APP_LOG_BACKUP_COUNT,
         encoding="utf-8",
@@ -88,7 +100,7 @@ def configure_logging() -> str:
     app_handler.setLevel(logging.INFO)
 
     error_handler = logging.handlers.RotatingFileHandler(
-        str(Path(log_dir) / "errors.log"),
+        str(Path(log_dir) / ERROR_LOG),
         maxBytes=ERROR_LOG_MAX_BYTES,
         backupCount=ERROR_LOG_BACKUP_COUNT,
         encoding="utf-8",

@@ -152,8 +152,10 @@ def test_request_middleware_logs_method_path_status_no_body(monkeypatch, tmp_pat
     from backend.app.main import app
 
     client = TestClient(app)
-    res = client.get("/health")
+    # /health is a noisy polling endpoint logged at DEBUG (see test_request_logging.py),
+    # so exercise a normal route to check the per-request INFO line still has no body.
+    res = client.get("/api/v1/collections")
     assert res.status_code == 200
 
     app_log = (tmp_path / "app.log").read_text()
-    assert "GET /health -> 200" in app_log
+    assert "GET /api/v1/collections -> 200" in app_log
