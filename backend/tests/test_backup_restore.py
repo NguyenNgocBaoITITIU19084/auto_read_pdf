@@ -1,5 +1,18 @@
+import json
+
 import pytest
 from backend.app.core import database as db
+
+
+def test_backup_export_never_includes_gemini_api_key():
+    db.init_db()
+    secret = "AIzaSyREALSECRETVALUE1234567890"
+    db.set_system_setting("gemini_api_key", secret)
+
+    backup = db.export_backup_data()
+
+    assert "system_settings" not in backup
+    assert secret not in json.dumps(backup)
 
 
 def test_backup_restore_includes_color_rules():

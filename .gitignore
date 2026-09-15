@@ -31,6 +31,9 @@ MANIFEST
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+# App logs (backend/logs/, or wherever LOG_DIR / DB_PATH's dir points)
+logs/
+*.log
 # Unit test / coverage reports
 htmlcov/
 .tox/
