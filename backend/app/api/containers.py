@@ -10,7 +10,8 @@ from backend.app.core.database import (
 from backend.app.services.eport_client import search_containers
 from backend.app.schemas.models import (
     ContainerSearchRequest, ContainerWatchlistAddRequest, BatchDeleteRequest,
-    ContainerWatchlistBatchAddRequest, BatchIdsRequest, ResyncRequest, ResyncResponse
+    ContainerWatchlistBatchAddRequest, BatchIdsRequest, ResyncRequest, ResyncResponse,
+    ContainerResyncRequest
 )
 
 logger = logging.getLogger("backend.api.containers")
@@ -84,18 +85,21 @@ def _result_container_no(r: dict) -> str:
     return str(r.get("CONTAINERNO", r.get("containerno", "")) or "").strip().upper()
 
 @router.post("/resync", response_model=ResyncResponse)
-def resync_containers(payload: ResyncRequest):
-    """Re-query ePort for the selected container rows (one call per site) and upsert the results."""
+def resync_containers(payload: ContainerResyncRequest):
+    """Re-query ePort for the selected rows (one call per site). Only events of the selected rows' types are
+    saved unless all_events=true."""
     rows = get_containers_by_ids(payload.ids)
 
-    # site_id -> container_no -> set(collection_id)
-    by_site: dict[str, dict[str, set[int]]] = {}
+    # site_id -> container_no -> {"collections": set[int], "events": set[str] ("" = any event)}
+    by_site: dict[str, dict[str, dict]] = {}
     for r in rows:
         cont_no = (r.get("containerno") or "").strip().upper()
         if not cont_no:
             continue
         site_id = (r.get("site_id") or "").strip().upper()
-        by_site.setdefault(site_id, {}).setdefault(cont_no, set()).add(r["collection_id"])
+        entry = by_site.setdefault(site_id, {}).setdefault(cont_no, {"collections": set(), "events": set()})
+        entry["collections"].add(r["collection_id"])
+        entry["events"].add((r.get("event_type") or "").strip().upper())
 
     updated = 0
     not_found: list[str] = []
@@ -113,10 +117,14 @@ def resync_containers(payload: ResyncRequest):
         per_collection: dict[int, list[dict]] = {}
         for res in results:
             cont_no = _result_container_no(res)
-            if cont_no not in conts:
+            entry = conts.get(cont_no)
+            if not entry:
+                continue
+            event = str(res.get("EVENT_TYPE", res.get("event_type", "")) or "").strip().upper()
+            if not (payload.all_events or "" in entry["events"] or event in entry["events"]):
                 continue
             found.add(cont_no)
-            for col_id in conts[cont_no]:
+            for col_id in entry["collections"]:
                 per_collection.setdefault(col_id, []).append(res)
 
         try:
@@ -129,7 +137,7 @@ def resync_containers(payload: ResyncRequest):
 
         not_found.extend(c for c in cont_nos if c not in found)
 
-    logger.info(f"[API /containers/resync] Done. updated={updated}, not_found={len(not_found)}, errors={len(errors)}")
+    logger.info(f"[API /containers/resync] Done. all_events={payload.all_events}, updated={updated}, not_found={len(not_found)}, errors={len(errors)}")
     return {"status": "success", "updated": updated, "not_found": not_found, "errors": errors}
 
 @router.delete("/{cont_id}")

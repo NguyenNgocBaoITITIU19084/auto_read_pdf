@@ -303,8 +303,8 @@ export const removeContainerWatchlistBatch = async (ids: number[]): Promise<{ st
 };
 
 /** Re-query ePort for the given containers ids. */
-export const resyncContainersApi = async (ids: number[]): Promise<ResyncResult> => {
-  const res = await apiClient.post<ResyncResult>('/containers/resync', { ids }, { timeout: LONG_TIMEOUT });
+export const resyncContainersApi = async (ids: number[], options: { allEvents?: boolean } = {}): Promise<ResyncResult> => {
+  const res = await apiClient.post<ResyncResult>('/containers/resync', { ids, all_events: !!options.allEvents }, { timeout: LONG_TIMEOUT });
   return res.data;
 };
 

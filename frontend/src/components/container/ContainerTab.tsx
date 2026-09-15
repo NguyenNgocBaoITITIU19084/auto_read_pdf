@@ -535,11 +535,11 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       addToast(tf(t.container.watchlistBatchRemoved, { count: res?.removed ?? idList.length }), 'success');
     });
 
-  const handleBatchResync = () =>
-    runBulk('resync', async () => {
+  const handleBatchResync = (allEvents = false) =>
+    runBulk(allEvents ? 'resync-all' : 'resync', async () => {
       const ids = selectedIdList;
       if (ids.length === 0) return;
-      const res = await resyncContainersApi(ids);
+      const res = await resyncContainersApi(ids, { allEvents });
       const notFound = Array.isArray(res?.not_found) ? res.not_found : [];
       const errors = Array.isArray(res?.errors) ? res.errors : [];
       addToast(
@@ -592,7 +592,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       loading: bulkBusy === 'watch-remove',
       disabled: !!bulkBusy,
     },
-    { key: 'resync', label: t.bulk.resync, icon: RotateCw, onClick: handleBatchResync, loading: bulkBusy === 'resync', disabled: !!bulkBusy },
+    { key: 'resync', label: t.bulk.resync, title: t.bulk.resyncSameEventTooltip, icon: RotateCw, onClick: () => handleBatchResync(false), loading: bulkBusy === 'resync', disabled: !!bulkBusy },
+    { key: 'resync-all', label: t.bulk.resyncAllEvents, title: t.bulk.resyncAllEventsTooltip, icon: RotateCw, onClick: () => handleBatchResync(true), loading: bulkBusy === 'resync-all', disabled: !!bulkBusy },
     { key: 'move', label: t.container.moveToCollection, icon: FolderInput, onClick: () => setIsMoveOpen(true), disabled: !!bulkBusy },
     { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
   ];

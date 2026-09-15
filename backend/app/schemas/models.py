@@ -96,6 +96,9 @@ class ContainerWatchlistBatchAddRequest(BaseModel):
 class ResyncRequest(BaseModel):
     ids: List[int]
 
+class ContainerResyncRequest(ResyncRequest):
+    all_events: Optional[bool] = False
+
 class ResyncResponse(BaseModel):
     status: str
     updated: int

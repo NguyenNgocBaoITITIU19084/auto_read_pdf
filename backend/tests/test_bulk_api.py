@@ -145,3 +145,31 @@ def test_vessel_search_save_flag_and_save_endpoint(client, monkeypatch):
     res = client.post(f"{API}/vessels/search", json={"collection_id": col, "site_id": "CTL", "vessel_name": "EVER MEMO"})
     assert res.json()["saved"] is True  # default stays backward compatible
 
+
+def test_container_resync_filters_by_selected_event_type(client, monkeypatch):
+    col = db.create_collection("RS")
+    ids = db.insert_containers(col, [{"SITE": "CTL", "CONTAINERNO": "ABCU1234567", "EVENT_TIME": "t0", "EVENT_TYPE": "LOAD"}])
+    eport_rows = [
+        {"CONTAINERNO": "ABCU1234567", "EVENT_TIME": "t1", "EVENT_TYPE": "LOAD"},
+        {"CONTAINERNO": "ABCU1234567", "EVENT_TIME": "t2", "EVENT_TYPE": "UNLOAD"},
+    ]
+    monkeypatch.setattr(containers_api, "search_containers", lambda *a, **k: eport_rows)
+
+    res = client.post(f"{API}/containers/resync", json={"ids": ids})
+    assert res.json()["updated"] == 1
+    assert sorted(c["event_type"] for c in db.get_containers(col)) == ["LOAD", "LOAD"]
+
+    res = client.post(f"{API}/containers/resync", json={"ids": ids, "all_events": True})
+    assert res.json()["updated"] == 2
+    assert "UNLOAD" in {c["event_type"] for c in db.get_containers(col)}
+
+
+def test_container_resync_reports_not_found_when_event_missing(client, monkeypatch):
+    col = db.create_collection("RS2")
+    ids = db.insert_containers(col, [{"SITE": "CTL", "CONTAINERNO": "ABCU7654321", "EVENT_TIME": "t0", "EVENT_TYPE": "OUTGATE"}])
+    monkeypatch.setattr(containers_api, "search_containers",
+                        lambda *a, **k: [{"CONTAINERNO": "ABCU7654321", "EVENT_TIME": "t1", "EVENT_TYPE": "LOAD"}])
+    body = client.post(f"{API}/containers/resync", json={"ids": ids}).json()
+    assert body["updated"] == 0 and body["not_found"] == ["ABCU7654321"]
+
+
