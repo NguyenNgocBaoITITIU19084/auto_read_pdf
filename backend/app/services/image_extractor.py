@@ -390,12 +390,15 @@ def extract_booking_from_image_detailed(
     api_key = (api_key or "").strip()
     chosen_model = (model or get_system_setting("gemini_model", DEFAULT_MODEL) or DEFAULT_MODEL).strip()
 
+    MAX_LIVE_FALLBACKS = 4
+
     if api_key:
         started = time.monotonic()
         models_to_try = [chosen_model]
-        if chosen_model != DEFAULT_MODEL:
-            models_to_try.append(DEFAULT_MODEL)
-        for i, m in enumerate(models_to_try):
+        looked_up_live_fallback = False
+        i = 0
+        while i < len(models_to_try):
+            m = models_to_try[i]
             remaining = GEMINI_TIMEOUT_S - (time.monotonic() - started)
             if remaining <= 2:
                 warnings.append(W_NETWORK)
@@ -409,8 +412,21 @@ def extract_booking_from_image_detailed(
                 return {"data": data, "engine_used": "gemini", "warnings": warnings}
             except GeminiError as err:
                 print(f"AI Vision extraction error with model {m} ({err.kind}: {err}), falling back...")
-                if err.kind == "model_not_found" and i + 1 < len(models_to_try):
-                    continue
+                if err.kind == "model_not_found":
+                    if not looked_up_live_fallback:
+                        # Google's model catalog moves fast enough that a hardcoded
+                        # DEFAULT_MODEL can itself be deprecated (and models.list() can still
+                        # list names that 404 on generateContent). Queue several currently
+                        # listed models instead of retrying one fixed, possibly-stale name,
+                        # so a second deprecated pick doesn't burn the whole attempt.
+                        looked_up_live_fallback = True
+                        live_models, from_api = list_gemini_models(api_key)
+                        if from_api:
+                            candidates = [mm for mm in live_models if mm not in models_to_try]
+                            models_to_try.extend(candidates[:MAX_LIVE_FALLBACKS])
+                    if i + 1 < len(models_to_try):
+                        i += 1
+                        continue
                 warnings.append(gemini_error_warning(err, m))
                 break
             except Exception as err:  # defensive: never fail silently

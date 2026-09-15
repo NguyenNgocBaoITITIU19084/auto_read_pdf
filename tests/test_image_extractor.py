@@ -204,7 +204,9 @@ def test_detailed_gemini_errors_then_no_ocr(monkeypatch, no_ocr, status, body, e
     assert out["data"]["Booking No"] == "null"
 
 
-def test_detailed_model_404_retries_default_model(monkeypatch, no_ocr):
+def test_detailed_model_404_retries_a_live_model_from_the_api(monkeypatch, no_ocr):
+    # DEFAULT_MODEL (or any hardcoded name) can itself go stale as Google's catalog moves,
+    # so on a 404 the retry must come from a live models.list() call, not a fixed constant.
     calls = []
 
     def fake_post(url, **kwargs):
@@ -214,14 +216,18 @@ def test_detailed_model_404_retries_default_model(monkeypatch, no_ocr):
         return _resp(200, GOOD_AI_BODY)
 
     monkeypatch.setattr(ie.requests, "post", fake_post)
+    monkeypatch.setattr(ie.requests, "get", lambda *a, **k: _resp(200, {"models": [
+        {"name": "models/gemini-9-flash", "supportedGenerationMethods": ["generateContent"]},
+    ]}))
     out = ie.extract_booking_from_image_detailed(create_sample_image_bytes(), "a.jpg", api_key="k", model="gemini-2.0-flash")
     assert out["engine_used"] == "gemini"
-    assert len(calls) == 2 and ie.DEFAULT_MODEL in calls[1]
+    assert len(calls) == 2 and "gemini-9-flash" in calls[1]
     assert any("gemini-2.0-flash" in w and "không khả dụng" in w for w in out["warnings"])
 
 
-def test_detailed_default_model_404_reports_model_unavailable(monkeypatch, no_ocr):
+def test_detailed_model_404_with_no_live_fallback_reports_model_unavailable(monkeypatch, no_ocr):
     monkeypatch.setattr(ie.requests, "post", lambda *a, **k: _resp(404, {"error": {"message": "not found"}}))
+    monkeypatch.setattr(ie.requests, "get", lambda *a, **k: _resp(400, {"error": {"message": "bad key"}}))
     out = ie.extract_booking_from_image_detailed(create_sample_image_bytes(), "a.jpg", api_key="k", model=ie.DEFAULT_MODEL)
     assert out["engine_used"] == "none"
     assert any("không khả dụng" in w for w in out["warnings"])
@@ -375,3 +381,27 @@ def test_list_gemini_models_sends_key_via_header_not_url(monkeypatch):
 
     assert "key" not in (captured["params"] or {})
     assert captured["headers"]["x-goog-api-key"] == "AQ.super-secret-token"
+
+
+def test_detailed_model_404_cascades_through_multiple_stale_live_candidates(monkeypatch, no_ocr):
+    # Google's models.list() can list several models that still 404 on generateContent
+    # (deprecated but not yet delisted). The retry must cascade past more than one before
+    # giving up, instead of stopping after a single (possibly also-stale) live pick.
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if "gemini-9-working" in url:
+            return _resp(200, GOOD_AI_BODY)
+        return _resp(404, {"error": {"message": "not found"}})
+
+    monkeypatch.setattr(ie.requests, "post", fake_post)
+    monkeypatch.setattr(ie.requests, "get", lambda *a, **k: _resp(200, {"models": [
+        {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-2.5-flash-lite", "supportedGenerationMethods": ["generateContent"]},
+        {"name": "models/gemini-9-working", "supportedGenerationMethods": ["generateContent"]},
+    ]}))
+    out = ie.extract_booking_from_image_detailed(create_sample_image_bytes(), "a.jpg", api_key="k", model="gemini-2.0-flash")
+    assert out["engine_used"] == "gemini"
+    assert len(calls) == 4  # gemini-2.0-flash, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-9-working
+    assert "gemini-9-working" in calls[-1]
