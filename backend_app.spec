@@ -3,13 +3,26 @@
 
 import os
 
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
+
 project_root = os.path.abspath('.')
+
+# APScheduler 3.x resolves triggers/executors/jobstores via importlib.metadata entry
+# points -> ship its dist-info metadata, otherwise add_job(trigger='cron') fails at runtime.
+# tzdata provides the IANA database for zoneinfo('Asia/Ho_Chi_Minh') on Windows.
+# (pyinstaller-hooks-contrib also ships hooks for both; this keeps the build correct without them.)
+extra_datas = []
+for _collect in (lambda: copy_metadata('APScheduler', recursive=True), lambda: collect_data_files('tzdata')):
+    try:
+        extra_datas += _collect()
+    except Exception as _e:  # package missing -> warn instead of breaking the build
+        print(f'WARNING: backend_app.spec data collection skipped: {_e}')
 
 a = Analysis(
     ['backend/app/main.py'],
     pathex=[project_root],
     binaries=[],
-    datas=[],
+    datas=extra_datas,
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',
@@ -32,11 +45,18 @@ a = Analysis(
         'apscheduler.triggers.interval',
         'apscheduler.triggers.cron',
         'apscheduler.triggers.date',
+        'apscheduler.triggers.combining',
+        'apscheduler.triggers.calendarinterval',
+        'apscheduler.triggers.cron.expressions',
+        'apscheduler.triggers.cron.fields',
         'apscheduler.executors',
         'apscheduler.executors.asyncio',
         'apscheduler.executors.pool',
         'apscheduler.jobstores',
         'apscheduler.jobstores.memory',
+        'tzlocal',
+        'tzdata',
+        'zoneinfo',
         'backend',
         'backend.app',
         'backend.app.core',
@@ -84,7 +104,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -97,7 +117,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='backend_app',
 )
