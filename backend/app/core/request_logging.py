@@ -11,6 +11,10 @@ logger = logging.getLogger("backend.request")
 
 _VALID_ID = re.compile(r"^[A-Za-z0-9-]{6,64}$")
 _QUIET = ("/health", "/api/v1/scheduler/status", "/api/v1/logs")
+# GET only: the desktop UI polls this every ~2s while the phone-capture QR modal is open, and
+# again every ~3s per queued photo fetch/ack -- POST (start session) and DELETE (stop session)
+# are once-per-session and worth keeping at the normal INFO level.
+_QUIET_GET = ("/api/v1/mobile/session", "/api/v1/mobile/photos/")
 SLOW_MS = 3000
 
 
@@ -67,7 +71,7 @@ class RequestLoggingMiddleware:
             logger.warning(line)
         elif elapsed_ms > SLOW_MS:
             logger.warning(f"SLOW {line}")
-        elif path.startswith(_QUIET):
+        elif path.startswith(_QUIET) or (scope.get("method") == "GET" and path.startswith(_QUIET_GET)):
             logger.debug(line)
         else:
             logger.info(line)

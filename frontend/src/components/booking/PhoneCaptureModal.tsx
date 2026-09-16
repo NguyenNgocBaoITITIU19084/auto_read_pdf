@@ -85,7 +85,11 @@ export const PhoneCaptureModal: React.FC<PhoneCaptureModalProps> = ({ isOpen, on
   };
 
   const handleDisconnect = () => {
+    // The start effect only re-runs when `isOpen` changes, so without closing here the modal
+    // would be left showing a permanent loading spinner (no active session, but nothing
+    // triggers a fresh `start()`) until the user manually closes and reopens it.
     void stop();
+    onClose();
   };
 
   return (

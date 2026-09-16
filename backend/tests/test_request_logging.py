@@ -82,6 +82,27 @@ def test_noisy_polling_not_logged_at_info(client):
     assert "GET /health ->" not in content and "GET /api/v1/scheduler/status ->" not in content
 
 
+def test_mobile_session_poll_is_quiet_but_start_and_stop_are_not(client, monkeypatch):
+    c, log_dir = client
+    import backend.app.api.mobile as mobile_api
+
+    # This test only cares about log verbosity, not real LAN networking -- mock LanServer the
+    # same way tests/test_mobile_control_api.py does so no real port is opened here.
+    monkeypatch.setattr(mobile_api, "list_lan_ipv4", lambda: ["192.168.1.10"])
+    monkeypatch.setattr(mobile_api.lan_server, "start", lambda app, host="0.0.0.0", preferred_port=8765: 8765)
+    monkeypatch.setattr(mobile_api.lan_server, "stop", lambda timeout=3: None)
+    monkeypatch.setattr(mobile_api.lan_server, "selected_ip", "192.168.1.10", raising=False)
+    monkeypatch.setattr(mobile_api.lan_server, "port", 8765, raising=False)
+
+    c.get("/api/v1/mobile/session")  # the desktop UI's ~2s poll while the QR modal is open
+    c.post("/api/v1/mobile/session", json={})
+    c.delete("/api/v1/mobile/session")
+    content = _read(log_dir / ls.APP_LOG)
+    assert "GET /api/v1/mobile/session ->" not in content
+    assert "POST /api/v1/mobile/session ->" in content
+    assert "DELETE /api/v1/mobile/session ->" in content
+
+
 def test_invalid_incoming_request_id_is_replaced(client):
     c, _ = client
     res = c.get("/health", headers={"X-Request-ID": "bad id with spaces"})

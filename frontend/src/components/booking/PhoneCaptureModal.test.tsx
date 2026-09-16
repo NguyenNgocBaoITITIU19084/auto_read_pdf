@@ -88,7 +88,7 @@ describe('PhoneCaptureModal', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
-  it('calls stop() when "Ngắt kết nối" is clicked', () => {
+  it('"Ngắt kết nối" calls stop() and closes the modal (otherwise it would show a permanent spinner)', () => {
     mockSession = {
       active: true,
       pair_url: 'http://192.168.1.5:8765/#p=abc',
@@ -97,9 +97,11 @@ describe('PhoneCaptureModal', () => {
       devices: [],
       pending: [],
     };
-    render(<PhoneCaptureModal isOpen onClose={() => {}} />);
+    const onClose = vi.fn();
+    render(<PhoneCaptureModal isOpen onClose={onClose} />);
     fireEvent.click(screen.getByRole('button', { name: p.disconnect }));
     expect(stopMock).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('closing the modal does not stop the session', () => {
