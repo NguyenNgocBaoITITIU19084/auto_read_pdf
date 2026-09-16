@@ -448,8 +448,21 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   // Photos arriving from a paired phone: open them one at a time in the review modal, only
   // once the previous one has been saved/dismissed, so a fresh photo never clobbers an
   // in-progress edit.
+  //
+  // `takeNext()` mutates the queue synchronously and returns immediately, so React 18
+  // StrictMode's development-only mount double-invocation of this effect (BookingTab remounts
+  // every time the user switches back to this tab, since App.tsx only renders the active tab)
+  // would otherwise call `takeNext()` twice back-to-back for the SAME queue-length snapshot —
+  // both photos get ack'd to the backend, but only the second ever reaches the UI. Comparing
+  // against the last queue length this effect actually handled (rather than a plain boolean
+  // latch, which a same-tick double-invoke would just flip back) makes the dequeue idempotent
+  // per queue-length transition regardless of how many times the effect body itself runs for
+  // that same transition.
+  const lastHandledQueueLenRef = useRef<number | null>(null);
   useEffect(() => {
     if (isImageModalOpen || mobile.queue.length === 0) return;
+    if (lastHandledQueueLenRef.current === mobile.queue.length) return;
+    lastHandledQueueLenRef.current = mobile.queue.length;
     const file = mobile.takeNext();
     if (file) {
       setActiveImageFile(file);
