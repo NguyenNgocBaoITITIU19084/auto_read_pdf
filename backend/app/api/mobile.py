@@ -101,7 +101,12 @@ def get_session():
 
     return {
         "active": True,
+        "session_id": snap.get("session_id"),
         "pair_url": pair_url,
+        "ips": list_lan_ipv4(),
+        "selected_ip": lan_server.selected_ip,
+        "port": lan_server.port,
+        "pairing_expires_at": snap.get("pairing_expires_at"),
         "devices": devices,
         "pending": pending,
     }

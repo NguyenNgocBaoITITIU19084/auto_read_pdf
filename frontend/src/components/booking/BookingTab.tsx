@@ -6,6 +6,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useMobileBridge } from '../../context/MobileBridgeContext';
+import { usePhoneQueueDrain } from '../../hooks/usePhoneQueueDrain';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
@@ -447,28 +448,13 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
   // Photos arriving from a paired phone: open them one at a time in the review modal, only
   // once the previous one has been saved/dismissed, so a fresh photo never clobbers an
-  // in-progress edit.
-  //
-  // `takeNext()` mutates the queue synchronously and returns immediately, so React 18
-  // StrictMode's development-only mount double-invocation of this effect (BookingTab remounts
-  // every time the user switches back to this tab, since App.tsx only renders the active tab)
-  // would otherwise call `takeNext()` twice back-to-back for the SAME queue-length snapshot —
-  // both photos get ack'd to the backend, but only the second ever reaches the UI. Comparing
-  // against the last queue length this effect actually handled (rather than a plain boolean
-  // latch, which a same-tick double-invoke would just flip back) makes the dequeue idempotent
-  // per queue-length transition regardless of how many times the effect body itself runs for
-  // that same transition.
-  const lastHandledQueueLenRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (isImageModalOpen || mobile.queue.length === 0) return;
-    if (lastHandledQueueLenRef.current === mobile.queue.length) return;
-    lastHandledQueueLenRef.current = mobile.queue.length;
-    const file = mobile.takeNext();
-    if (file) {
-      setActiveImageFile(file);
-      setIsImageModalOpen(true);
-    }
-  }, [isImageModalOpen, mobile.queue.length, mobile]);
+  // in-progress edit. See usePhoneQueueDrain.ts for why this needs to guard on the queue
+  // head's identity rather than its length.
+  const handlePhoneQueuePhoto = useStableCallback((file: File) => {
+    setActiveImageFile(file);
+    setIsImageModalOpen(true);
+  });
+  usePhoneQueueDrain(mobile, isImageModalOpen, handlePhoneQueuePhoto);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();

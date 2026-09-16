@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 import backend.app.api.mobile as mobile_api
 from backend.app.main import app
+from backend.app.mobile.app import mobile_app
 from backend.app.services.mobile_bridge import bridge
 
 
@@ -52,6 +53,10 @@ def fake_lan_server(monkeypatch):
             self.stop_calls = 0
 
         def start(self, app, host="0.0.0.0", preferred_port=8765):
+            # Regression pin for the plan's one hard security requirement: the
+            # LAN server must only ever be handed the phone-facing app, never
+            # the main (loopback-only) app.
+            assert app is mobile_app, "LanServer.start() must only ever be given mobile_app"
             self.port = 8765
             self._running = True
             return self.port
@@ -141,6 +146,21 @@ class TestGetSession:
         assert set(body["devices"][0].keys()) == {"id", "label", "last_seen"}
         assert len(body["pending"]) == 1
         assert set(body["pending"][0].keys()) == {"id", "filename", "size", "received_at"}
+
+    def test_active_session_keeps_ip_and_port_fields_across_a_poll(self, client, fake_lan_server):
+        # Regression: GET must return the same connection-detail fields POST does, so the
+        # desktop UI's IP picker (documented in README as the fix for multi-homed machines)
+        # doesn't disappear on the very next 2s poll.
+        start_body = client.post("/api/v1/mobile/session", json={}).json()
+
+        resp = client.get("/api/v1/mobile/session")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ips"] == start_body["ips"]
+        assert body["selected_ip"] == start_body["selected_ip"]
+        assert body["port"] == start_body["port"]
+        assert body["session_id"] == start_body["session_id"]
+        assert body["pairing_expires_at"] == start_body["pairing_expires_at"]
 
     def test_response_never_contains_a_device_token(self, client, fake_lan_server):
         client.post("/api/v1/mobile/session", json={})
