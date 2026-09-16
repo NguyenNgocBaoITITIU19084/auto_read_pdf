@@ -69,6 +69,35 @@ npm run build:win
 
 ---
 
+## 📱 Chụp booking bằng điện thoại (quét mã QR)
+
+Không cần cài app trên điện thoại — chụp ảnh booking trực tiếp bằng camera điện thoại và gửi thẳng vào máy tính để đọc OCR.
+
+### Cách dùng
+
+1. Ở tab **Booking**, bấm nút **"Chụp từ điện thoại"** (icon 📱) cạnh nút "Đọc ảnh AI".
+2. Máy tính hiện mã QR. Dùng camera hoặc trình quét QR trên điện thoại quét mã đó (**điện thoại và máy tính phải ở chung một mạng WiFi**).
+3. Trình duyệt trên điện thoại tự mở một trang chụp ảnh — không cần cài gì thêm.
+4. Bấm **"📷 Chụp ảnh booking"**: camera hệ thống mở ra, chụp xong ảnh tự gửi về máy tính.
+5. Trên máy tính, ảnh tự động mở màn hình xem trước + trích xuất OCR (giống hệt khi dán ảnh) để kiểm tra, sửa và lưu vào bộ sưu tập đang chọn.
+6. Chụp liên tiếp nhiều ảnh: máy tính sẽ mở lần lượt từng ảnh một, không mất ảnh nào; điện thoại hiện dấu ✓ khi máy tính đã nhận.
+7. Đóng cửa sổ mã QR **không** ngắt kết nối — điện thoại vẫn gửi ảnh tiếp được. Bấm **"Ngắt kết nối"** khi dùng xong, hoặc để yên 30 phút hệ thống tự ngắt.
+
+### Xử lý sự cố kết nối
+
+- **Điện thoại không quét được / không kết nối được máy tính**: kiểm tra lại điện thoại và máy tính đang **cùng một mạng WiFi** (không phải WiFi khách — nhiều WiFi khách/công ty chặn các thiết bị nói chuyện với nhau).
+- **Đang dùng WiFi khách**: bật hotspot (phát WiFi) riêng trên điện thoại, rồi cho máy tính kết nối vào hotspot đó thay vì WiFi khách.
+- **Windows hiện hộp thoại tường lửa lần đầu bật tính năng này**: chọn cho phép ở mạng **"Private"** (mạng riêng tư) để tính năng hoạt động.
+- **Đang dùng VPN**: tắt VPN trên cả điện thoại và máy tính rồi thử lại.
+- **Mã QR báo lỗi "đã dùng hoặc hết hạn"**: mỗi mã chỉ dùng được một lần và tự hết hạn sau vài phút — quét lại mã QR mới đang hiện trên màn hình máy tính.
+- **Máy tính có nhiều mạng (VPN, Ethernet + WiFi,...)**: chọn đúng địa chỉ IP ở khung chọn IP trong cửa sổ mã QR.
+
+### Lưu ý bảo mật
+
+Ảnh chỉ được truyền trong mạng nội bộ (không qua internet, không có máy chủ trung gian), không lưu vào cơ sở dữ liệu và bị xoá ngay khi ngắt kết nối. API chính của ứng dụng (cổng `8000`) luôn chỉ chạy trên máy (`127.0.0.1`), không bao giờ lộ ra mạng WiFi — chỉ có tính năng chụp ảnh này mở một cổng riêng (`8765`) khi đang sử dụng.
+
+---
+
 ## 📑 Các hãng tàu và mẫu trích xuất PDF hỗ trợ
 
 - **Hãng DONGJIN**: Nhận diện chuyến Direct, lấy tàu Trunk Vessel, bãi hạ CAT LAI TERMINAL, quy cách cont (`20'DRY ST.-1` $\rightarrow$ `20'DRY ST` + Qty `1`), ngày cắt máng và ETD.
