@@ -344,5 +344,9 @@ class TestRealPortIntegration:
             started = False
 
         # Port must now be closed: a new connection attempt should fail.
-        with pytest.raises(httpx.ConnectError):
+        # On Linux/macOS a closed loopback port refuses the connection
+        # immediately (ConnectError); on Windows CI runners the firewall can
+        # silently drop the SYN instead of sending RST, so the same "nothing
+        # is listening" condition surfaces as a ConnectTimeout instead.
+        with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
             httpx.get(f"http://127.0.0.1:{port}/", timeout=2)
