@@ -1,21 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  FolderPlus, Trash2, Moon, Sun, Database, 
-  RefreshCw, Layers, ShieldCheck, Settings2, Palette,
-  HelpCircle, Compass, Sparkles, BookOpen, ChevronRight
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import {
+  Moon, Sun, Database,
+  RefreshCw, ShieldCheck, Palette,
+  HelpCircle
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { TabId } from './Tabs';
-import { Modal } from './Modal';
-import { BackupModal } from './BackupModal';
-import { CollectionManagerModal } from './CollectionManagerModal';
-import { ColorConfigModal } from './ColorConfigModal';
 import { Tooltip } from './Tooltip';
-import { 
-  startFullAppTour, startTabTour, 
-  hasCompletedOnboarding, setOnboardingCompleted,
+import { CollectionSwitcher } from './CollectionSwitcher';
+import { describeAutoSyncSchedule, formatIntervalShort } from '../../services/autoSync';
+import {
+  hasCompletedOnboarding,
   subscribeTourActions
-} from '../../services/tourService';
+} from '../../services/tourEvents';
+
+const BackupModal = lazy(() => import('./BackupModal').then((m) => ({ default: m.BackupModal })));
+const CollectionManagerModal = lazy(() => import('./CollectionManagerModal').then((m) => ({ default: m.CollectionManagerModal })));
+const ColorConfigModal = lazy(() => import('./ColorConfigModal').then((m) => ({ default: m.ColorConfigModal })));
+const HelpTourModal = lazy(() => import('./HelpTourModal').then((m) => ({ default: m.HelpTourModal })));
+const WelcomeModal = lazy(() => import('./WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
 
 interface HeaderProps {
   activeTab?: TabId;
@@ -23,22 +26,17 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavigateTab }) => {
-  const { 
-    t, language, setLanguage, isDark, setIsDark, 
-    collections, activeCollection, setActiveCollection, 
-    handleCreateCollection, handleDeleteCollection,
-    autoSyncEnabled, syncInterval, toggleAutoSync
+  const {
+    t, language, setLanguage, isDark, setIsDark,
+    autoSyncEnabled, syncInterval, toggleAutoSync, autoSyncStatus
   } = useApp();
 
-  const [isNewColOpen, setIsNewColOpen] = useState(false);
-  const [newColName, setNewColName] = useState('');
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isCollectionManagerOpen, setIsCollectionManagerOpen] = useState(false);
   const [isColorConfigOpen, setIsColorConfigOpen] = useState(false);
 
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
-  const [dontShowAgain, setDontShowAgain] = useState(false);
 
   // First time onboarding check
   useEffect(() => {
@@ -64,21 +62,20 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
     return unsubscribe;
   }, []);
 
-  const submitCreateCollection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newColName.trim()) return;
-    await handleCreateCollection(newColName.trim());
-    setNewColName('');
-    setIsNewColOpen(false);
-  };
+  const syncTimes = autoSyncStatus?.mode === 'times' ? autoSyncStatus.times : null;
+  const intervalLabel = syncTimes
+    ? (syncTimes.length <= 2 ? syncTimes.join(', ') : `${syncTimes[0]} +${syncTimes.length - 1}`) || '--:--'
+    : formatIntervalShort(syncInterval);
+  const scheduleText = describeAutoSyncSchedule(
+    autoSyncStatus ?? { mode: 'interval', interval_minutes: syncInterval, times: [] },
+    t.autoSync
+  );
+  const autoSyncRunning = !!autoSyncStatus?.running;
 
-  const intervalLabel = syncInterval >= 60 && syncInterval % 60 === 0 
-    ? `${syncInterval / 60}h` 
-    : `${syncInterval}p`;
-
-  const handleStartFullTour = () => {
+  const handleStartFullTour = async () => {
     setIsHelpModalOpen(false);
     setIsWelcomeModalOpen(false);
+    const { startFullAppTour } = await import('../../services/tourService');
     setTimeout(() => {
       startFullAppTour({
         t,
@@ -87,18 +84,12 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
     }, 150);
   };
 
-  const handleStartTabTour = () => {
+  const handleStartTabTour = async () => {
     setIsHelpModalOpen(false);
+    const { startTabTour } = await import('../../services/tourService');
     setTimeout(() => {
       startTabTour(activeTab, { t });
     }, 150);
-  };
-
-  const handleDismissWelcome = () => {
-    setIsWelcomeModalOpen(false);
-    if (dontShowAgain) {
-      setOnboardingCompleted(true);
-    }
   };
 
   const activeTabName = t.tabs[activeTab] || activeTab;
@@ -122,47 +113,9 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
           </div>
         </div>
 
-        {/* Collection Dropdown */}
-        <div data-tour="collection-selector" className="flex items-center gap-2 pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0">
-            <Layers className="w-3.5 h-3.5" />
-            <span>{t.common.collection}:</span>
-          </div>
-
-          <Tooltip content="Chọn bộ sưu tập để làm việc" position="bottom">
-            <select
-              value={activeCollection?.id || ''}
-              onChange={(e) => {
-                const selected = collections.find((c) => c.id === Number(e.target.value));
-                if (selected) setActiveCollection(selected);
-              }}
-              className="w-44 text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 cursor-pointer truncate"
-            >
-              {collections.map((col) => (
-                <option key={col.id} value={col.id}>
-                  {col.name}
-                </option>
-              ))}
-            </select>
-          </Tooltip>
-
-          <Tooltip content="Tạo bộ sưu tập mới" position="bottom">
-            <button
-              onClick={() => setIsNewColOpen(true)}
-              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-100 dark:bg-slate-800 hover:bg-primary-50 dark:hover:bg-primary-950/50 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-            >
-              <FolderPlus className="w-4 h-4" />
-            </button>
-          </Tooltip>
-
-          <Tooltip content="Quản lý bộ sưu tập (xóa, tạo mới...)" position="bottom">
-            <button
-              onClick={() => setIsCollectionManagerOpen(true)}
-              className="p-1.5 text-slate-600 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-400 bg-slate-100 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950/50 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
-          </Tooltip>
+        {/* Collection Switcher */}
+        <div className="pl-4 border-l border-slate-200 dark:border-slate-800 shrink-0">
+          <CollectionSwitcher onManage={() => setIsCollectionManagerOpen(true)} />
         </div>
       </div>
 
@@ -170,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
       <div className="flex items-center gap-2.5 shrink-0">
         {/* Auto Sync Toggle */}
         <div data-tour="auto-sync">
-          <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (mỗi ${syncInterval} phút). Nhấp để tắt hoặc vào tab Watchlist để đổi thời gian` : `Tự động đồng bộ đang TẮT (chu kỳ ${syncInterval} phút). Nhấp để bật hoặc vào tab Watchlist để đổi thời gian`} position="bottom">
+          <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (${scheduleText}). Nhấp để tắt hoặc vào Cài đặt / Watchlist để đổi lịch` : `Tự động đồng bộ đang TẮT (${scheduleText}). Nhấp để bật hoặc vào Cài đặt / Watchlist để đổi lịch`} position="bottom">
             <button
               onClick={() => toggleAutoSync()}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap shrink-0 ${
@@ -179,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-750'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'animate-spin text-emerald-600' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'text-emerald-600' : ''} ${autoSyncRunning ? 'animate-spin' : ''}`} />
               <span>{t.common.autoSync}: {autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
             </button>
           </Tooltip>
@@ -266,175 +219,65 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
       </div>
 
       {/* Welcome Onboarding Modal for First Time Users */}
-      <Modal
-        isOpen={isWelcomeModalOpen}
-        onClose={handleDismissWelcome}
-        title={t.tour.welcomeModalTitle}
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4 pt-1">
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-primary-50 dark:bg-primary-950/40 border border-primary-100 dark:border-primary-900/60">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary-600 to-sky-400 flex items-center justify-center text-white shadow-md shrink-0">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              {t.tour.welcomeModalDesc}
-            </p>
-          </div>
-
-          <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={dontShowAgain}
-              onChange={(e) => setDontShowAgain(e.target.checked)}
-              className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500"
-            />
-            <span>{t.tour.dontShowAgain}</span>
-          </label>
-
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={handleDismissWelcome}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
-            >
-              {t.tour.skipTourBtn}
-            </button>
-            <button
-              type="button"
-              onClick={handleStartFullTour}
-              className="px-4 py-2 text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 rounded-xl shadow-md shadow-primary-500/20 transition-all flex items-center gap-1.5"
-            >
-              <Compass className="w-3.5 h-3.5" />
-              <span>{t.tour.startTourBtn}</span>
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* New Collection Modal */}
-      <Modal
-        isOpen={isNewColOpen}
-        onClose={() => setIsNewColOpen(false)}
-        title={t.common.newCollection}
-        maxWidth="max-w-md"
-      >
-        <form onSubmit={submitCreateCollection} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
-              {t.common.collection}
-            </label>
-            <input
-              type="text"
-              required
-              autoFocus
-              value={newColName}
-              onChange={(e) => setNewColName(e.target.value)}
-              placeholder={t.common.enterCollectionName}
-              className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setIsNewColOpen(false)}
-              className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
-            >
-              {t.common.cancel}
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-semibold text-white bg-primary-600 hover:bg-primary-700 rounded-xl shadow-md shadow-primary-500/20 transition-colors"
-            >
-              {t.common.save}
-            </button>
-          </div>
-        </form>
-      </Modal>
+      {isWelcomeModalOpen && (
+        <Suspense fallback={null}>
+          <WelcomeModal
+            isOpen={isWelcomeModalOpen}
+            onClose={() => setIsWelcomeModalOpen(false)}
+            t={t}
+            onStartFullTour={handleStartFullTour}
+          />
+        </Suspense>
+      )}
 
       {/* Backup & Restore Modal */}
-      <BackupModal
-        isOpen={isBackupOpen}
-        onClose={() => setIsBackupOpen(false)}
-      />
+      {isBackupOpen && (
+        <Suspense fallback={null}>
+          <BackupModal
+            isOpen={isBackupOpen}
+            onClose={() => setIsBackupOpen(false)}
+            onNavigateToLogs={onNavigateTab ? () => {
+              setIsBackupOpen(false);
+              onNavigateTab('logs');
+            } : undefined}
+          />
+        </Suspense>
+      )}
 
       {/* Collection Manager Modal */}
-      <CollectionManagerModal
-        isOpen={isCollectionManagerOpen}
-        onClose={() => setIsCollectionManagerOpen(false)}
-      />
+      {isCollectionManagerOpen && (
+        <Suspense fallback={null}>
+          <CollectionManagerModal
+            isOpen={isCollectionManagerOpen}
+            onClose={() => setIsCollectionManagerOpen(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Color Config Modal */}
-      <ColorConfigModal
-        isOpen={isColorConfigOpen}
-        onClose={() => setIsColorConfigOpen(false)}
-      />
+      {isColorConfigOpen && (
+        <Suspense fallback={null}>
+          <ColorConfigModal
+            isOpen={isColorConfigOpen}
+            onClose={() => setIsColorConfigOpen(false)}
+          />
+        </Suspense>
+      )}
 
       {/* Interactive Help & Tour Center Modal */}
-      <Modal
-        isOpen={isHelpModalOpen}
-        onClose={() => setIsHelpModalOpen(false)}
-        title={t.tour.helpMenuTitle}
-        maxWidth="max-w-lg"
-      >
-        <div className="space-y-3 pt-1">
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Chọn chuyến tham quan hướng dẫn tương tác hoặc khám phá các tính năng chuyên sâu:
-          </p>
-
-          <div className="grid grid-cols-1 gap-2.5">
-            {/* Full App Tour Option */}
-            <button
-              type="button"
-              onClick={handleStartFullTour}
-              className="w-full text-left p-3.5 rounded-2xl bg-gradient-to-r from-primary-50 to-sky-50 dark:from-primary-950/40 dark:to-sky-950/30 border border-primary-200 dark:border-primary-800/80 hover:border-primary-400 dark:hover:border-primary-600 transition-all flex items-start gap-3.5 group cursor-pointer shadow-xs"
-            >
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary-600 to-sky-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-primary-500/20 group-hover:scale-105 transition-transform">
-                <Sparkles className="w-5 h-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                  <span className="text-primary-700 dark:text-primary-300 font-extrabold">{t.tour.fullTourTitle}</span>
-                  <ChevronRight className="w-4 h-4 text-primary-500 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                  {t.tour.fullTourSubtitle}
-                </p>
-              </div>
-            </button>
-
-            {/* Current Active Tab Tour Option */}
-            <button
-              type="button"
-              onClick={handleStartTabTour}
-              className="w-full text-left p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 hover:border-primary-400 dark:hover:border-primary-600 transition-all flex items-start gap-3.5 group cursor-pointer shadow-xs"
-            >
-              <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center justify-between">
-                  <span>{t.tour.tabTourTitle} ({activeTabName})</span>
-                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  {t.tour.tabTourSubtitle}
-                </p>
-              </div>
-            </button>
-          </div>
-
-          <div className="flex items-center justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
-            <button
-              type="button"
-              onClick={() => setIsHelpModalOpen(false)}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-            >
-              {t.common.close}
-            </button>
-          </div>
-        </div>
-      </Modal>
+      {isHelpModalOpen && (
+        <Suspense fallback={null}>
+          <HelpTourModal
+            isOpen={isHelpModalOpen}
+            onClose={() => setIsHelpModalOpen(false)}
+            activeTab={activeTab}
+            activeTabName={activeTabName}
+            t={t}
+            onStartFullTour={handleStartFullTour}
+            onStartTabTour={handleStartTabTour}
+          />
+        </Suspense>
+      )}
     </header>
   );
 };

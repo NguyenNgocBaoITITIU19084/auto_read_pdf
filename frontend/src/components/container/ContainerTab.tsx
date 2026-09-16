@@ -1,48 +1,86 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Box, Search, RefreshCw, Trash2, FileSpreadsheet, 
-  SlidersHorizontal, Eye, BookmarkPlus, BookmarkCheck, Copy, Filter
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  Box, Search, RefreshCw, Trash2, FileSpreadsheet,
+  SlidersHorizontal, BookmarkPlus, BookmarkMinus, Filter, ClipboardCopy, FolderInput, RotateCw
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { ContainerInfo, ContainerWatchlist } from '../../types';
-import { 
-  getContainers, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers, 
-  addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist 
+import { useToastActions } from '../../context/ToastContext';
+import { useConfirm } from '../../hooks/useConfirm';
+import { useRowSelection } from '../../hooks/useRowSelection';
+import { ContainerInfo, ContainerWatchlist, ContainerWatchlistBatchItem, PageResult, ContainerPageResult, TableQuery } from '../../types';
+import {
+  getContainers, getContainersPage, getContainerIds, getContainersByIds, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
+  addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist,
+  addContainerWatchlistBatch, removeContainerWatchlistBatch, resyncContainersApi,
 } from '../../services/api';
+import { tf } from '../../services/i18nFormat';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
+import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
+import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
 import { ContainerDetailModal } from './ContainerDetailModal';
 import { ContainerWatchlistModal } from './ContainerWatchlistModal';
+import { ContainerRow } from './ContainerRow';
 import { ResizableTh } from '../common/ResizableTh';
-import { useColumnSettings } from '../../hooks/useColumnSettings';
+import { ColumnMigration, useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
-import { formatTimeAgo, isRecentUpdate, formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
+import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
-import { ValueBadge } from '../common/ValueBadge';
-import { subscribeTourActions } from '../../services/tourService';
+import { subscribeTourActions } from '../../services/tourEvents';
+import { useServerTable, LoadMode } from '../../hooks/useServerTable';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useVirtualRows } from '../../hooks/useVirtualRows';
+import {
+  useStableCallback, useAutoRefresh, watchlistSignature, rowsToTSV, errorMessage,
+} from '../vessel/tableHelpers';
+import { getCustomsStatus, getImdgInfo, sanitizeDisplayValue } from './customs';
 
 interface ContainerTabProps {
   initialSearchQuery?: string;
 }
 
+/** v2: merge "Trạng thái thông quan" + "Giám sát HQ" into "Tình trạng thông quan". */
+const COLUMN_MIGRATION: ColumnMigration = {
+  version: 2,
+  replace: { custom_clearance_status: 'customs_status' },
+  hide: ['cust'],
+};
+
+const getRowId = (r: ContainerInfo) => r.id;
+const norm = (s?: string | null) => (s || '').trim().toUpperCase();
+
+const previewList = (items: string[], max = 5) =>
+  items.length > max ? `${items.slice(0, max).join(', ')}, … (+${items.length - max})` : items.join(', ');
+
+/** Value used for export / TSV copy (merged customs, IMDG link, no raw HTML). */
+const getContainerExportValue = (row: ContainerInfo, key: string): unknown => {
+  if (key === 'customs_status') return getCustomsStatus(row);
+  if (key === 'haz') {
+    const { text, url } = getImdgInfo(row);
+    return text || url;
+  }
+  const v = row[key];
+  return v === undefined || v === null ? v : sanitizeDisplayValue(v);
+};
+
+const toExportRow = (row: ContainerInfo): ContainerInfo => ({
+  ...row,
+  customs_status: getCustomsStatus(row),
+  haz: String(getContainerExportValue(row, 'haz') || ''),
+});
+
 export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }) => {
-  const { t, activeCollection, addToast, autoSyncEnabled } = useApp();
-  const [containers, setContainers] = useState<ContainerInfo[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { t, activeCollection, autoSyncEnabled, autoSyncStatus } = useApp();
+  const { addToast } = useToastActions();
+  const confirm = useConfirm();
   const [querying, setQuerying] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkBusy, setBulkBusy] = useState<string | null>(null);
 
   // Filter by event type
   const [eventTypeFilter, setEventTypeFilter] = useState<string>('ALL');
 
-  // Pagination state
-  const [pageSize, setPageSize] = useState<number>(() => {
-    const saved = localStorage.getItem('container_page_size');
-    return saved && !isNaN(Number(saved)) ? Number(saved) : 50;
-  });
-  const [currentPage, setCurrentPage] = useState<number>(1);
-
+  // Search in database
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
 
@@ -61,6 +99,9 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
   const [watchlist, setWatchlist] = useState<ContainerWatchlist[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
+  const [exportRows, setExportRows] = useState<ContainerInfo[]>([]);
+  const [isMoveOpen, setIsMoveOpen] = useState(false);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
 
   // Listen to interactive tour triggers (open/close Container Watchlist modal)
@@ -108,7 +149,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     { key: "im_exp", label: t.container.columns["im_exp"], visible: true },
     { key: "bill_book", label: t.container.columns["bill_book"], visible: true },
     { key: "cust_approval_date", label: t.container.columns["cust_approval_date"], visible: false },
-    { key: "custom_clearance_status", label: t.container.columns["custom_clearance_status"], visible: true },
+    { key: "customs_status", label: t.container.columns["customs_status"], visible: true },
+    { key: "custom_clearance_status", label: t.container.columns["custom_clearance_status"], visible: false },
     { key: "infras_fee_status", label: t.container.columns["infras_fee_status"], visible: true },
     { key: "item_seal_no", label: t.container.columns["item_seal_no"], visible: true },
     { key: "note", label: t.container.columns["note"], visible: true },
@@ -137,7 +179,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     "location": 95,
     "stack": 75,
     "temp": 75,
-    "haz": 75,
+    "haz": 110,
     "load_to_vessel": 90,
     "pod_destination": 95,
     "truck_vessel": 140,
@@ -149,6 +191,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     "im_exp": 80,
     "bill_book": 125,
     "cust_approval_date": 140,
+    "customs_status": 165,
     "custom_clearance_status": 120,
     "infras_fee_status": 115,
     "item_seal_no": 105,
@@ -161,6 +204,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     storageKey: 'container_table',
     defaultColumns,
     defaultWidths,
+    migration: COLUMN_MIGRATION,
   });
 
   useEffect(() => {
@@ -177,54 +221,75 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     );
   }, [t, defaultColumns, setColumns]);
 
+  const visibleColumns = useMemo(() => columns.filter((c) => c.visible), [columns]);
+
   const getColLabel = (key: string, fallback: string) => {
     const col = columns.find((c) => c.key === key);
     return col?.label || fallback;
   };
 
-  const loadWatchlist = async () => {
+  // ---------------------------------------------------------------------------
+  // Data loading (server-paged table + separate watchlist load)
+  // ---------------------------------------------------------------------------
+  const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  const tableQuery = useMemo<TableQuery>(
+    () => ({
+      search_query: debouncedQuery,
+      search_field: searchField,
+      event_type: eventTypeFilter === 'ALL' ? undefined : eventTypeFilter,
+    }),
+    [debouncedQuery, searchField, eventTypeFilter]
+  );
+
+  const table = useServerTable<ContainerInfo, ContainerPageResult>({
+    enabled: !!activeCollection,
+    queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
+    pageSizeStorageKey: 'container_page_size',
+    fetchPage: (limit, offset) => getContainersPage(activeCollection!.id, limit, offset, tableQuery),
+    onError: (e) => addToast(errorMessage(e, t.common.error), 'error'),
+  });
+  const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+
+  const watchSigRef = useRef('');
+  const loadWatchlist = useStableCallback(async () => {
     if (!activeCollection) return;
     try {
       const data = await getContainerWatchlist(activeCollection.id);
-      setWatchlist(data);
+      const wsig = watchlistSignature(data);
+      if (wsig !== watchSigRef.current) {
+        watchSigRef.current = wsig;
+        setWatchlist(data);
+      }
     } catch (e) {
       console.error(e);
     }
-  };
+  });
 
-  const loadData = async (showLoading = true) => {
-    if (!activeCollection) return;
-    try {
-      if (showLoading) setLoading(true);
-      const data = await getContainers(activeCollection.id, searchQuery, searchField);
-      setContainers(data);
-      loadWatchlist();
-    } catch (e: any) {
-      console.error(e);
-      if (showLoading) addToast(e.message || t.common.error, 'error');
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  };
+  /** 'loading' | 'refresh' | 'silent' — reloads the current page and the watchlist together. */
+  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    await Promise.all([table.reload(mode), loadWatchlist()]);
+  });
 
   useEffect(() => {
-    setSelectedIds([]);
-    setCurrentPage(1);
-    loadData(true);
     loadWatchlist();
-  }, [activeCollection, searchQuery, searchField]);
+  }, [activeCollection?.id, loadWatchlist]);
 
-  // Compute event counts across all containers in current collection
+  const silentRefresh = useCallback(() => {
+    loadData('silent');
+  }, [loadData]);
+
+  // Refetch when the scheduler finishes a run; 60s safety poll while auto-sync is on; paused when hidden.
+  useAutoRefresh({
+    enabled: autoSyncEnabled && !!activeCollection,
+    lastRunAt: autoSyncStatus?.last_run_at,
+    running: autoSyncStatus?.running,
+    refresh: silentRefresh,
+  });
+
+  // Event counts from server result or fallback
   const eventCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: containers.length };
-    containers.forEach((c) => {
-      const type = (c.event_type || '').trim().toUpperCase();
-      if (type) {
-        counts[type] = (counts[type] || 0) + 1;
-      }
-    });
-    return counts;
-  }, [containers]);
+    return table.result?.event_type_counts || { ALL: total };
+  }, [table.result?.event_type_counts, total]);
 
   // List of distinct event types found in data
   const availableEventTypes = useMemo(() => {
@@ -237,115 +302,86 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     return sorted;
   }, [eventCounts]);
 
-  // Filter containers by selected event type
-  const filteredContainers = useMemo(() => {
-    if (eventTypeFilter === 'ALL') return containers;
-    return containers.filter(
-      (c) => (c.event_type || '').trim().toUpperCase() === eventTypeFilter.toUpperCase()
-    );
-  }, [containers, eventTypeFilter]);
+  const selection = useRowSelection(
+    pageRows,
+    getRowId,
+    [activeCollection?.id, debouncedQuery, searchField, eventTypeFilter],
+    { pruneMissing: false }
+  );
+  const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
 
-  const paginatedContainers = useMemo(() => {
-    if (pageSize >= filteredContainers.length || pageSize <= 0) return filteredContainers;
-    const start = (currentPage - 1) * pageSize;
-    return filteredContainers.slice(start, start + pageSize);
-  }, [filteredContainers, currentPage, pageSize]);
+  /** Selected rows even when they live on other pages. */
+  const resolveSelectedRows = useCallback(async (): Promise<ContainerInfo[]> => {
+    if (selection.selectedRows.length === selection.count) return selection.selectedRows;
+    return getContainersByIds(selectedIdList);
+  }, [selection.selectedRows, selection.count, selectedIdList]);
 
-  // Periodic polling when auto-sync is active to automatically reflect new container statuses
-  useEffect(() => {
-    if (!autoSyncEnabled || !activeCollection) return;
+  const handleSelectAllResults = useCallback(async () => {
+    if (!activeCollection) return;
+    try {
+      const ids = await getContainerIds(activeCollection.id, tableQuery);
+      selection.selectIds(ids, true);
+    } catch (e) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    }
+  }, [activeCollection, tableQuery, selection, addToast, t]);
 
-    const timer = setInterval(() => {
-      loadData(false);
-    }, 10000);
-
-    return () => clearInterval(timer);
-  }, [autoSyncEnabled, activeCollection, searchQuery, searchField]);
+  // Watchlist index: container_no -> entries (site/event checked on the few candidates)
+  const watchlistIndex = useMemo(() => {
+    const map = new Map<string, ContainerWatchlist[]>();
+    watchlist.forEach((w) => {
+      const no = norm(w.container_no);
+      if (!no) return;
+      const list = map.get(no);
+      if (list) list.push(w);
+      else map.set(no, [w]);
+    });
+    return map;
+  }, [watchlist]);
 
   // Match a container item with watchlist strictly (by container_no, site_id, and event_type)
-  const getWatchlistItem = (item: ContainerInfo): ContainerWatchlist | undefined => {
-    if (!item) return undefined;
-    const itemNo = (item.containerno || '').trim().toUpperCase();
+  const findWatchlistItem = useCallback((item: ContainerInfo): ContainerWatchlist | undefined => {
+    const itemNo = norm(item?.containerno);
     if (!itemNo) return undefined;
-
-    const itemSite = (item.site_id || '').trim().toUpperCase();
-    const itemEvent = (item.event_type || '').trim().toUpperCase();
-
-    return watchlist.find((w) => {
-      const wNo = (w.container_no || '').trim().toUpperCase();
-      if (!wNo || wNo !== itemNo) return false;
-
-      const wSite = (w.site_id || '').trim().toUpperCase();
+    const candidates = watchlistIndex.get(itemNo);
+    if (!candidates) return undefined;
+    const itemSite = norm(item.site_id);
+    const itemEvent = norm(item.event_type);
+    return candidates.find((w) => {
+      const wSite = norm(w.site_id);
       if (wSite && itemSite && wSite !== itemSite) return false;
-
-      const wEvent = (w.event_type || '').trim().toUpperCase();
+      const wEvent = norm(w.event_type);
       if (wEvent && itemEvent && wEvent !== itemEvent) return false;
-
       return true;
     });
-  };
+  }, [watchlistIndex]);
 
   // Toggle add/remove container from watchlist
-  const handleToggleWatchlist = async (item: ContainerInfo) => {
+  const handleToggleWatchlist = useStableCallback(async (item: ContainerInfo) => {
     if (!activeCollection) return;
-    const cleanItemNo = (item.containerno || '').trim().toUpperCase();
+    const cleanItemNo = norm(item.containerno);
     if (!cleanItemNo) {
       addToast('Không tìm thấy số Container hợp lệ', 'error');
       return;
     }
-    const cleanSite = (item.site_id || siteId || localStorage.getItem('last_container_site_id') || 'CTL').trim().toUpperCase();
-    const cleanEvent = (item.event_type || '').trim().toUpperCase();
+    const cleanSite = norm(item.site_id || siteId || localStorage.getItem('last_container_site_id') || 'CTL');
+    const cleanEvent = norm(item.event_type);
 
-    const matched = getWatchlistItem(item);
+    const matched = findWatchlistItem(item);
     try {
       if (matched) {
         await deleteContainerWatchlist(matched.id);
         setWatchlist((prev) => prev.filter((w) => w.id !== matched.id));
         addToast(`Đã xóa container ${cleanItemNo}${cleanEvent ? ` (${cleanEvent})` : ''} khỏi Watchlist!`, 'success');
       } else {
-        await addContainerWatchlist(
-          activeCollection.id,
-          cleanSite,
-          cleanItemNo,
-          cleanEvent
-        );
+        await addContainerWatchlist(activeCollection.id, cleanSite, cleanItemNo, cleanEvent);
         addToast(`Đã thêm container ${cleanItemNo}${cleanEvent ? ` (${cleanEvent})` : ''} vào Watchlist!`, 'success');
         await loadWatchlist();
       }
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     }
-  };
-
-  const handleToggleSelect = (id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleSelectAll = () => {
-    const pageIds = paginatedContainers.map((c) => c.id).filter((id): id is number => typeof id === 'number');
-    if (pageIds.length === 0) return;
-    const allPageSelected = pageIds.every((id) => selectedIds.includes(id));
-    if (allPageSelected) {
-      setSelectedIds((prev) => prev.filter((id) => !pageIds.includes(id)));
-    } else {
-      setSelectedIds((prev) => Array.from(new Set([...prev, ...pageIds])));
-    }
-  };
-
-  const handleBatchDelete = async () => {
-    if (selectedIds.length === 0) return;
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} container đã chọn?`)) return;
-    try {
-      await deleteContainersBatch(selectedIds);
-      addToast(`Đã xóa thành công ${selectedIds.length} container!`, 'success');
-      setContainers((prev) => prev.filter((c) => !selectedIds.includes(c.id)));
-      setSelectedIds([]);
-    } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
-    }
-  };
+  });
 
   const handleQueryEport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,48 +412,221 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       } else {
         addToast(res.message || 'Không tìm thấy thông tin container trên ePort', 'info');
       }
-      await loadData();
+      await loadData('refresh');
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     } finally {
       setQuerying(false);
     }
   };
 
-  const handleCopyRow = async (item: ContainerInfo) => {
-    const text = formatRowForCopy(item, columns);
+  const handleCopyRow = useStableCallback(async (item: ContainerInfo) => {
+    const text = formatRowForCopy(
+      { ...item, customs_status: getCustomsStatus(item), haz: getContainerExportValue(item, 'haz') },
+      columns
+    );
     const success = await copyTextToClipboard(text);
-    if (success) {
-      addToast(t.common.copySuccess, 'success');
-    } else {
-      addToast(t.common.error, 'error');
-    }
-  };
+    addToast(success ? t.common.copySuccess : t.common.error, success ? 'success' : 'error');
+  });
 
-  const handleDelete = async (id: number) => {
-    if (!window.confirm(t.common.deleteConfirm)) return;
+  const handleDelete = useStableCallback(async (id: number) => {
+    const ok = await confirm({ title: t.container.deleteOneTitle, message: t.common.deleteConfirm, danger: true });
+    if (!ok) return;
     try {
       await deleteContainer(id);
       addToast(t.common.success, 'success');
-      setContainers((prev) => prev.filter((c) => c.id !== id));
-      setSelectedIds((prev) => prev.filter((i) => i !== id));
+      selection.selectIds([id], false);
+      await loadData('refresh');
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     }
-  };
+  });
 
   const handleClearAll = async () => {
     if (!activeCollection) return;
-    if (!window.confirm(t.common.clearConfirm)) return;
+    const ok = await confirm({ title: t.container.clearAllTitle, message: t.common.clearConfirm, danger: true });
+    if (!ok) return;
     try {
       await clearContainers(activeCollection.id);
       addToast(t.common.success, 'success');
-      setContainers([]);
-      setSelectedIds([]);
+      selection.clear();
+      await loadData('refresh');
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(errorMessage(e, t.common.error), 'error');
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Bulk actions
+  // ---------------------------------------------------------------------------
+  const runBulk = async (key: string, fn: () => Promise<void>) => {
+    if (bulkBusy) return;
+    setBulkBusy(key);
+    try {
+      await fn();
+    } catch (e: any) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    const ids = selectedIdList;
+    if (ids.length === 0) return;
+    const ok = await confirm({
+      title: t.container.deleteSelectedTitle,
+      message: tf(t.bulk.deleteSelectedConfirm, { count: ids.length }),
+      danger: true,
+    });
+    if (!ok) return;
+    await runBulk('delete', async () => {
+      await deleteContainersBatch(ids);
+      addToast(tf(t.container.deleteSelectedSuccess, { count: ids.length }), 'success');
+      selection.selectIds(ids, false);
+      await loadData('refresh');
+    });
+  };
+
+  const handleBatchAddWatchlist = () =>
+    runBulk('watch-add', async () => {
+      if (!activeCollection) return;
+      const rows = await resolveSelectedRows();
+      const seen = new Set<string>();
+      const items: ContainerWatchlistBatchItem[] = [];
+      rows.forEach((r) => {
+        const containerNo = norm(r.containerno);
+        if (!containerNo || findWatchlistItem(r)) return;
+        const item = {
+          site_id: norm(r.site_id || siteId || 'CTL'),
+          container_no: containerNo,
+          event_type: norm(r.event_type),
+        };
+        const key = `${item.site_id}|${item.container_no}|${item.event_type}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        items.push(item);
+      });
+      if (items.length === 0) {
+        addToast(t.container.watchlistBatchAllTracked, 'info');
+        return;
+      }
+      const res = await addContainerWatchlistBatch(activeCollection.id, items);
+      addToast(tf(t.container.watchlistBatchAdded, { count: res?.added ?? items.length }), 'success');
+      await loadWatchlist();
+    });
+
+  const handleBatchRemoveWatchlist = () =>
+    runBulk('watch-remove', async () => {
+      const rows = await resolveSelectedRows();
+      const ids = new Set<number>();
+      rows.forEach((r) => {
+        const w = findWatchlistItem(r);
+        if (w) ids.add(w.id);
+      });
+      const idList = Array.from(ids);
+      if (idList.length === 0) {
+        addToast(t.container.watchlistBatchNoneTracked, 'info');
+        return;
+      }
+      const res = await removeContainerWatchlistBatch(idList);
+      const idSet = new Set(idList);
+      setWatchlist((prev) => prev.filter((w) => !idSet.has(w.id)));
+      addToast(tf(t.container.watchlistBatchRemoved, { count: res?.removed ?? idList.length }), 'success');
+    });
+
+  const handleBatchResync = (allEvents = false) =>
+    runBulk(allEvents ? 'resync-all' : 'resync', async () => {
+      const ids = selectedIdList;
+      if (ids.length === 0) return;
+      const res = await resyncContainersApi(ids, { allEvents });
+      const notFound = Array.isArray(res?.not_found) ? res.not_found : [];
+      const errors = Array.isArray(res?.errors) ? res.errors : [];
+      addToast(
+        tf(t.container.resyncSummary, { updated: res?.updated ?? 0, notFound: notFound.length, errors: errors.length }),
+        errors.length > 0 ? 'error' : notFound.length > 0 ? 'info' : 'success'
+      );
+      if (notFound.length > 0) addToast(tf(t.container.resyncNotFoundDetail, { items: previewList(notFound) }), 'info');
+      if (errors.length > 0) addToast(tf(t.container.resyncErrorDetail, { items: previewList(errors, 3) }), 'error');
+      await loadData('refresh');
+    });
+
+  const handleCopySelected = async () => {
+    const rows = await resolveSelectedRows();
+    if (rows.length === 0) return;
+    const cols = visibleColumns.map((c) => ({ key: c.key, label: c.label }));
+    const text = rowsToTSV(rows, cols, getContainerExportValue);
+    const success = await copyTextToClipboard(text);
+    addToast(
+      success ? tf(t.container.copyRowsSuccess, { count: rows.length }) : t.common.error,
+      success ? 'success' : 'error'
+    );
+  };
+
+  const handleOpenExport = async (scope: 'all' | 'selected') => {
+    if (!activeCollection) return;
+    setExportScope(scope);
+    try {
+      const rows = scope === 'all'
+        ? await getContainers(activeCollection.id, debouncedQuery, searchField)
+        : await resolveSelectedRows();
+      const filtered = eventTypeFilter === 'ALL' || scope === 'selected'
+        ? rows
+        : rows.filter((c) => (c.event_type || '').trim().toUpperCase() === eventTypeFilter.toUpperCase());
+      setExportRows(filtered.map(toExportRow));
+      setIsExportOpen(true);
+    } catch (e) {
+      addToast(errorMessage(e, t.common.error), 'error');
+    }
+  };
+
+  // Order matters: BulkActionBar shows the first 3 non-danger actions as labelled
+  // buttons and collapses the rest into a "Thêm" menu (E Task 5). Kept in the
+  // tab's pre-existing order (export, copy, watch-add first) rather than
+  // re-guessing priority.
+  const bulkActions: BulkAction[] = [
+    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => handleOpenExport('selected') },
+    { key: 'copy', label: t.bulk.copySelected, icon: ClipboardCopy, onClick: handleCopySelected },
+    { key: 'watch-add', label: t.bulk.addToWatchlist, icon: BookmarkPlus, onClick: handleBatchAddWatchlist, loading: bulkBusy === 'watch-add', disabled: !!bulkBusy },
+    {
+      key: 'watch-remove',
+      label: t.bulk.removeFromWatchlist,
+      icon: BookmarkMinus,
+      onClick: handleBatchRemoveWatchlist,
+      loading: bulkBusy === 'watch-remove',
+      disabled: !!bulkBusy,
+    },
+    { key: 'resync', label: t.bulk.resync, title: t.bulk.resyncSameEventTooltip, icon: RotateCw, onClick: () => handleBatchResync(false), loading: bulkBusy === 'resync', disabled: !!bulkBusy },
+    { key: 'resync-all', label: t.bulk.resyncAllEvents, title: t.bulk.resyncAllEventsTooltip, icon: RotateCw, onClick: () => handleBatchResync(true), loading: bulkBusy === 'resync-all', disabled: !!bulkBusy },
+    { key: 'move', label: t.container.moveToCollection, icon: FolderInput, onClick: () => setIsMoveOpen(true), disabled: !!bulkBusy },
+    { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
+  ];
+
+  const exportData = exportRows;
+
+  const exportColumns = useMemo(() => [
+    { key: "STT", label: t.container.columns["STT"] },
+    ...columns.map((c) => ({ key: c.key, label: c.label })),
+  ], [columns, t]);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualRows(pageRows.length, scrollRef);
+  const colSpan = visibleColumns.length + 3;
+
+  // Back to the top when the page or filters change
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [currentPage, pageSize, tableQuery]);
+
+  // Header checkbox (page) with indeterminate state
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  const pageAllSelected = selection.isPageAllSelected(pageRows);
+  const pagePartiallySelected = selection.isPagePartiallySelected(pageRows);
+  useEffect(() => {
+    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = pagePartiallySelected;
+  }, [pagePartiallySelected]);
+
+  const rowOffset = (currentPage - 1) * pageSize;
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
@@ -523,7 +732,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
             <option value="line_oper">{getColLabel("line_oper", t.container.columns["line_oper"])}</option>
             <option value="bill_book">{getColLabel("bill_book", t.container.columns["bill_book"])}</option>
             <option value="item_seal_no">{getColLabel("item_seal_no", t.container.columns["item_seal_no"])}</option>
-            <option value="custom_clearance_status">{getColLabel("custom_clearance_status", t.container.columns["custom_clearance_status"])}</option>
+            <option value="customs_status">{getColLabel("customs_status", t.container.columns["customs_status"])}</option>
             <option value="infras_fee_status">{getColLabel("infras_fee_status", t.container.columns["infras_fee_status"])}</option>
             <option value="pod_destination">{getColLabel("pod_destination", t.container.columns["pod_destination"])}</option>
             <option value="note">{getColLabel("note", t.container.columns["note"])}</option>
@@ -550,12 +759,11 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               value={eventTypeFilter}
               onChange={(e) => {
                 setEventTypeFilter(e.target.value);
-                setCurrentPage(1);
               }}
               className="text-xs font-bold bg-transparent text-slate-800 dark:text-slate-100 border-none outline-none cursor-pointer pr-1"
             >
               <option value="ALL" className="bg-white dark:bg-slate-800">
-                {t.container.allEvents || 'Tất cả'} ({containers.length})
+                {t.container.allEvents || 'Tất cả'} ({eventCounts['ALL'] ?? total})
               </option>
               {availableEventTypes.map((type) => (
                 <option key={type} value={type} className="bg-white dark:bg-slate-800">
@@ -567,24 +775,6 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          {selectedIds.length > 0 && (
-            <div className="flex items-center gap-1.5 mr-2 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 px-2 py-1 rounded-lg animate-in fade-in">
-              <button
-                onClick={handleBatchDelete}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Xóa đã chọn ({selectedIds.length})</span>
-              </button>
-              <button
-                onClick={() => setSelectedIds([])}
-                className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 underline px-1"
-              >
-                Bỏ chọn
-              </button>
-            </div>
-          )}
-
           <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
             <button
               onClick={() => setIsColumnConfigOpen(true)}
@@ -597,8 +787,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
           <Tooltip content="Xuất danh sách Container ra file Excel">
             <button
-              onClick={() => setIsExportOpen(true)}
-              disabled={containers.length === 0}
+              onClick={() => handleOpenExport('all')}
+              disabled={total === 0}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -608,14 +798,14 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
           <Tooltip content="Tải lại dữ liệu Container">
             <button
-              onClick={() => loadData(true)}
+              onClick={() => loadData('loading')}
               className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </Tooltip>
 
-          {containers.length > 0 && (
+          {total > 0 && (
             <Tooltip content="Xóa tất cả Container trong bộ sưu tập này">
               <button
                 onClick={handleClearAll}
@@ -629,7 +819,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       </div>
 
       {/* Quick Event Filter Pills */}
-      {containers.length > 0 && availableEventTypes.length > 0 && (
+      {availableEventTypes.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 text-xs shrink-0 shadow-2xs">
           <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1">
             <Filter className="w-3 h-3 text-primary-500" />
@@ -637,7 +827,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           </span>
           <button
             type="button"
-            onClick={() => { setEventTypeFilter('ALL'); setCurrentPage(1); }}
+            onClick={() => { setEventTypeFilter('ALL'); }}
             className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
               eventTypeFilter === 'ALL'
                 ? 'bg-primary-600 text-white shadow-xs'
@@ -650,7 +840,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                 ? 'bg-white/20 text-white'
                 : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 font-semibold'
             }`}>
-              {containers.length}
+              {eventCounts['ALL'] ?? total}
             </span>
           </button>
           {availableEventTypes.map((type) => {
@@ -667,7 +857,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               <button
                 key={type}
                 type="button"
-                onClick={() => { setEventTypeFilter(type); setCurrentPage(1); }}
+                onClick={() => { setEventTypeFilter(type); }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
                   isActive
                     ? `${pillColor} shadow-xs border-transparent`
@@ -690,33 +880,32 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
       {/* Container Table */}
       <div data-tour="container-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
-        <div className="flex-1 overflow-x-auto overflow-y-auto w-full">
+        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
               <tr>
                 <th className="py-2 px-2 text-center w-8 shrink-0">
                   <input
+                    ref={headerCheckboxRef}
                     type="checkbox"
-                    checked={paginatedContainers.length > 0 && paginatedContainers.every((c) => selectedIds.includes(c.id))}
-                    onChange={handleSelectAll}
+                    checked={pageAllSelected}
+                    onChange={() => selection.selectPage(pageRows, !pageAllSelected)}
                     className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                    title="Chọn tất cả trên trang này / Bỏ chọn"
+                    title={t.bulk.selectPage}
                   />
                 </th>
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-10 shrink-0 text-[11px]">
                   {t.common.stt}
                 </th>
-                {columns
-                  .filter((c) => c.visible)
-                  .map((col) => (
-                    <ResizableTh
-                      key={col.key}
-                      colKey={col.key}
-                      label={col.label}
-                      width={columnWidths[col.key]}
-                      onResize={startResize}
-                    />
-                  ))}
+                {visibleColumns.map((col) => (
+                  <ResizableTh
+                    key={col.key}
+                    colKey={col.key}
+                    label={col.label}
+                    width={columnWidths[col.key]}
+                    onResize={startResize}
+                  />
+                ))}
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">
                   {t.common.actions}
                 </th>
@@ -732,10 +921,10 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                   hasActions={true}
                   actionColClass="w-24"
                 />
-              ) : containers.length === 0 ? (
+              ) : pageRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={columns.filter((c) => c.visible).length + 3}
+                    colSpan={colSpan}
                     className="py-12 text-center text-slate-400 dark:text-slate-500"
                   >
                     <Box className="w-8 h-8 mx-auto mb-1.5 opacity-30" />
@@ -743,185 +932,39 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                   </td>
                 </tr>
               ) : (
-                paginatedContainers.map((item, idx) => {
-                  const isRecent = isRecentUpdate(item.queried_at, 45);
-                  const watchlistItem = getWatchlistItem(item);
-                  const isBookmarked = !!watchlistItem;
-                  const isSelected = selectedIds.includes(item.id);
-                  return (
-                    <tr
-                      key={item.id || idx}
-                      onDoubleClick={() => setSelectedContainer(item)}
-                      className={`hover:bg-sky-100/80 dark:hover:bg-sky-950/70 hover:shadow-xs transition-colors group cursor-pointer ${
-                        isSelected
-                          ? 'bg-sky-50 dark:bg-sky-950/50 ring-1 ring-inset ring-sky-300 dark:ring-sky-800'
-                          : isBookmarked
-                          ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-l-[3px] border-l-emerald-500'
-                          : ''
-                      }`}
-                    >
-                      <td className="py-1.5 px-2 text-center w-8" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleSelect(item.id)}
-                          className="rounded border-slate-300 dark:border-slate-700 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                        />
-                      </td>
-                      <td className="py-1.5 px-2.5 text-center font-medium text-slate-400 w-10">
-                        {(currentPage - 1) * pageSize + idx + 1}
-                      </td>
-                      {columns
-                        .filter((c) => c.visible)
-                        .map((col) => {
-                          const val = item[col.key] !== undefined && item[col.key] !== null ? item[col.key] : 'null';
-                          const isNull = val === 'null' || val === '' || val === 0;
-                          const w = columnWidths[col.key];
-
-                          if (col.key === 'queried_at') {
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate"
-                                title={`Thời gian cập nhật: ${String(val)}`}
-                              >
-                                {isNull ? (
-                                  <span className="text-slate-400 dark:text-slate-500 italic text-[11px]">Chưa cập nhật</span>
-                                ) : (
-                                  <span
-                                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold tracking-tight border ${
-                                      isRecent
-                                        ? 'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 shadow-2xs'
-                                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                                    }`}
-                                  >
-                                    <span
-                                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                        isRecent ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
-                                      }`}
-                                    />
-                                    <span>{formatTimeAgo(val)}</span>
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          }
-
-                          if (col.key === 'containerno') {
-                            return (
-                              <td
-                                key={col.key}
-                                style={{
-                                  width: w ? `${w}px` : undefined,
-                                  maxWidth: w ? `${w}px` : undefined,
-                                }}
-                                className="py-1.5 px-2.5 truncate font-mono font-bold"
-                                title={String(val)}
-                              >
-                                <div className="flex items-center gap-1.5 truncate">
-                                  {isBookmarked && (
-                                    <span
-                                      title="Đang trong Watchlist theo dõi"
-                                      className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"
-                                    />
-                                  )}
-                                  <ValueBadge
-                                    table="container"
-                                    columnKey={col.key}
-                                    value={val}
-                                    className="font-mono font-bold text-slate-900 dark:text-slate-100"
-                                    fallbackText="-"
-                                  />
-                                </div>
-                              </td>
-                            );
-                          }
-
-                          let displayVal = val;
-                          if (col.key === 'custom_clearance_status') {
-                            if (String(val).toUpperCase() === 'Y') displayVal = 'Đã duyệt (Y)';
-                            else if (String(val).toUpperCase() === 'N') displayVal = 'Chưa duyệt (N)';
-                          } else if (col.key === 'infras_fee_status') {
-                            if (String(val) === '3') displayVal = 'Chưa đóng (3)';
-                          }
-
-                          return (
-                            <td
-                              key={col.key}
-                              style={{
-                                width: w ? `${w}px` : undefined,
-                                maxWidth: w ? `${w}px` : undefined,
-                              }}
-                              className="py-1.5 px-2.5 truncate"
-                              title={`${col.label}: ${String(displayVal ?? '')}`}
-                            >
-                              <ValueBadge
-                                table="container"
-                                columnKey={col.key}
-                                value={displayVal}
-                                fallbackText="-"
-                              />
-                            </td>
-                          );
-                        })}
-                    <td className="py-1.5 px-2.5 text-center w-24">
-                      <div className="flex items-center justify-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
-                        <Tooltip content="Xem chi tiết đầy đủ thông tin Container">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setSelectedContainer(item); }}
-                            className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        </Tooltip>
-                        <Tooltip content="Sao chép thông tin dòng">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleCopyRow(item); }}
-                            className="p-1 rounded-md text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-950/50 transition-colors"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                        </Tooltip>
-                        <Tooltip
-                          content={
-                            isBookmarked
-                              ? (t.container.inWatchlistTooltip || 'Đang trong Watchlist (Nhấn để hủy theo dõi)')
-                              : (t.container.addToWatchlistTooltip || 'Thêm vào Watchlist để theo dõi')
-                          }
-                        >
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleToggleWatchlist(item); }}
-                            className={`p-1 rounded-md transition-all ${
-                              isBookmarked
-                                ? 'text-amber-500 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 shadow-2xs'
-                                : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50'
-                            }`}
-                          >
-                            {isBookmarked ? (
-                              <BookmarkCheck className="w-3.5 h-3.5 fill-amber-500/20 text-amber-500 dark:text-amber-400" />
-                            ) : (
-                              <BookmarkPlus className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </Tooltip>
-                        <Tooltip content="Xóa dòng Container này">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                            className="p-1 rounded-md text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </Tooltip>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
+                <>
+                  {virtual.paddingTop > 0 && (
+                    <tr aria-hidden="true" style={{ height: virtual.paddingTop }}>
+                      <td colSpan={colSpan} />
+                    </tr>
+                  )}
+                  {virtual.indexes.map((i) => {
+                    const item = pageRows[i];
+                    return (
+                      <ContainerRow
+                        key={item.id ?? i}
+                        item={item}
+                        rowNumber={rowOffset + i + 1}
+                        visibleColumns={visibleColumns}
+                        columnWidths={columnWidths}
+                        isSelected={selection.selectedIds.has(item.id)}
+                        isBookmarked={!!findWatchlistItem(item)}
+                        t={t}
+                        onToggleSelect={selection.toggle}
+                        onOpen={setSelectedContainer}
+                        onCopy={handleCopyRow}
+                        onToggleWatchlist={handleToggleWatchlist}
+                        onDelete={handleDelete}
+                      />
+                    );
+                  })}
+                  {virtual.paddingBottom > 0 && (
+                    <tr aria-hidden="true" style={{ height: virtual.paddingBottom }}>
+                      <td colSpan={colSpan} />
+                    </tr>
+                  )}
+                </>
+              )}
             </tbody>
           </table>
         </div>
@@ -929,16 +972,29 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         {/* Pagination Footer */}
         <Pagination
           currentPage={currentPage}
-          totalItems={filteredContainers.length}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={(newSize) => {
-            setPageSize(newSize);
-            localStorage.setItem('container_page_size', String(newSize));
-            setCurrentPage(1);
-          }}
+          onPageSizeChange={setPageSize}
         />
       </div>
+
+      <BulkActionBar
+        count={selection.count}
+        onClear={selection.clear}
+        actions={bulkActions}
+        extra={
+          !selection.isAllSelected && total > selection.count ? (
+            <button
+              type="button"
+              onClick={handleSelectAllResults}
+              className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap"
+            >
+              {tf(t.bulk.selectAllResults, { count: total })}
+            </button>
+          ) : undefined
+        }
+      />
 
       {/* Modals */}
       <ContainerDetailModal
@@ -950,18 +1006,26 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       <ContainerWatchlistModal
         isOpen={isWatchlistOpen}
         onClose={() => setIsWatchlistOpen(false)}
-        onDataUpdated={loadData}
+        onDataUpdated={() => loadData('refresh')}
       />
 
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
-        data={filteredContainers}
-        allColumns={[
-          { key: "STT", label: t.container.columns["STT"] },
-          ...columns.map((c) => ({ key: c.key, label: c.label })),
-        ]}
-        filenamePrefix="containers"
+        data={exportData}
+        allColumns={exportColumns}
+        filenamePrefix={exportScope === 'selected' ? 'containers_selected' : 'containers'}
+      />
+
+      <MoveToCollectionModal
+        isOpen={isMoveOpen}
+        onClose={() => setIsMoveOpen(false)}
+        entity="containers"
+        ids={selectedIdList}
+        onDone={(result) => {
+          selection.clear();
+          if (!result.copy) loadData('refresh');
+        }}
       />
 
       <ColumnConfigModal
@@ -974,3 +1038,4 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     </div>
   );
 };
+

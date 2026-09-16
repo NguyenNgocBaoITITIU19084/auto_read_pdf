@@ -3,13 +3,26 @@
 
 import os
 
+from PyInstaller.utils.hooks import collect_data_files, copy_metadata
+
 project_root = os.path.abspath('.')
+
+# APScheduler 3.x resolves triggers/executors/jobstores via importlib.metadata entry
+# points -> ship its dist-info metadata, otherwise add_job(trigger='cron') fails at runtime.
+# tzdata provides the IANA database for zoneinfo('Asia/Ho_Chi_Minh') on Windows.
+# (pyinstaller-hooks-contrib also ships hooks for both; this keeps the build correct without them.)
+extra_datas = []
+for _collect in (lambda: copy_metadata('APScheduler', recursive=True), lambda: collect_data_files('tzdata')):
+    try:
+        extra_datas += _collect()
+    except Exception as _e:  # package missing -> warn instead of breaking the build
+        print(f'WARNING: backend_app.spec data collection skipped: {_e}')
 
 a = Analysis(
     ['backend/app/main.py'],
     pathex=[project_root],
     binaries=[],
-    datas=[],
+    datas=extra_datas,
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',
@@ -32,16 +45,28 @@ a = Analysis(
         'apscheduler.triggers.interval',
         'apscheduler.triggers.cron',
         'apscheduler.triggers.date',
+        'apscheduler.triggers.combining',
+        'apscheduler.triggers.calendarinterval',
+        'apscheduler.triggers.cron.expressions',
+        'apscheduler.triggers.cron.fields',
         'apscheduler.executors',
         'apscheduler.executors.asyncio',
         'apscheduler.executors.pool',
         'apscheduler.jobstores',
         'apscheduler.jobstores.memory',
+        'tzlocal',
+        'tzdata',
+        'zoneinfo',
         'backend',
         'backend.app',
         'backend.app.core',
         'backend.app.core.config',
         'backend.app.core.database',
+        'backend.app.core.logging_setup',
+        'backend.app.core.request_context',
+        'backend.app.core.request_logging',
+        'backend.app.core.timezone',
+        'backend.app.core.version',
         'backend.app.schemas',
         'backend.app.schemas.models',
         'backend.app.services',
@@ -50,6 +75,10 @@ a = Analysis(
         'backend.app.services.exporter',
         'backend.app.services.extractor',
         'backend.app.services.image_extractor',
+        'backend.app.services.log_reader',
+        'backend.app.services.lan_ip',
+        'backend.app.services.lan_server',
+        'backend.app.services.mobile_bridge',
         'backend.app.api',
         'backend.app.api.bookings',
         'backend.app.api.collections',
@@ -57,14 +86,25 @@ a = Analysis(
         'backend.app.api.containers',
         'backend.app.api.dashboard',
         'backend.app.api.export_backup',
+        'backend.app.api.logs',
         'backend.app.api.settings',
         'backend.app.api.vessels',
+        'backend.app.api.mobile',
+        'backend.app.mobile',
+        'backend.app.mobile.app',
+        'backend.app.mobile.page',
         'pdfplumber',
         'openpyxl',
         'pandas',
         'pydantic',
         'fastapi',
         'requests',
+        # image_extractor already needs Pillow (lazy-imported); mobile_bridge's EXIF
+        # normalization also lazy-imports PIL.ImageOps, which PyInstaller's static
+        # analysis does not see since it's inside a try/except at call time.
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageOps',
     ],
     hookspath=[],
     hooksconfig={},
@@ -84,7 +124,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -97,7 +137,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='backend_app',
 )

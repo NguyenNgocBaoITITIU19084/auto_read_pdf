@@ -1,22 +1,37 @@
 import React from 'react';
-import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor } from 'lucide-react';
+import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor, Search, Pencil } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Booking } from '../../types';
 import { useApp } from '../../context/AppContext';
+import type { TabId } from '../common/Tabs';
+import { QuickVesselSearch } from './QuickVesselSearch';
+import { detectBookingCarrier, getCarrierBadgeClass } from './carriers';
+import { getBookingVesselCandidates } from '../../utils/vessel';
 
 interface BookingDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   booking: Booking | null;
+  /** Enables "Open Vessels tab" in the quick vessel lookup */
+  onNavigateTab?: (tab: TabId, query?: string) => void;
+  onEdit?: (booking: Booking) => void;
 }
 
 export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   isOpen,
   onClose,
   booking,
+  onNavigateTab,
+  onEdit,
 }) => {
   const { t, addToast } = useApp();
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
+  const [quickVesselOpen, setQuickVesselOpen] = React.useState(false);
+  const closeQuickVessel = React.useCallback(() => setQuickVesselOpen(false), []);
+
+  React.useEffect(() => {
+    if (!isOpen) setQuickVesselOpen(false);
+  }, [isOpen]);
 
   if (!booking) return null;
 
@@ -28,45 +43,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
     setTimeout(() => setCopiedKey(null), 1500);
   };
 
-  // Helper to detect carrier if missing
-  const detectCarrier = (b: Booking): string => {
-    if (b["Carrier"] && b["Carrier"] !== 'null') return b["Carrier"];
-    const text = `${b["Booking No"] || ''} ${b["Vessel"] || ''} ${b["Tên file PDF"] || ''}`.toUpperCase();
-    if (text.includes('DONGJIN') || text.includes('DJSC') || (b["Booking No"] && b["Booking No"].startsWith('DJ'))) return 'DONGJIN';
-    if (text.includes('PIL') || (b["Booking No"] && b["Booking No"].startsWith('SGN6')) || text.includes('KOTA')) return 'PIL';
-    if (text.includes('ONE') || (b["Booking No"] && b["Booking No"].startsWith('ONEY'))) return 'ONE';
-    if (text.includes('SITC')) return 'SITC';
-    if (text.includes('COSCO')) return 'COSCO';
-    if (text.includes('MAERSK') || text.includes('SEALAND')) return 'MAERSK';
-    if (text.includes('CMA') || text.includes('CNC')) return 'CMA CGM';
-    if (text.includes('EVER')) return 'EVERGREEN';
-    if (text.includes('WAN HAI') || text.includes('WHL')) return 'WAN HAI';
-    return 'Khác';
-  };
-
-  const carrierName = detectCarrier(booking);
-
-  // Styling per carrier
-  const getCarrierBadgeStyle = (carrier: string) => {
-    switch (carrier.toUpperCase()) {
-      case 'DONGJIN':
-        return 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800';
-      case 'PIL':
-        return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800';
-      case 'ONE':
-        return 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-200 dark:border-pink-800';
-      case 'SITC':
-        return 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800';
-      case 'COSCO':
-        return 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-200 dark:border-cyan-800';
-      case 'MAERSK':
-        return 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-800';
-      case 'EVERGREEN':
-        return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800';
-      default:
-        return 'bg-primary-500/10 text-primary-600 dark:text-primary-400 border-primary-200 dark:border-primary-800';
-    }
-  };
+  const carrierName = detectBookingCarrier(booking, 'Khác');
+  const hasVessel = getBookingVesselCandidates(booking).length > 0;
 
   const fields: { key: string; label: string; icon?: any }[] = [
     { key: "Carrier", label: t.booking.columns["Carrier"] || "Hãng tàu", icon: Building2 },
@@ -96,7 +74,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-md border uppercase tracking-wider ${getCarrierBadgeStyle(carrierName)}`}>
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-md border uppercase tracking-wider ${getCarrierBadgeClass(carrierName)}`}>
                   Hãng tàu: {carrierName}
                 </span>
               </div>
@@ -122,11 +100,33 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             </div>
           </div>
 
-          <div className="text-right hidden sm:block">
-            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 block">Tàu / Số chuyến</span>
-            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[180px] block">
+          <div className="text-right flex flex-col items-end gap-1">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 hidden sm:block">Tàu / Số chuyến</span>
+            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate max-w-[180px] hidden sm:block">
               {booking["Vessel"] || 'null'}
             </span>
+            <div className="flex items-center gap-1.5">
+              {onEdit && (
+                <button
+                  type="button"
+                  onClick={() => onEdit(booking)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  {t.booking.form.editButton}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setQuickVesselOpen(true)}
+                disabled={!hasVessel}
+                title={t.booking.quickVessel.rowTooltip}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-primary-600 hover:bg-primary-700 text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Search className="w-3 h-3" />
+                {t.booking.quickVessel.button}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -155,6 +155,17 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                     <span>{f.label}</span>
                   </span>
                   {!isNull && (
+                    <span className="flex items-center gap-0.5">
+                    {f.key === "Vessel" && (
+                      <button
+                        type="button"
+                        onClick={() => setQuickVesselOpen(true)}
+                        className="text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 p-0.5 rounded transition-colors"
+                        title={t.booking.quickVessel.rowTooltip}
+                      >
+                        <Ship className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => copyField(String(val), f.key)}
@@ -167,6 +178,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                         <Copy className="w-3.5 h-3.5" />
                       )}
                     </button>
+                    </span>
                   )}
                 </div>
                 <div className={`text-xs font-semibold break-words ${f.key === "Carrier" ? 'text-sm font-bold text-primary-700 dark:text-primary-300' : isNull ? 'text-slate-400 dark:text-slate-500 italic font-normal' : 'text-slate-900 dark:text-slate-100'}`}>
@@ -187,6 +199,12 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           </button>
         </div>
       </div>
+      <QuickVesselSearch
+        isOpen={isOpen && quickVesselOpen}
+        onClose={closeQuickVessel}
+        booking={booking}
+        onNavigateTab={onNavigateTab}
+      />
     </Modal>
   );
 };

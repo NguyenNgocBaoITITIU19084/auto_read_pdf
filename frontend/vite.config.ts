@@ -6,6 +6,12 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   base: './', // important for Electron file:// protocol
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(process.env.npm_package_version || ''),
+  },
+  build: {
+    manifest: true,
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

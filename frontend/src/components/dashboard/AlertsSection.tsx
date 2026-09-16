@@ -6,6 +6,7 @@ import {
 import { DashboardAlerts, TabId } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { ValueBadge } from '../common/ValueBadge';
+import { CustomsStatusBadge } from '../container/customs';
 
 interface AlertsSectionProps {
   alerts: DashboardAlerts;
@@ -91,7 +92,7 @@ export const AlertsSection: React.FC<AlertsSectionProps> = ({
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
             }`}
           >
-            Cont chưa duyệt ({totalUnclearedConts})
+            Cont chưa thông quan ({totalUnclearedConts})
           </button>
           <button
             onClick={() => setFilter('vessels')}
@@ -155,9 +156,8 @@ export const AlertsSection: React.FC<AlertsSectionProps> = ({
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {cont.custom_clearance_status && (
-                            <ValueBadge value={cont.custom_clearance_status} columnKey="custom_clearance_status" table="container" />
-                          )}
+                          {/* Merged "Tình trạng thông quan" (falls back to the raw clearance value) */}
+                          <CustomsStatusBadge row={cont} showDate={false} rawFallback fallbackText="" />
                           {cont.infras_fee_status && (
                             <ValueBadge value={cont.infras_fee_status} columnKey="infras_fee_status" table="container" />
                           )}
