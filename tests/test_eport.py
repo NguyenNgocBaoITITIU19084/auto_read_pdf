@@ -2,6 +2,7 @@ import pytest
 import sqlite3
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from unittest.mock import patch, MagicMock
 from backend.app.services.eport_client import search_vessels, search_containers
 from backend.app.core.database import (
@@ -24,6 +25,8 @@ from backend.app.core.database import (
     remove_from_container_watchlist,
     get_connection
 )
+
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 @pytest.fixture(autouse=True)
 def setup_db():
@@ -412,8 +415,8 @@ def test_search_containers_client(mock_post):
     results = search_containers("CTL", "EMCU9914560")
     assert len(results) == 1
     assert results[0]["CONTAINERNO"] == "EMCU9914560"
-    # Verify date is formatted properly
-    expected_time = datetime.fromtimestamp(1782769311000 / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
+    # Verify date is formatted properly (in the fixed Asia/Ho_Chi_Minh timezone the client uses)
+    expected_time = datetime.fromtimestamp(1782769311000 / 1000.0, tz=VN_TZ).strftime("%Y-%m-%d %H:%M:%S")
     assert results[0]["EVENT_TIME"] == expected_time
 
 
