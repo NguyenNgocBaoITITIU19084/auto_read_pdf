@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
-  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus
+  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
+import { useMobileBridge } from '../../context/MobileBridgeContext';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
@@ -15,6 +16,7 @@ import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { BookingFormModal } from './BookingFormModal';
 import { ImageBookingModal } from './ImageBookingModal';
+import { PhoneCaptureModal } from './PhoneCaptureModal';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { BulkVesselLookupModal, BulkVesselLookupMode } from './BulkVesselLookupModal';
 import { ResizableTh } from '../common/ResizableTh';
@@ -216,6 +218,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
+  const [isPhoneCaptureOpen, setIsPhoneCaptureOpen] = useState(false);
+  const mobile = useMobileBridge();
   const [quickVesselBooking, setQuickVesselBooking] = useState<Booking | null>(null);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
   const [isBulkVesselLookupOpen, setIsBulkVesselLookupOpen] = useState(false);
@@ -440,6 +444,18 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     }
     onPasteRequestHandled?.(id);
   }, [pasteRequest, activeCollection, addToast, t, uploadFiles, onPasteRequestHandled]);
+
+  // Photos arriving from a paired phone: open them one at a time in the review modal, only
+  // once the previous one has been saved/dismissed, so a fresh photo never clobbers an
+  // in-progress edit.
+  useEffect(() => {
+    if (isImageModalOpen || mobile.queue.length === 0) return;
+    const file = mobile.takeNext();
+    if (file) {
+      setActiveImageFile(file);
+      setIsImageModalOpen(true);
+    }
+  }, [isImageModalOpen, mobile.queue.length, mobile]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -759,6 +775,21 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             </Tooltip>
           </div>
 
+          <div data-tour="booking-phone-capture">
+            <Tooltip content={t.booking.phone.scanHint}>
+              <button
+                onClick={() => setIsPhoneCaptureOpen(true)}
+                className="relative flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>{mobile.session?.active ? t.booking.phone.connected : t.booking.phone.button}</span>
+                {mobile.session?.active && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                )}
+              </button>
+            </Tooltip>
+          </div>
+
           <div data-tour="booking-col-config">
             <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
               <button
@@ -983,6 +1014,12 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         initialFile={activeImageFile}
         onSavedSuccess={() => loadData('refresh')}
         onPdfFiles={(files) => void uploadFiles(files)}
+        pendingCount={mobile.queue.length}
+      />
+
+      <PhoneCaptureModal
+        isOpen={isPhoneCaptureOpen}
+        onClose={() => setIsPhoneCaptureOpen(false)}
       />
 
       <BookingFormModal

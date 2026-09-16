@@ -24,6 +24,8 @@ interface ImageBookingModalProps {
   onSavedSuccess?: (savedBooking: Booking) => void;
   /** PDFs picked / dropped inside the modal are handed back to the parent for normal upload */
   onPdfFiles?: (files: File[]) => void;
+  /** Photos still waiting in the phone-capture queue (Task 7's MobileBridgeContext). > 0 shows a header badge. */
+  pendingCount?: number;
 }
 
 const EMPTY_FIELDS: Partial<Booking> = {
@@ -62,6 +64,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
   initialFile,
   onSavedSuccess,
   onPdfFiles,
+  pendingCount,
 }) => {
   const { t, activeCollection } = useApp();
   const { addToast } = useToastActions();
@@ -285,6 +288,11 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
       title={t.booking.imageModal.title}
       maxWidth="max-w-5xl"
     >
+      {!!pendingCount && pendingCount > 0 && (
+        <div className="mb-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300 border border-primary-200 dark:border-primary-900">
+          {tf(t.booking.phone.pendingInModal, { count: pendingCount })}
+        </div>
+      )}
       <div className="flex flex-col md:flex-row gap-4 h-[75vh] max-h-[720px] select-none outline-none">
         {/* Left Side: Image Preview & Manipulation */}
         <div data-tour="ocr-controls" className="w-full md:w-1/2 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">

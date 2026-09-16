@@ -118,6 +118,7 @@ export const translations = {
       language: "Ngôn ngữ",
       success: "Thành công",
       error: "Đã có lỗi xảy ra",
+      retry: "Thử lại",
       // Color rules
       colorConfig: "Cấu hình màu sắc",
       colorRules: "Luật màu giá trị",
@@ -901,6 +902,7 @@ export const translations = {
       language: "Language",
       success: "Success",
       error: "An error occurred",
+      retry: "Retry",
       // Color rules
       colorConfig: "Color Rules Config",
       colorRules: "Value Color Rules",
