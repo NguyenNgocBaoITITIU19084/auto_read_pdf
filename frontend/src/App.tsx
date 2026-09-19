@@ -45,6 +45,22 @@ export const App: React.FC = () => {
     setActiveTab(tabId);
   }, []);
 
+  // A drill-down keyword is a one-shot hint for the tab it targets: drop it once the user leaves that
+  // tab, otherwise every later visit re-applies the stale search (e.g. Vessel tab stuck on one vessel).
+  useEffect(() => {
+    setDrilldownKeywords((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      (Object.keys(next) as (keyof typeof next)[]).forEach((tab) => {
+        if (tab !== activeTab && next[tab] !== undefined) {
+          delete next[tab];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [activeTab]);
+
   const handlePasteRequestHandled = useCallback((id: number) => {
     setPasteRequest((prev) => (prev && prev.id === id ? null : prev));
   }, []);
