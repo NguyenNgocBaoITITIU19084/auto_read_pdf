@@ -12,7 +12,7 @@ project_root = os.path.abspath('.')
 # tzdata provides the IANA database for zoneinfo('Asia/Ho_Chi_Minh') on Windows.
 # (pyinstaller-hooks-contrib also ships hooks for both; this keeps the build correct without them.)
 extra_datas = []
-for _collect in (lambda: copy_metadata('APScheduler', recursive=True), lambda: collect_data_files('tzdata')):
+for _collect in (lambda: copy_metadata('APScheduler', recursive=True), lambda: collect_data_files('tzdata'), lambda: collect_data_files('pdfminer')):
     try:
         extra_datas += _collect()
     except Exception as _e:  # package missing -> warn instead of breaking the build

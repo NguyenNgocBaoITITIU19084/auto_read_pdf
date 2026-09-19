@@ -83,12 +83,14 @@ def _process_uploads(collection_id: int, uploads: List[Tuple[str, bytes]]) -> Li
 
                 data["Tên file PDF"] = filename
                 _resolve_vessel_etd(data)
+                if not has_booking_fields(data):
+                    logger.warning(f"No booking fields extracted from {filename} (carrier={data.get('Carrier')}); saved as empty row")
 
                 row_id = insert_booking(collection_id, data)
                 data["id"] = row_id
                 extracted_results.append(data)
             except Exception as e:
-                print(f"Error parsing {filename}: {e}")
+                logger.exception(f"Error parsing {filename}: {e}")
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
     return extracted_results

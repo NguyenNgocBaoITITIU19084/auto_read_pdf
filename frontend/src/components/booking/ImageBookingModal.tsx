@@ -255,7 +255,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
       }
       onClose();
     } catch (e: any) {
-      addToast(e.message || t.common.error, 'error');
+      addToast(e?.response?.data?.detail || e.message || t.common.error, 'error');
     } finally {
       setSaving(false);
     }

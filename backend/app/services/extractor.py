@@ -1,7 +1,10 @@
+import logging
 import os
 import re
 from datetime import datetime
 from typing import List, Optional, Pattern, Tuple
+
+logger = logging.getLogger("backend.services.extractor")
 
 MONTH_MAP = {
     "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
@@ -414,7 +417,7 @@ def extract_booking_from_text(text: str, filename: str = "") -> dict:
         result["Carrier"] = detect_carrier(text, result["Booking No"], result["Vessel"], filename)
 
     except Exception as e:
-        print(f"Error parsing booking text ({filename}): {e}")
+        logger.exception(f"Error parsing booking text ({filename}): {e}")
 
     for k in result:
         if k != "Tên file PDF" and k != "STT":
@@ -445,6 +448,11 @@ def extract_booking_data(pdf_path: str) -> dict:
     try:
         text = read_pdf_text(pdf_path)
     except Exception as e:
-        print(f"Error parsing PDF {pdf_path}: {e}")
+        logger.exception(f"Error parsing PDF {pdf_path}: {e}")
         text = ""
-    return extract_booking_from_text(text, filename)
+    if not text.strip():
+        logger.warning(f"PDF {filename}: no text layer extracted (scan, or pdfminer failed)")
+    result = extract_booking_from_text(text, filename)
+    if text.strip() and not has_booking_fields(result):
+        logger.warning(f"PDF {filename}: {len(text)} chars of text but no booking fields matched; head={text[:200]!r}")
+    return result
