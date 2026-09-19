@@ -109,7 +109,7 @@ export interface ContainerInfo {
   item_seal_no: string;
   custom_clearance_status: string;
   infras_fee_status: string;
-  /** Computed by backend: "Đã thông quan" | "Đang giám sát HQ" | "Chưa thông quan" | "" */
+  /** Computed by backend: "Đã thông quan" | "Chưa thông quan" | "" */
   customs_status?: string;
   /** Computed by backend: IMDG link extracted from raw `haz` HTML, else "" */
   imdg_url?: string;

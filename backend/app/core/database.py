@@ -111,7 +111,6 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[st
 # Customs status / IMDG helpers (computed, not stored)
 # ---------------------------------------------------------------------------
 CUSTOMS_CLEARED = "Đã thông quan"
-CUSTOMS_SUPERVISED = "Đang giám sát HQ"
 CUSTOMS_NOT_CLEARED = "Chưa thông quan"
 
 
@@ -119,7 +118,7 @@ def _yn_flag(value, allow_legacy_labels: bool = False) -> str:
     """Normalize ePort Y/N values ('Y', 'N', or display strings ending in '(Y)'/'(N)').
 
     With allow_legacy_labels, clearance labels like 'Đã duyệt' / 'Chưa duyệt' are accepted too.
-    Mirrors CLEARANCE_Y_SQL / CLEARANCE_N_SQL / CUST_Y_SQL below.
+    Mirrors CUST_Y_SQL / CUST_N_SQL below.
     """
     if value is None:
         return ""
@@ -132,13 +131,12 @@ def _yn_flag(value, allow_legacy_labels: bool = False) -> str:
     return ""
 
 
-def compute_customs_status(cust, custom_clearance_status) -> str:
-    clearance = _yn_flag(custom_clearance_status, allow_legacy_labels=True)
-    if clearance == "Y":
+def compute_customs_status(cust, custom_clearance_status=None) -> str:
+    """Customs status depends only on the 'Giám sát HQ' flag: Y = cleared, N = not cleared."""
+    flag = _yn_flag(cust)
+    if flag == "Y":
         return CUSTOMS_CLEARED
-    if _yn_flag(cust) == "Y":
-        return CUSTOMS_SUPERVISED
-    if clearance == "N":
+    if flag == "N":
         return CUSTOMS_NOT_CLEARED
     return ""
 
@@ -148,13 +146,13 @@ _CUST = "TRIM(COALESCE(cust, ''))"
 CLEARANCE_Y_SQL = f"(UPPER({_CLR}) = 'Y' OR UPPER({_CLR}) LIKE '%(Y)' OR {_CLR} LIKE '%Đã duyệt%')"
 CLEARANCE_N_SQL = f"(UPPER({_CLR}) = 'N' OR UPPER({_CLR}) LIKE '%(N)' OR {_CLR} LIKE '%Chưa duyệt%')"
 CUST_Y_SQL = f"(UPPER({_CUST}) = 'Y' OR UPPER({_CUST}) LIKE '%(Y)')"
+CUST_N_SQL = f"(UPPER({_CUST}) = 'N' OR UPPER({_CUST}) LIKE '%(N)')"
 CUSTOMS_STATUS_SQL = (
-    f"(CASE WHEN {CLEARANCE_Y_SQL} THEN '{CUSTOMS_CLEARED}' "
-    f"WHEN {CUST_Y_SQL} THEN '{CUSTOMS_SUPERVISED}' "
-    f"WHEN {CLEARANCE_N_SQL} THEN '{CUSTOMS_NOT_CLEARED}' ELSE '' END)"
+    f"(CASE WHEN {CUST_Y_SQL} THEN '{CUSTOMS_CLEARED}' "
+    f"WHEN {CUST_N_SQL} THEN '{CUSTOMS_NOT_CLEARED}' ELSE '' END)"
 )
-# Not cleared = under customs supervision or explicitly not cleared (and clearance != Y)
-CUSTOMS_UNCLEARED_SQL = f"(NOT {CLEARANCE_Y_SQL} AND ({CUST_Y_SQL} OR {CLEARANCE_N_SQL}))"
+# Not cleared = 'Giám sát HQ' flag is N
+CUSTOMS_UNCLEARED_SQL = CUST_N_SQL
 
 _HREF_RE = re.compile(r"""href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]*>")
@@ -200,7 +198,6 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Đã duyệt (Y)", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
     {"target_table": "container", "column_key": "custom_clearance_status", "match_value": "Y", "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
     {"target_table": "container", "column_key": "customs_status", "match_value": CUSTOMS_CLEARED, "match_type": "exact", "preset_id": "emerald", "is_enabled": 1},
-    {"target_table": "container", "column_key": "customs_status", "match_value": CUSTOMS_SUPERVISED, "match_type": "exact", "preset_id": "amber", "is_enabled": 1},
     {"target_table": "container", "column_key": "customs_status", "match_value": CUSTOMS_NOT_CLEARED, "match_type": "exact", "preset_id": "rose", "is_enabled": 1},
     {"target_table": "container", "column_key": "infras_fee_status", "match_value": "Chưa đóng (3)", "match_type": "exact", "preset_id": "amber", "is_enabled": 1},
     {"target_table": "container", "column_key": "infras_fee_status", "match_value": "3", "match_type": "exact", "preset_id": "amber", "is_enabled": 1},
@@ -1538,7 +1535,7 @@ def get_dashboard_summary(collection_id: int = None) -> dict:
             SELECT
                 COUNT(*) as total_containers,
                 SUM(CASE WHEN {CUSTOMS_UNCLEARED_SQL} THEN 1 ELSE 0 END) as customs_uncleared,
-                SUM(CASE WHEN {CLEARANCE_Y_SQL} THEN 1 ELSE 0 END) as customs_cleared,
+                SUM(CASE WHEN {CUST_Y_SQL} THEN 1 ELSE 0 END) as customs_cleared,
                 SUM(CASE WHEN infras_fee_status LIKE '%Chưa%' OR infras_fee_status = '3' THEN 1 ELSE 0 END) as infras_unpaid,
                 SUM(CASE WHEN infras_fee_status LIKE '%Đã%' OR infras_fee_status = '1' OR infras_fee_status = '2' THEN 1 ELSE 0 END) as infras_paid,
                 SUM(CASE WHEN in_yard = 'Y' OR in_yard = '1' OR in_yard LIKE '%in%' THEN 1 ELSE 0 END) as containers_in_yard,

@@ -3,7 +3,6 @@ import { ExternalLink } from 'lucide-react';
 import { ValueBadge } from '../common/ValueBadge';
 
 export const CUSTOMS_CLEARED = 'Đã thông quan';
-export const CUSTOMS_SUPERVISED = 'Đang giám sát HQ';
 export const CUSTOMS_NOT_CLEARED = 'Chưa thông quan';
 
 /** Normalize ePort Y/N values ('Y', 'N', legacy labels like "Đã duyệt (Y)"). */
@@ -25,9 +24,9 @@ export const getCustomsStatus = (row: {
   custom_clearance_status?: string | null;
 }): string => {
   if (typeof row.customs_status === 'string') return row.customs_status;
-  if (ynFlag(row.custom_clearance_status) === 'Y') return CUSTOMS_CLEARED;
-  if (ynFlag(row.cust) === 'Y') return CUSTOMS_SUPERVISED;
-  if (ynFlag(row.custom_clearance_status) === 'N') return CUSTOMS_NOT_CLEARED;
+  const flag = ynFlag(row.cust);
+  if (flag === 'Y') return CUSTOMS_CLEARED;
+  if (flag === 'N') return CUSTOMS_NOT_CLEARED;
   return '';
 };
 

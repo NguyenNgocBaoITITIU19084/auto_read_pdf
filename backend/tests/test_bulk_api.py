@@ -112,7 +112,7 @@ def test_container_resync_groups_by_site(client, monkeypatch):
     assert len(body["errors"]) == 1 and "bad site" in body["errors"][0]
     assert not any(c["containerno"] == "ZZZU9999999" for c in db.get_containers(col))
     loaded = next(c for c in db.get_containers(col) if c["event_type"] == "LOAD")
-    assert loaded["customs_status"] == "Đang giám sát HQ"
+    assert loaded["customs_status"] == "Đã thông quan"
 
 
 def test_container_watchlist_sync_records_status(client, monkeypatch):

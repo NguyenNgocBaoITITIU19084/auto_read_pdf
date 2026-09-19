@@ -71,7 +71,7 @@ def test_create_color_rule_is_idempotent(fresh_db):
 def test_default_customs_status_rules_seeded(fresh_db):
     rules = [r for r in db.get_color_rules() if r["column_key"] == "customs_status"]
     presets = {r["match_value"]: r["preset_id"] for r in rules}
-    assert presets == {"Đã thông quan": "emerald", "Đang giám sát HQ": "amber", "Chưa thông quan": "rose"}
+    assert presets == {"Đã thông quan": "emerald", "Chưa thông quan": "rose"}
     reset = db.reset_color_rules_to_default()
     assert len(reset) == len(db.DEFAULT_COLOR_RULES)
 
@@ -246,15 +246,14 @@ def test_move_and_copy_items(fresh_db):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("cust,clearance,expected", [
     ("Y", "Y", "Đã thông quan"),
-    ("N", "Y", "Đã thông quan"),
-    ("Y", "N", "Đang giám sát HQ"),
-    ("Y", "", "Đang giám sát HQ"),
-    ("", "N", "Chưa thông quan"),
+    ("Y", "N", "Đã thông quan"),
+    ("Y", "", "Đã thông quan"),
+    ("N", "Y", "Chưa thông quan"),
     ("N", "N", "Chưa thông quan"),
+    ("", "N", ""),
+    ("", "Y", ""),
     ("", "", ""),
     (None, None, ""),
-    ("", "Đã duyệt (Y)", "Đã thông quan"),
-    ("", "Chưa duyệt (N)", "Chưa thông quan"),
 ])
 def test_compute_customs_status(cust, clearance, expected):
     assert db.compute_customs_status(cust, clearance) == expected
@@ -273,7 +272,7 @@ def _seed_customs_containers(col):
     db.insert_containers(col, [
         {"SITE": "CTL", "CONTAINERNO": "CLRD0000001", "EVENT_TYPE": "INGATE", "CUST": "Y", "CUSTOM_CLEARANCE_STATUS": "Y", "HAZ": haz},
         {"SITE": "CTL", "CONTAINERNO": "SUPV0000002", "EVENT_TYPE": "INGATE", "CUST": "Y", "CUSTOM_CLEARANCE_STATUS": "N"},
-        {"SITE": "CTL", "CONTAINERNO": "NOTC0000003", "EVENT_TYPE": "INGATE", "CUST": "", "CUSTOM_CLEARANCE_STATUS": "N"},
+        {"SITE": "CTL", "CONTAINERNO": "NOTC0000003", "EVENT_TYPE": "INGATE", "CUST": "N", "CUSTOM_CLEARANCE_STATUS": "N"},
         {"SITE": "CTL", "CONTAINERNO": "UNKN0000004", "EVENT_TYPE": "INGATE"},
     ])
 
@@ -285,17 +284,17 @@ def test_get_containers_computed_fields_and_search(fresh_db):
     assert rows["CLRD0000001"]["customs_status"] == "Đã thông quan"
     assert rows["CLRD0000001"]["imdg_url"].endswith("itemNo=ZGLU2008173")
     assert rows["CLRD0000001"]["haz"] == ""
-    assert rows["SUPV0000002"]["customs_status"] == "Đang giám sát HQ"
+    assert rows["SUPV0000002"]["customs_status"] == "Đã thông quan"
     assert rows["NOTC0000003"]["customs_status"] == "Chưa thông quan"
     assert rows["UNKN0000004"]["customs_status"] == "" and rows["UNKN0000004"]["imdg_url"] == ""
 
-    by_field = db.get_containers(col, "giám sát", "customs_status")
-    assert [r["containerno"] for r in by_field] == ["SUPV0000002"]
+    by_field = db.get_containers(col, "Chưa thông quan", "customs_status")
+    assert [r["containerno"] for r in by_field] == ["NOTC0000003"]
     all_fields = db.get_containers(col, "Chưa thông quan", "all")
     assert [r["containerno"] for r in all_fields] == ["NOTC0000003"]
 
     by_ids = db.get_containers_by_ids([rows["CLRD0000001"]["id"], rows["SUPV0000002"]["id"]])
-    assert {r["customs_status"] for r in by_ids} == {"Đã thông quan", "Đang giám sát HQ"}
+    assert {r["customs_status"] for r in by_ids} == {"Đã thông quan"}
     assert all("imdg_url" in r for r in by_ids)
 
 
@@ -303,8 +302,8 @@ def test_dashboard_uses_merged_customs_logic(fresh_db):
     col = db.create_collection("DASH")
     _seed_customs_containers(col)
     summary = db.get_dashboard_summary(collection_id=col)
-    assert summary["kpis"]["customs_cleared"] == 1
-    assert summary["kpis"]["customs_uncleared"] == 2  # supervised + not cleared
+    assert summary["kpis"]["customs_cleared"] == 2
+    assert summary["kpis"]["customs_uncleared"] == 1
     alert_nos = {c["containerno"] for c in summary["alerts"]["uncleared_containers"]}
     assert alert_nos == {"SUPV0000002", "NOTC0000003"}
     assert all(c["customs_status"] for c in summary["alerts"]["uncleared_containers"])
