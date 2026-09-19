@@ -34,12 +34,18 @@ def normalize_string(s: str) -> str:
 
 def is_voyage_match(query_voy: str, eport_voy: str) -> bool:
     """
-    So sánh chính xác 2 chuỗi số chuyến (1-1 exact match).
-    Chỉ cập nhật khi số chuyến của ePort trùng khớp hoàn toàn với số chuyến yêu cầu.
+    So sánh chính xác số chuyến. ePort trả dạng "nhập-xuất" (vd '062E-062E'), nên khớp khi
+    số chuyến yêu cầu trùng cả chuỗi đầy đủ HOẶC trùng chính xác một phần (chuyến nhập / chuyến xuất).
     """
     if not query_voy or not eport_voy:
         return False
-    return normalize_string(query_voy) == normalize_string(eport_voy)
+    query = normalize_string(query_voy)
+    if not query:
+        return False
+    if query == normalize_string(eport_voy):
+        return True
+    parts = re.split(r"[-/\\]", eport_voy)
+    return len(parts) > 1 and any(normalize_string(p) == query for p in parts)
 
 def clean_vessel_name_for_eport(vessel_name: str, voyage: str = None) -> str:
     """
