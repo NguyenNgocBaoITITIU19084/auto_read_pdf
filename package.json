@@ -34,6 +34,14 @@
   "build": {
     "appId": "com.autoreadpdf.pro",
     "productName": "Auto Read PDF Pro",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "NguyenNgocBaoITITIU19084",
+        "repo": "auto_read_pdf",
+        "releaseType": "release"
+      }
+    ],
     "directories": {
       "output": "dist_electron"
     },
@@ -79,5 +87,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

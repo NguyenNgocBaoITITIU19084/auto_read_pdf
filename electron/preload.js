@@ -38,4 +38,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showBackendLog: () => ipcRenderer.send('backend-show-log'),
   /** Open the folder containing app.log / errors.log. */
   openLogFolder: () => ipcRenderer.send('open-log-folder'),
+
+  // --- Auto update (Windows only; other platforms report state 'unsupported') ---
+  /** Subscribe to update events: {state, version, percent, error, currentVersion, releasesUrl}. */
+  onUpdateStatus: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('update-status', listener);
+    return () => ipcRenderer.removeListener('update-status', listener);
+  },
+  /** Current update status without waiting for an event. */
+  getUpdateStatus: () => ipcRenderer.invoke('update-status'),
+  /** Check now; the download then runs in the background. Resolves with the status. */
+  checkForUpdates: () => ipcRenderer.invoke('update-check'),
+  /** Quit and install a downloaded update. Resolves false when nothing is ready. */
+  installUpdate: () => ipcRenderer.invoke('update-install'),
 });

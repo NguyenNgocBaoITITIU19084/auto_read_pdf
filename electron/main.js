@@ -14,6 +14,7 @@ const fs = require('fs');
 const { fileURLToPath } = require('url');
 const { backend, backendRequest } = require('./py_manager');
 const { createTrayIcon, createAppIcon } = require('./tray_icon');
+const updater = require('./updater');
 
 const APP_NAME = 'Auto Read PDF Pro';
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -33,6 +34,8 @@ let windowReadyToShow = false;
 let page = 'none'; // 'splash' | 'ui'
 let splashReady = false;
 let lastStatus = { state: 'starting', message: 'Đang khởi động...' };
+let backendStopPromise = null;
+let updateStatus = updater.getStatus();
 
 // ---------------------------------------------------------------------------
 // Single instance: a second launch focuses the existing window (no 2nd backend)
@@ -166,6 +169,24 @@ function createWindow() {
     if (backend.state === 'stopped' || backend.state === 'idle') backend.start();
   }
   return win;
+}
+
+/**
+ * Stop the packaged backend exactly once. Both the normal quit path and the
+ * update installer path go through here: on Windows the NSIS installer cannot
+ * overwrite resources/backend_dist while the Python child process is alive.
+ */
+function stopBackendOnce() {
+  if (backendStopPromise) return backendStopPromise;
+  destroyTray();
+  const timeout = new Promise((r) => setTimeout(r, 5000));
+  backendStopPromise = Promise.race([backend.stop(), timeout])
+    .catch(() => {})
+    .then(() => {
+      backendStopped = true;
+      backend.stopSync();
+    });
+  return backendStopPromise;
 }
 
 function showMainWindow() {
@@ -355,6 +376,22 @@ function registerIpc() {
     else shell.openPath(path.dirname(logPath));
   });
 
+  ipcMain.handle('update-check', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return updater.checkForUpdates(true);
+  });
+
+  ipcMain.handle('update-status', (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return updateStatus;
+  });
+
+  ipcMain.handle('update-install', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    isQuitting = true;
+    return updater.quitAndInstall(stopBackendOnce);
+  });
+
   ipcMain.on('open-log-folder', (event) => {
     if (!isFromMainWindow(event)) return;
     const dir = backend.logDir;
@@ -389,6 +426,14 @@ function onReady() {
     }
   });
 
+  updater.initUpdater({
+    onStatus: (status) => {
+      updateStatus = status;
+      sendToRenderer('update-status', status);
+    },
+    log: (msg) => backend.info(`[Updater] ${msg}`),
+  });
+
   createWindow(); // shows the splash immediately and starts the backend
 
   app.on('activate', () => showMainWindow());
@@ -416,15 +461,7 @@ app.on('before-quit', () => {
 app.on('will-quit', (event) => {
   if (backendStopped) return;
   event.preventDefault();
-  destroyTray();
-  const timeout = new Promise((r) => setTimeout(r, 5000));
-  Promise.race([backend.stop(), timeout])
-    .catch(() => {})
-    .finally(() => {
-      backendStopped = true;
-      backend.stopSync();
-      app.exit(0);
-    });
+  stopBackendOnce().finally(() => app.exit(0));
 });
 
 process.on('exit', () => backend.stopSync());

@@ -4,6 +4,7 @@ import { Tabs, TabId } from './components/common/Tabs';
 import type { BookingPasteRequest } from './components/booking/BookingTab';
 import { TableSkeleton } from './components/common/TableSkeleton';
 import { ToastContainer } from './components/common/Toast';
+import { UpdateBanner } from './components/common/UpdateBanner';
 import { extractClipboardFiles, isEditableTarget, isImageFile, isPdfFile } from './components/booking/clipboard';
 import { useMobileBridge } from './context/MobileBridgeContext';
 
@@ -95,6 +96,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
+      <UpdateBanner />
       <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
       <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} />
       <main className="flex-1 overflow-hidden flex flex-col">

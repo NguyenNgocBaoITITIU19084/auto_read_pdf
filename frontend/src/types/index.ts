@@ -325,6 +325,26 @@ export type RunSyncNowStatus = 'started' | 'already_running';
 // ---------------------------------------------------------------------------
 // Electron preload bridge
 // ---------------------------------------------------------------------------
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'up-to-date'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+  | 'unsupported';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  /** Version of the update being downloaded / ready to install. */
+  version?: string | null;
+  /** Download progress 0-100 while state === 'downloading'. */
+  percent?: number;
+  error?: string | null;
+  currentVersion?: string;
+  releasesUrl?: string;
+}
+
 export interface ElectronAPI {
   platform?: string;
   version?: string;
@@ -335,6 +355,12 @@ export interface ElectronAPI {
   setAutoSyncActive?: (active: boolean) => void;
   /** Open the folder containing app.log / errors.log. */
   openLogFolder?: () => void;
+  /** Subscribe to auto-update events. Returns an unsubscribe fn. */
+  onUpdateStatus?: (cb: (status: UpdateStatus) => void) => () => void;
+  getUpdateStatus?: () => Promise<UpdateStatus>;
+  checkForUpdates?: () => Promise<UpdateStatus>;
+  /** Quit and install a downloaded update; false when nothing is ready. */
+  installUpdate?: () => Promise<boolean>;
 }
 
 declare global {

@@ -5,6 +5,7 @@ import { useApp } from '../../context/AppContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
 import { AISettingsCard } from './AISettingsCard';
+import { UpdateSettingsCard } from './UpdateSettingsCard';
 import { getBackupDb, restoreBackupDb, RestoreMode, downloadLogsZipApi } from '../../services/api';
 import { errorMessage } from '../vessel/tableHelpers';
 
@@ -102,6 +103,9 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
         {/* Auto Sync & Interval Configuration */}
         <AutoSyncSettingsCard />
+
+        {/* App auto-update (Windows) */}
+        <UpdateSettingsCard />
 
         {/* Export Backup JSON */}
         <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl">
