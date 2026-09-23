@@ -11,7 +11,7 @@ interface KPICardsProps {
   loading?: boolean;
 }
 
-export const KPICards: React.FC<KPICardsProps> = ({ kpis, loading = false }) => {
+export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = false }) => {
   const { t } = useApp();
 
   const totalConts = kpis.total_containers || 1;
@@ -140,7 +140,7 @@ export const KPICards: React.FC<KPICardsProps> = ({ kpis, loading = false }) => 
       </div>
 
       {/* 5. Watchlists */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
+      <div className="sm:col-span-2 lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110" />
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -171,4 +171,5 @@ export const KPICards: React.FC<KPICardsProps> = ({ kpis, loading = false }) => 
       </div>
     </div>
   );
-};
+});
+KPICards.displayName = 'KPICards';

@@ -305,7 +305,8 @@ def test_dashboard_uses_merged_customs_logic(fresh_db):
     assert summary["kpis"]["customs_cleared"] == 2
     assert summary["kpis"]["customs_uncleared"] == 1
     alert_nos = {c["containerno"] for c in summary["alerts"]["uncleared_containers"]}
-    assert alert_nos == {"SUPV0000002", "NOTC0000003"}
+    # Since 9ff0319 customs status depends only on the Giam sat HQ flag (CUST): SUPV has CUST=Y
+    assert alert_nos == {"NOTC0000003"}
     assert all(c["customs_status"] for c in summary["alerts"]["uncleared_containers"])
 
 

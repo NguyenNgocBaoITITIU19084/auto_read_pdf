@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
-import { 
-  AlertTriangle, Clock, ShieldAlert, Ship, ArrowRight, 
-  CheckCircle2, Box, Calendar, MapPin
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock, MapPin, ShieldAlert, Ship } from 'lucide-react';
 import { DashboardAlerts, TabId } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { ValueBadge } from '../common/ValueBadge';
 import { CustomsStatusBadge } from '../container/customs';
+import { tf } from '../../services/i18nFormat';
+import { parseVnDateTime } from '../../utils/vnTime';
 
 interface AlertsSectionProps {
   alerts: DashboardAlerts;
@@ -14,288 +13,211 @@ interface AlertsSectionProps {
   loading?: boolean;
 }
 
-type AlertFilter = 'all' | 'cutoffs' | 'containers' | 'vessels';
+type AlertTab = 'cutoffs' | 'containers' | 'vessels';
 
-export const AlertsSection: React.FC<AlertsSectionProps> = ({
-  alerts,
-  onNavigateTab,
-  loading = false,
-}) => {
+const DEFAULT_WINDOW_DAYS = 7;
+
+/** "còn 5 giờ" / "còn 2 ngày" from a VN wall-clock "YYYY-MM-DDTHH:mm"; null when unknown. */
+export function timeLeft(alertAt: string | undefined, now: number = Date.now()): { hours: number } | null {
+  const d = parseVnDateTime(alertAt);
+  if (!d) return null;
+  return { hours: (d.getTime() - now) / 3_600_000 };
+}
+
+const rowClass =
+  'w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group';
+
+export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts, onNavigateTab, loading = false }) => {
   const { t } = useApp();
-  const [filter, setFilter] = useState<AlertFilter>('all');
+  const a = t.dashboard.alerts;
+  const days = alerts.window_days ?? DEFAULT_WINDOW_DAYS;
 
-  const totalCutoffs = alerts.critical_cutoffs?.length || 0;
-  const totalUnclearedConts = alerts.uncleared_containers?.length || 0;
-  const totalUpcomingVessels = alerts.upcoming_vessels?.length || 0;
-  const totalAlertsCount = totalCutoffs + totalUnclearedConts + totalUpcomingVessels;
+  const lists = {
+    cutoffs: alerts.critical_cutoffs || [],
+    containers: alerts.uncleared_containers || [],
+    vessels: alerts.upcoming_vessels || [],
+  };
+  const totals = {
+    cutoffs: alerts.totals?.critical_cutoffs ?? lists.cutoffs.length,
+    containers: alerts.totals?.uncleared_containers ?? lists.containers.length,
+    vessels: alerts.totals?.upcoming_vessels ?? lists.vessels.length,
+  };
+  const grandTotal = totals.cutoffs + totals.containers + totals.vessels;
+
+  // Open the most urgent non-empty list; keep the user's choice afterwards.
+  const firstNonEmpty: AlertTab = totals.cutoffs ? 'cutoffs' : totals.containers ? 'containers' : totals.vessels ? 'vessels' : 'cutoffs';
+  const [tab, setTab] = useState<AlertTab | null>(null);
+  const active = tab ?? firstNonEmpty;
+  useEffect(() => {
+    if (tab && totals[tab] === 0 && grandTotal > 0) setTab(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grandTotal]);
 
   if (loading) {
-    return (
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm animate-pulse h-64" />
-    );
+    return <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm animate-pulse h-[360px]" />;
   }
 
-  return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
-      {/* Header */}
-      <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/50">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
-            <AlertTriangle className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                {t.dashboard.alerts.title}
-              </h3>
-              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                totalAlertsCount > 0 
-                  ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800' 
-                  : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-              }`}>
-                {totalAlertsCount} {totalAlertsCount > 0 ? 'mục cần lưu ý' : 'hoàn tất'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              {t.dashboard.alerts.subtitle}
-            </p>
-          </div>
-        </div>
+  const tabs: { id: AlertTab; label: string; icon: React.ReactNode; tone: string }[] = [
+    { id: 'cutoffs', label: a.tabCutoffs, icon: <Clock className="w-3.5 h-3.5" />, tone: 'text-amber-600 dark:text-amber-400' },
+    { id: 'containers', label: a.tabContainers, icon: <ShieldAlert className="w-3.5 h-3.5" />, tone: 'text-rose-600 dark:text-rose-400' },
+    { id: 'vessels', label: a.tabVessels, icon: <Ship className="w-3.5 h-3.5" />, tone: 'text-sky-600 dark:text-sky-400' },
+  ];
+  const jump: Record<AlertTab, { tab: TabId; label: string }> = {
+    cutoffs: { tab: 'booking', label: a.jumpToBooking },
+    containers: { tab: 'container', label: a.jumpToContainer },
+    vessels: { tab: 'vessel', label: a.jumpToVessel },
+  };
 
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1 bg-slate-200/60 dark:bg-slate-800 p-1 rounded-lg text-xs font-medium">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-              filter === 'all'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-2xs font-semibold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            {t.common.all} ({totalAlertsCount})
-          </button>
-          <button
-            onClick={() => setFilter('cutoffs')}
-            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-              filter === 'cutoffs'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-2xs font-semibold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            Cut-off ({totalCutoffs})
-          </button>
-          <button
-            onClick={() => setFilter('containers')}
-            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-              filter === 'containers'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-2xs font-semibold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            Cont chưa thông quan ({totalUnclearedConts})
-          </button>
-          <button
-            onClick={() => setFilter('vessels')}
-            className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
-              filter === 'vessels'
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-2xs font-semibold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-            }`}
-          >
-            Lịch tàu ({totalUpcomingVessels})
-          </button>
+  const renderTimeLeft = (alertAt?: string) => {
+    const left = timeLeft(alertAt);
+    if (!left) return null;
+    const text = left.hours < 1 ? a.timeLeftSoon
+      : left.hours < 48 ? tf(a.timeLeftHours, { n: Math.floor(left.hours) })
+      : tf(a.timeLeftDays, { n: Math.floor(left.hours / 24) });
+    const urgent = left.hours < 24;
+    return (
+      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${urgent ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'}`}>
+        {text}
+      </span>
+    );
+  };
+
+  const empty = (text: string) => (
+    <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center gap-2 px-6">
+      <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+      <p className="text-xs text-slate-500 dark:text-slate-400">{text}</p>
+    </div>
+  );
+
+  const list = () => {
+    if (active === 'cutoffs') {
+      if (!lists.cutoffs.length) return empty(tf(a.emptyCutoffs, { days }));
+      return lists.cutoffs.map((b) => (
+        <button key={`c-${b.id}`} type="button" className={rowClass} onClick={() => onNavigateTab('booking', b.booking_no)}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400 truncate">
+                {b.booking_no || 'N/A'}
+              </span>
+              {b.carrier && <ValueBadge value={b.carrier} columnKey="Carrier" table="booking" />}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+              {b.vessel && <span>{a.vessel}: <strong className="text-slate-700 dark:text-slate-300">{b.vessel}</strong></span>}
+              {b.vessel && b.port_of_discharging && <span className="mx-1.5">·</span>}
+              {b.port_of_discharging && <span>{a.pod}: <strong className="text-slate-700 dark:text-slate-300">{b.port_of_discharging}</strong></span>}
+            </div>
+          </div>
+          <div className="text-right shrink-0 space-y-0.5">
+            <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{b.cutoff_time}</div>
+            {renderTimeLeft(b.alert_at)}
+          </div>
+        </button>
+      ));
+    }
+    if (active === 'containers') {
+      if (!lists.containers.length) return empty(a.emptyContainers);
+      return lists.containers.map((c) => (
+        <button key={`k-${c.id}`} type="button" className={rowClass} onClick={() => onNavigateTab('container', c.containerno)}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                {c.containerno}
+              </span>
+              {c.site_id && <ValueBadge value={c.site_id} columnKey="site_id" table="container" />}
+              {c.iso && <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400">{c.iso}</span>}
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+              <CustomsStatusBadge row={c} showDate={false} rawFallback fallbackText="" />
+              {c.infras_fee_status && <ValueBadge value={c.infras_fee_status} columnKey="infras_fee_status" table="container" />}
+              {c.location && (
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-0.5">
+                  <MapPin className="w-2.5 h-2.5" />
+                  {c.location}
+                </span>
+              )}
+            </div>
+          </div>
+          <span className="text-[10px] text-slate-400 shrink-0 tabular-nums">{c.event_time ? c.event_time.substring(0, 16) : ''}</span>
+        </button>
+      ));
+    }
+    if (!lists.vessels.length) return empty(tf(a.emptyVessels, { days }));
+    return lists.vessels.map((v) => (
+      <button key={`v-${v.id}`} type="button" className={rowClass} onClick={() => onNavigateTab('vessel', v.vessel_name)}>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400 truncate">
+              {v.vessel_name}
+            </span>
+            {v.site_id && <ValueBadge value={v.site_id} columnKey="site_id" table="vessel" />}
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            {v.in_out_voyage && <span>{a.voyage}: <span className="font-mono">{v.in_out_voyage}</span></span>}
+            {v.closing_time && <span className="ml-2">{a.closing}: {v.closing_time}</span>}
+          </div>
         </div>
+        <div className="text-right shrink-0 space-y-0.5">
+          <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{v.actual_berth_time}</div>
+          {renderTimeLeft(v.alert_at)}
+        </div>
+      </button>
+    ));
+  };
+
+  const shown = lists[active].length;
+
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm flex flex-col h-full min-h-[360px]">
+      <div className="px-4 pt-3.5 pb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className={`w-4 h-4 ${grandTotal ? 'text-rose-500' : 'text-emerald-500'}`} />
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">{a.title}</h3>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${grandTotal ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400' : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'}`}>
+            {grandTotal ? tf(a.needAttention, { count: grandTotal }) : a.allDone}
+          </span>
+        </div>
+        <span className="text-[11px] text-slate-400">{tf(a.windowHint, { days })}</span>
       </div>
 
-      {/* Content Area */}
-      <div className="p-4 space-y-4 max-h-[420px] overflow-y-auto">
-        {totalAlertsCount === 0 ? (
-          <div className="py-12 flex flex-col items-center justify-center text-center">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-2" />
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-              {t.dashboard.alerts.noAlerts}
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* 1. Uncleared Containers */}
-            {(filter === 'all' || filter === 'containers') && totalUnclearedConts > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldAlert className="w-3.5 h-3.5" />
-                    {t.dashboard.alerts.unclearedConts} ({totalUnclearedConts})
-                  </span>
-                  <button
-                    onClick={() => onNavigateTab('container')}
-                    className="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                  >
-                    {t.dashboard.alerts.jumpToContainer}
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {alerts.uncleared_containers.map((cont) => (
-                    <div
-                      key={`cont-alert-${cont.id}`}
-                      onClick={() => onNavigateTab('container', cont.containerno)}
-                      className="p-3 rounded-lg border border-rose-200/80 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20 hover:border-rose-300 dark:hover:border-rose-800 transition-all cursor-pointer flex items-center justify-between group"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                            {cont.containerno}
-                          </span>
-                          {cont.site_id && (
-                            <ValueBadge value={cont.site_id} columnKey="site_id" table="container" />
-                          )}
-                          {cont.iso && (
-                            <span className="text-[10px] bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400">
-                              {cont.iso}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* Merged "Tình trạng thông quan" (falls back to the raw clearance value) */}
-                          <CustomsStatusBadge row={cont} showDate={false} rawFallback fallbackText="" />
-                          {cont.infras_fee_status && (
-                            <ValueBadge value={cont.infras_fee_status} columnKey="infras_fee_status" table="container" />
-                          )}
-                          {cont.location && (
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-0.5">
-                              <MapPin className="w-2.5 h-2.5" />
-                              {cont.location}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right flex flex-col items-end gap-1">
-                        <span className="text-[10px] text-slate-400">
-                          {cont.event_time ? cont.event_time.substring(0, 16) : ''}
-                        </span>
-                        <span className="text-xs font-semibold text-primary-600 dark:text-primary-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
-                          {t.dashboard.alerts.action} &rarr;
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+      <div role="tablist" className="px-4 flex items-center gap-1 border-b border-slate-100 dark:border-slate-800">
+        {tabs.map((tb) => (
+          <button
+            key={tb.id}
+            role="tab"
+            type="button"
+            aria-selected={active === tb.id}
+            onClick={() => setTab(tb.id)}
+            className={`flex items-center gap-1.5 px-2.5 py-2 -mb-px border-b-2 text-xs font-semibold transition-colors cursor-pointer ${
+              active === tb.id
+                ? `border-primary-500 text-slate-900 dark:text-slate-100`
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <span className={tb.tone}>{tb.icon}</span>
+            {tb.label}
+            <span className={`text-[10px] px-1.5 rounded-full tabular-nums ${totals[tb.id] ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+              {totals[tb.id]}
+            </span>
+          </button>
+        ))}
+      </div>
 
-            {/* 2. Critical Cargo Cut-offs */}
-            {(filter === 'all' || filter === 'cutoffs') && totalCutoffs > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5" />
-                    {t.dashboard.alerts.criticalCutoffs} ({totalCutoffs})
-                  </span>
-                  <button
-                    onClick={() => onNavigateTab('booking')}
-                    className="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                  >
-                    {t.dashboard.alerts.jumpToBooking}
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {alerts.critical_cutoffs.map((bkg) => (
-                    <div
-                      key={`bkg-alert-${bkg.id}`}
-                      onClick={() => onNavigateTab('booking', bkg.booking_no)}
-                      className="p-3 rounded-lg border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 hover:border-amber-300 dark:hover:border-amber-800 transition-all cursor-pointer flex items-center justify-between group"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                            {bkg.booking_no || 'N/A'}
-                          </span>
-                          {bkg.carrier && (
-                            <ValueBadge value={bkg.carrier} columnKey="Carrier" table="booking" />
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2">
-                          {bkg.vessel && <span>Tàu: <strong>{bkg.vessel}</strong></span>}
-                          {bkg.port_of_discharging && <span>POD: <strong>{bkg.port_of_discharging}</strong></span>}
-                        </div>
-                      </div>
-                      <div className="text-right flex flex-col items-end gap-1">
-                        <div className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1 bg-amber-100 dark:bg-amber-950 px-2 py-0.5 rounded">
-                          <Clock className="w-3 h-3" />
-                          <span>{bkg.cutoff_time}</span>
-                        </div>
-                        <span className="text-xs font-semibold text-primary-600 dark:text-primary-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
-                          {t.dashboard.alerts.action} &rarr;
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+      <div role="tabpanel" className="flex-1 overflow-y-auto p-1.5 max-h-[340px] divide-y divide-slate-100 dark:divide-slate-800/60">
+        {list()}
+      </div>
 
-            {/* 3. Upcoming Vessels */}
-            {(filter === 'all' || filter === 'vessels') && totalUpcomingVessels > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-sky-700 dark:text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Ship className="w-3.5 h-3.5" />
-                    {t.dashboard.alerts.upcomingVessels} ({totalUpcomingVessels})
-                  </span>
-                  <button
-                    onClick={() => onNavigateTab('vessel')}
-                    className="text-xs text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 cursor-pointer font-medium"
-                  >
-                    {t.dashboard.alerts.jumpToVessel}
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {alerts.upcoming_vessels.map((v) => (
-                    <div
-                      key={`vessel-alert-${v.id}`}
-                      onClick={() => onNavigateTab('vessel', v.vessel_name)}
-                      className="p-3 rounded-lg border border-sky-200/80 dark:border-sky-900/50 bg-sky-50/40 dark:bg-sky-950/20 hover:border-sky-300 dark:hover:border-sky-800 transition-all cursor-pointer flex items-center justify-between group"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400">
-                            {v.vessel_name}
-                          </span>
-                          {v.in_out_voyage && (
-                            <span className="text-[10px] bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400 font-mono">
-                              Chuyến: {v.in_out_voyage}
-                            </span>
-                          )}
-                          {v.site_id && (
-                            <ValueBadge value={v.site_id} columnKey="site_id" table="vessel" />
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400">
-                          {v.actual_berth_time && (
-                            <span>Cập bến: <strong>{v.actual_berth_time}</strong></span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right flex flex-col items-end gap-1">
-                        {v.closing_time && (
-                          <span className="text-[10px] text-slate-500">
-                            Closing: {v.closing_time}
-                          </span>
-                        )}
-                        <span className="text-xs font-semibold text-primary-600 dark:text-primary-400 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
-                          {t.dashboard.alerts.action} &rarr;
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
+      <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
+        <span className="text-slate-400">{shown ? tf(a.showing, { shown, total: totals[active] }) : ''}</span>
+        <button
+          type="button"
+          onClick={() => onNavigateTab(jump[active].tab)}
+          className="text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
+        >
+          {jump[active].label}
+          <ArrowRight className="w-3 h-3" />
+        </button>
       </div>
     </div>
   );
-};
+});
+AlertsSection.displayName = 'AlertsSection';

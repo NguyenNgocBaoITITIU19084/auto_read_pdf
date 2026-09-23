@@ -4,7 +4,7 @@ import os
 import re
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from backend.app.core import config
 from backend.app.core.timezone import VN_TZ, now_vn_str
 
@@ -1509,8 +1509,68 @@ def _calculate_teus(qty_str: str, equip_str: str) -> int:
     return count * multiplier
 
 
-def get_dashboard_summary(collection_id: int = None) -> dict:
+# Cut-off / berthing alerts only cover this many days ahead of "now" (VN time).
+ALERT_WINDOW_DAYS = 7
+ALERT_LIST_LIMIT = 10
+
+# Date formats seen in bookings / vessel schedules (regexes: strptime with fallbacks is ~30x slower)
+_ALERT_DMY_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?: (\d{1,2}):(\d{2})(?::(\d{2}))?)?$")
+_ALERT_ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$")
+_ALERT_HM_DMY_RE = re.compile(r"^(\d{1,2}):(\d{2}) (\d{1,2})/(\d{1,2})/(\d{4})$")
+
+# Dashboard-local, cheaper forms of CUST_N_SQL / CUST_Y_SQL: the LIKE prefilter is implied by the
+# exact expression (a trimmed 'N' or a '...(N)' value always contains an n), so results are identical
+# while most rows ('' / 'Y') skip the UPPER/TRIM/COALESCE work.
+_DASH_CUST_N_SQL = f"(cust LIKE '%n%' AND {CUST_N_SQL})"
+_DASH_CUST_Y_SQL = f"(cust LIKE '%y%' AND {CUST_Y_SQL})"
+
+
+def _parse_alert_datetime(value) -> datetime | None:
+    """Parse the date formats seen in bookings/vessel schedules; date-only values mean end of day."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return None
+    try:
+        m = _ALERT_DMY_RE.match(text)
+        if m:
+            d, mo, y, h, mi, _ = m.groups()
+            return datetime(int(y), int(mo), int(d), int(h), int(mi)) if h else datetime(int(y), int(mo), int(d), 23, 59)
+        m = _ALERT_ISO_RE.match(text)
+        if m:
+            y, mo, d, h, mi, _ = m.groups()
+            return datetime(int(y), int(mo), int(d), int(h), int(mi)) if h else datetime(int(y), int(mo), int(d), 23, 59)
+        m = _ALERT_HM_DMY_RE.match(text)
+        if m:
+            h, mi, d, mo, y = m.groups()
+            return datetime(int(y), int(mo), int(d), int(h), int(mi))
+    except ValueError:  # e.g. 30/02/2026 or 25:00
+        return None
+    return None
+
+
+def _upcoming(rows: list[dict], time_key: str, dedupe_key, now: datetime) -> tuple[list[dict], int]:
+    """Rows whose `time_key` falls in [now, now + ALERT_WINDOW_DAYS], soonest first, one per dedupe key."""
+    end = now + timedelta(days=ALERT_WINDOW_DAYS)
+    dated = []
+    for r in rows:
+        dt = _parse_alert_datetime(r.get(time_key))
+        if dt is not None and now <= dt <= end:
+            dated.append((dt, r))
+    dated.sort(key=lambda x: (x[0], x[1]["id"]))
+    seen, out = set(), []
+    for dt, r in dated:
+        key = dedupe_key(r)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({**r, "alert_at": dt.strftime("%Y-%m-%dT%H:%M")})
+    return out[:ALERT_LIST_LIMIT], len(out)
+
+
+def get_dashboard_summary(collection_id: int = None, now: datetime | None = None) -> dict:
     now_str = _now_str()
+    # Naive VN wall-clock time, comparable with the naive datetimes parsed from the data
+    now = now or datetime.now(VN_TZ).replace(tzinfo=None)
     with get_connection() as conn:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -1537,12 +1597,15 @@ def get_dashboard_summary(collection_id: int = None) -> dict:
         cursor.execute(f"""
             SELECT
                 COUNT(*) as total_containers,
-                SUM(CASE WHEN {CUSTOMS_UNCLEARED_SQL} THEN 1 ELSE 0 END) as customs_uncleared,
-                SUM(CASE WHEN {CUST_Y_SQL} THEN 1 ELSE 0 END) as customs_cleared,
+                SUM(CASE WHEN {_DASH_CUST_N_SQL} THEN 1 ELSE 0 END) as customs_uncleared,
+                SUM(CASE WHEN {_DASH_CUST_Y_SQL} THEN 1 ELSE 0 END) as customs_cleared,
                 SUM(CASE WHEN infras_fee_status LIKE '%Chưa%' OR infras_fee_status = '3' THEN 1 ELSE 0 END) as infras_unpaid,
                 SUM(CASE WHEN infras_fee_status LIKE '%Đã%' OR infras_fee_status = '1' OR infras_fee_status = '2' THEN 1 ELSE 0 END) as infras_paid,
                 SUM(CASE WHEN in_yard = 'Y' OR in_yard = '1' OR in_yard LIKE '%in%' THEN 1 ELSE 0 END) as containers_in_yard,
-                SUM(CASE WHEN in_yard = 'N' OR in_yard = '0' OR in_yard LIKE '%out%' THEN 1 ELSE 0 END) as containers_out_yard
+                SUM(CASE WHEN in_yard = 'N' OR in_yard = '0' OR in_yard LIKE '%out%' THEN 1 ELSE 0 END) as containers_out_yard,
+                SUM(CASE WHEN {_DASH_CUST_N_SQL}
+                          OR COALESCE(infras_fee_status, '') LIKE '%Chưa%' OR COALESCE(infras_fee_status, '') = '3'
+                    THEN 1 ELSE 0 END) as attention_containers
             FROM containers {where_clause};
         """, params)
         cont_kpi = cursor.fetchone()
@@ -1569,14 +1632,16 @@ def get_dashboard_summary(collection_id: int = None) -> dict:
         watchlist_containers = cursor.fetchone()[0]
 
         # 4. Critical Alerts
+        # Dates are stored as display strings in several formats, so ordering/windowing is done in
+        # Python on parsed datetimes (SQL string order would sort by day-of-month).
         cursor.execute(f"""
             SELECT id, booking_no, carrier, cutoff_time, vessel, port_of_discharging
             FROM bookings
             {where_clause} {and_or_where} cutoff_time IS NOT NULL AND cutoff_time != ''
-            ORDER BY cutoff_time ASC
-            LIMIT 10;
         """, params)
-        critical_cutoffs = [dict(r) for r in cursor.fetchall()]
+        critical_cutoffs, total_cutoffs = _upcoming(
+            [dict(r) for r in cursor.fetchall()], "cutoff_time",
+            lambda r: (r.get("booking_no") or "").strip().upper() or f"#{r['id']}", now)
 
         # Uncleared containers (customs not cleared / under supervision, or infras fee unpaid)
         cursor.execute(f"""
@@ -1584,10 +1649,10 @@ def get_dashboard_summary(collection_id: int = None) -> dict:
                    custom_clearance_status, infras_fee_status, fel, iso, location
             FROM containers
             {where_clause} {and_or_where}
-                ({CUSTOMS_UNCLEARED_SQL}
+                ({_DASH_CUST_N_SQL}
                  OR COALESCE(infras_fee_status, '') LIKE '%Chưa%' OR COALESCE(infras_fee_status, '') = '3')
             ORDER BY event_time DESC, id DESC
-            LIMIT 10;
+            LIMIT {ALERT_LIST_LIMIT};
         """, params)
         uncleared_containers = []
         for r in cursor.fetchall():
@@ -1601,10 +1666,11 @@ def get_dashboard_summary(collection_id: int = None) -> dict:
             FROM vessel_schedules
             {where_clause} {and_or_where}
                 (actual_berth_time IS NOT NULL AND actual_berth_time != '')
-            ORDER BY actual_berth_time ASC
-            LIMIT 10;
         """, params)
-        upcoming_vessels = [dict(r) for r in cursor.fetchall()]
+        upcoming_vessels, total_vessels_alert = _upcoming(
+            [dict(r) for r in cursor.fetchall()], "actual_berth_time",
+            lambda r: ((r.get("vessel_name") or "").strip().upper(), (r.get("in_out_voyage") or "").strip().upper(),
+                       (r.get("site_id") or "").strip().upper()), now)
 
         def _distribution(rows):
             total = sum(r["count"] for r in rows) if rows else 1
@@ -1677,7 +1743,13 @@ def get_dashboard_summary(collection_id: int = None) -> dict:
             "alerts": {
                 "critical_cutoffs": critical_cutoffs,
                 "uncleared_containers": uncleared_containers,
-                "upcoming_vessels": upcoming_vessels
+                "upcoming_vessels": upcoming_vessels,
+                "totals": {
+                    "critical_cutoffs": total_cutoffs,
+                    "uncleared_containers": _kpi("attention_containers"),
+                    "upcoming_vessels": total_vessels_alert,
+                },
+                "window_days": ALERT_WINDOW_DAYS,
             },
             "distributions": {
                 "carriers": carrier_dist,

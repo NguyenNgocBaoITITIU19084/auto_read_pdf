@@ -194,6 +194,8 @@ export interface CriticalCutoffAlert {
   cutoff_time?: string;
   vessel?: string;
   port_of_discharging?: string;
+  /** Parsed cut-off, VN wall-clock "YYYY-MM-DDTHH:mm" (newer backends only) */
+  alert_at?: string;
 }
 
 export interface UnclearedContainerAlert {
@@ -220,12 +222,17 @@ export interface UpcomingVesselAlert {
   actual_berth_time?: string;
   actual_departure_time?: string;
   closing_time?: string;
+  /** Parsed berth time, VN wall-clock "YYYY-MM-DDTHH:mm" (newer backends only) */
+  alert_at?: string;
 }
 
 export interface DashboardAlerts {
   critical_cutoffs: CriticalCutoffAlert[];
   uncleared_containers: UnclearedContainerAlert[];
   upcoming_vessels: UpcomingVesselAlert[];
+  /** Full counts (lists are capped at 10); missing on older backends */
+  totals?: { critical_cutoffs: number; uncleared_containers: number; upcoming_vessels: number };
+  window_days?: number;
 }
 
 export interface DashboardDistributions {

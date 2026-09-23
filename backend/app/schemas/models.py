@@ -174,10 +174,17 @@ class DistributionItem(BaseModel):
     count: int
     percentage: float
 
+class DashboardAlertTotals(BaseModel):
+    critical_cutoffs: int
+    uncleared_containers: int
+    upcoming_vessels: int
+
 class DashboardAlerts(BaseModel):
     critical_cutoffs: List[dict]
     uncleared_containers: List[dict]
     upcoming_vessels: List[dict]
+    totals: Optional[DashboardAlertTotals] = None
+    window_days: Optional[int] = None
 
 class DashboardDistributions(BaseModel):
     carriers: List[DistributionItem]
