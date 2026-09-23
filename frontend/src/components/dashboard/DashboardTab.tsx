@@ -9,6 +9,7 @@ import { useApp } from '../../context/AppContext';
 import { KPICards } from './KPICards';
 import { AlertsSection } from './AlertsSection';
 import { BreakdownCharts } from './BreakdownCharts';
+import { ResourceMonitor } from './ResourceMonitor';
 
 interface DashboardTabProps {
   onNavigateTab: (tabId: TabId, searchKeyword?: string) => void;
@@ -128,6 +129,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
           }}
           loading={loading}
         />
+      </div>
+
+      {/* System resources (CPU / RAM) — polls on its own, independent of the scope above */}
+      <div data-tour="dashboard-resources">
+        <ResourceMonitor onBackendRestarted={fetchSummary} />
       </div>
 
       {/* 2. Urgent Alerts Section */}

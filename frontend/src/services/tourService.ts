@@ -230,6 +230,15 @@ export const startTabTour = (tabId: TabId, { t }: TourManagerOptions) => {
         },
       },
       {
+        element: '[data-tour="dashboard-resources"]',
+        popover: {
+          title: t.tour.steps.dashboardResources.title,
+          description: t.tour.steps.dashboardResources.desc,
+          side: 'top',
+          align: 'center',
+        },
+      },
+      {
         element: '[data-tour="dashboard-alerts"]',
         popover: {
           title: t.tour.steps.dashboardAlerts.title,

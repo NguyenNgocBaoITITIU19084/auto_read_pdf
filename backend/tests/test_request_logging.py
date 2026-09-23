@@ -76,10 +76,12 @@ def test_noisy_polling_not_logged_at_info(client):
     c, log_dir = client
     c.get("/health")
     c.get("/api/v1/scheduler/status")
+    c.get("/api/v1/system/resources")
     content = _read(log_dir / ls.APP_LOG)
     # Only check our own per-request log line (not httpx's client-side "HTTP Request: ..."
     # line, which the test client itself emits and which also mentions these URLs).
     assert "GET /health ->" not in content and "GET /api/v1/scheduler/status ->" not in content
+    assert "GET /api/v1/system/resources ->" not in content
 
 
 def test_mobile_session_poll_is_quiet_but_start_and_stop_are_not(client, monkeypatch):

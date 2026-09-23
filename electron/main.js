@@ -9,6 +9,7 @@ const {
   powerMonitor,
   shell,
 } = require('electron');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { fileURLToPath } = require('url');
@@ -341,6 +342,28 @@ async function initAutoSyncFlag() {
   }
 }
 
+/**
+ * CPU / RAM of every Electron process (main, renderer, GPU, utility).
+ * percentCPUUsage (since the previous getAppMetrics call) is ALREADY a share of the whole machine:
+ * measured on an 8-core Mac, one busy core in main reports ~12%, not ~100% — so no division here.
+ * That matches the backend's normalized "% of the whole machine". workingSetSize is in KB → bytes.
+ */
+function collectAppMetrics() {
+  const cpuCount = os.cpus().length || 1;
+  const processes = app.getAppMetrics().map((m) => ({
+    type: m.type,
+    pid: m.pid,
+    cpuPercent: Math.round(((m.cpu && m.cpu.percentCPUUsage) || 0) * 10) / 10,
+    workingSetBytes: ((m.memory && m.memory.workingSetSize) || 0) * 1024,
+  }));
+  return {
+    processes,
+    totalCpuPercent: Math.round(processes.reduce((a, p) => a + p.cpuPercent, 0) * 10) / 10,
+    totalWorkingSetBytes: processes.reduce((a, p) => a + p.workingSetBytes, 0),
+    cpuCount,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
@@ -390,6 +413,25 @@ function registerIpc() {
     if (!isFromMainWindow(event)) throw new Error('Forbidden');
     isQuitting = true;
     return updater.quitAndInstall(stopBackendOnce);
+  });
+
+  ipcMain.handle('get-app-metrics', (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return collectAppMetrics();
+  });
+
+  ipcMain.handle('clear-renderer-cache', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    const before = collectAppMetrics().totalWorkingSetBytes;
+    const ses = mainWindow.webContents.session;
+    await ses.clearCache().catch(() => {});
+    await ses.clearCodeCaches({}).catch(() => {});
+    return { before, after: collectAppMetrics().totalWorkingSetBytes };
+  });
+
+  ipcMain.handle('restart-backend', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return backend.restartByUser();
   });
 
   ipcMain.on('open-log-folder', (event) => {

@@ -482,6 +482,13 @@ export const getDashboardSummaryApi = async (collectionId?: number): Promise<imp
   return res.data;
 };
 
+// System resources (dashboard resource monitor)
+export const getSystemResourcesApi = async (): Promise<import('../types').SystemResources> =>
+  (await apiClient.get<import('../types').SystemResources>('/system/resources', { timeout: 5000 })).data;
+
+export const freeBackendMemoryApi = async (): Promise<{ rss_before: number; rss_after: number }> =>
+  (await apiClient.post<{ rss_before: number; rss_after: number }>('/system/free-memory')).data;
+
 // AI & System Settings
 export const getAISettingsApi = async (): Promise<import('../types').AISettings> => {
   const res = await apiClient.get<import('../types').AISettings>('/settings/ai');

@@ -361,6 +361,33 @@ export interface ElectronAPI {
   checkForUpdates?: () => Promise<UpdateStatus>;
   /** Quit and install a downloaded update; false when nothing is ready. */
   installUpdate?: () => Promise<boolean>;
+  /** CPU/RAM of all Electron processes (dashboard resource monitor). */
+  getAppMetrics?: () => Promise<AppMetrics>;
+  /** Clear the UI session caches → working-set bytes before/after. */
+  clearRendererCache?: () => Promise<{ before: number; after: number }>;
+  /** Restart the backend owned by Electron. */
+  restartBackend?: () => Promise<{ ok: boolean; reason?: 'not_owned' | 'busy' | 'failed' }>;
+}
+
+export interface AppMetricsProcess {
+  type: string;
+  pid: number;
+  /** % of the whole machine (0-100) */
+  cpuPercent: number;
+  workingSetBytes: number;
+}
+
+export interface AppMetrics {
+  processes: AppMetricsProcess[];
+  totalCpuPercent: number;
+  totalWorkingSetBytes: number;
+  cpuCount: number;
+}
+
+export interface SystemResources {
+  sampled_at: string;
+  system: { cpu_percent: number; cpu_count: number; ram_total: number; ram_used: number; ram_percent: number };
+  backend: { pid: number; rss: number; cpu_percent: number; child_count: number };
 }
 
 declare global {

@@ -10,7 +10,7 @@ from backend.app.core.request_context import request_id_var
 logger = logging.getLogger("backend.request")
 
 _VALID_ID = re.compile(r"^[A-Za-z0-9-]{6,64}$")
-_QUIET = ("/health", "/api/v1/scheduler/status", "/api/v1/logs")
+_QUIET = ("/health", "/api/v1/scheduler/status", "/api/v1/logs", "/api/v1/system/resources")
 # GET only: the desktop UI polls this every ~2s while the phone-capture QR modal is open, and
 # again every ~3s per queued photo fetch/ack -- POST (start session) and DELETE (stop session)
 # are once-per-session and worth keeping at the normal INFO level.

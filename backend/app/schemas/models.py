@@ -192,3 +192,26 @@ class DashboardSummaryResponse(BaseModel):
     alerts: DashboardAlerts
     distributions: DashboardDistributions
 
+
+class SystemUsage(BaseModel):
+    cpu_percent: float
+    cpu_count: int
+    ram_total: int
+    ram_used: int
+    ram_percent: float
+
+class BackendProcessUsage(BaseModel):
+    pid: int
+    rss: int
+    cpu_percent: float
+    child_count: int
+
+class SystemResourcesResponse(BaseModel):
+    sampled_at: str
+    system: SystemUsage
+    backend: BackendProcessUsage
+
+class FreeMemoryResponse(BaseModel):
+    rss_before: int
+    rss_after: int
+    collected_objects: int

@@ -39,6 +39,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Open the folder containing app.log / errors.log. */
   openLogFolder: () => ipcRenderer.send('open-log-folder'),
 
+  // --- Resource monitor (dashboard) ---
+  /** CPU/RAM of all Electron processes: {processes, totalCpuPercent, totalWorkingSetBytes, cpuCount}. */
+  getAppMetrics: () => ipcRenderer.invoke('get-app-metrics'),
+  /** Clear the HTTP + code caches of the UI session → {before, after} working-set bytes. */
+  clearRendererCache: () => ipcRenderer.invoke('clear-renderer-cache'),
+  /** Restart the backend we own → {ok, reason?: 'not_owned'|'busy'|'failed'}. */
+  restartBackend: () => ipcRenderer.invoke('restart-backend'),
+
   // --- Auto update (Windows only; other platforms report state 'unsupported') ---
   /** Subscribe to update events: {state, version, percent, error, currentVersion, releasesUrl}. */
   onUpdateStatus: (callback) => {

@@ -285,6 +285,23 @@ class BackendManager extends EventEmitter {
     return this.start();
   }
 
+  /**
+   * User-requested restart (dashboard "free memory" lever). Goes through stop()/start() like retry(),
+   * so the exit is not treated as a crash and does not count toward MAX_RESTARTS.
+   * → {ok} or {ok:false, reason:'not_owned'|'busy'|'failed'}
+   */
+  async restartByUser() {
+    if (!this.owned || !this.proc) return { ok: false, reason: 'not_owned' };
+    if (this.state !== 'ready') return { ok: false, reason: 'busy' };
+    try {
+      const status = await backendRequest('GET', '/api/v1/scheduler/status');
+      if (status && status.running) return { ok: false, reason: 'busy' };
+    } catch (e) {}
+    this.info('Backend restart requested from dashboard');
+    const ok = await this.retry();
+    return ok ? { ok: true } : { ok: false, reason: 'failed' };
+  }
+
   async _handleExistingBackend() {
     const health = await checkHealth();
     const inUse = health ? true : await isPortInUse();
@@ -392,11 +409,15 @@ class BackendManager extends EventEmitter {
       exited = true;
       if (err) this.info(`Spawn error: ${err.stack || err.message}`);
       this.info(`Backend exited (code=${code}, signal=${signal || ''})`);
-      if (this.proc === proc) {
+      // killPid() can return (PID gone) before this 'exit' event fires; by then stop() has already
+      // dropped this.proc and start() may have cleared `stopping`. A stale process exiting must
+      // not trigger the crash auto-restart (double spawn + counts toward MAX_RESTARTS).
+      const wasCurrent = this.proc === proc;
+      if (wasCurrent) {
         this.proc = null;
         this.owned = false;
       }
-      if (!this.stopping) this._scheduleRestart();
+      if (!this.stopping && wasCurrent) this._scheduleRestart();
     };
     proc.once('error', (err) => onExit(null, null, err));
     proc.once('exit', (code, signal) => onExit(code, signal));

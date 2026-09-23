@@ -59,6 +59,37 @@ export const translations = {
         events: "Trạng thái Vận hành (Sự kiện ePort)",
         noData: "Chưa có dữ liệu phân bổ",
         itemsCount: "lượt / đơn vị"
+      },
+      resources: {
+        title: "Tài nguyên hệ thống",
+        subtitle: "CPU và RAM của ứng dụng và cả máy, cập nhật mỗi 3 giây",
+        cpu: "CPU",
+        ram: "RAM",
+        app: "Ứng dụng",
+        machine: "Cả máy",
+        last5min: "5 phút gần nhất",
+        unavailable: "Không đọc được số liệu tài nguyên — dịch vụ nền đang khởi động lại hoặc không phản hồi.",
+        warnHigh: "Mức sử dụng đang cao",
+        critHint: "Tài nguyên đang ở mức nguy hiểm. Khởi động lại dịch vụ nền để giải phóng RAM.",
+        details: "Chi tiết tiến trình",
+        procRenderer: "Giao diện",
+        procBrowser: "Electron (tiến trình chính)",
+        procGpu: "GPU",
+        procOther: "Tiện ích Electron",
+        procBackend: "Dịch vụ nền",
+        procOcr: "Tiến trình con (OCR...)",
+        freeMemory: "Giải phóng bộ nhớ",
+        freed: "Đã giải phóng {mb} MB (ứng dụng: {before} → {after})",
+        freedNothing: "Không có nhiều bộ nhớ để giải phóng ({before} → {after}). Thử khởi động lại dịch vụ nền.",
+        restartBackend: "Khởi động lại dịch vụ nền",
+        restartTitle: "Khởi động lại dịch vụ nền?",
+        restartMessage: "Dịch vụ nền sẽ tắt và bật lại trong vài giây để giải phóng RAM. Phiên chụp ảnh bằng điện thoại (QR/LAN) sẽ bị ngắt và các thao tác đang chạy sẽ bị huỷ.",
+        restartConfirm: "Khởi động lại",
+        restartDone: "Đã khởi động lại dịch vụ nền",
+        restartFailed: "Không khởi động lại được dịch vụ nền",
+        reasonNotElectron: "Chỉ dùng được trong ứng dụng desktop",
+        reasonNotOwned: "Dịch vụ nền đang được chạy bên ngoài (chế độ dev) — không thể khởi động lại từ đây",
+        reasonBusy: "Đang đồng bộ tự động — vui lòng đợi xong rồi thử lại"
       }
     },
     common: {
@@ -691,6 +722,10 @@ export const translations = {
           title: "Các Chỉ Số Vận Hành (KPIs)",
           desc: "Theo dõi nhanh tổng sản lượng TEUs, số lượng container chưa duyệt hải quan, chưa đóng phí CSHT cảng biển và số lượng container đang nằm tại bãi."
         },
+        dashboardResources: {
+          title: "Tài Nguyên Hệ Thống",
+          desc: "Theo dõi CPU và RAM của ứng dụng và cả máy theo thời gian thực. Khi máy chậm, bấm 'Giải phóng bộ nhớ' hoặc 'Khởi động lại dịch vụ nền' để giải phóng RAM."
+        },
         dashboardAlerts: {
           title: "Cảnh Báo Vận Hành Khẩn Cấp",
           desc: "Tự động phát hiện các booking sắp đến giờ cắt máng (cut-off) và container tồn bãi có nguy cơ trễ hạn để bấm 'Chuyển tới' xử lý ngay."
@@ -843,6 +878,37 @@ export const translations = {
         events: "Operational Status (ePort Events)",
         noData: "No distribution data available",
         itemsCount: "items / units"
+      },
+      resources: {
+        title: "System Resources",
+        subtitle: "CPU and RAM of the app and the whole machine, refreshed every 3 seconds",
+        cpu: "CPU",
+        ram: "RAM",
+        app: "App",
+        machine: "Machine",
+        last5min: "Last 5 minutes",
+        unavailable: "Cannot read resource usage — the background service is restarting or not responding.",
+        warnHigh: "Usage is high",
+        critHint: "Resources are critically high. Restart the background service to free RAM.",
+        details: "Process details",
+        procRenderer: "UI",
+        procBrowser: "Electron (main process)",
+        procGpu: "GPU",
+        procOther: "Electron utilities",
+        procBackend: "Background service",
+        procOcr: "Child processes (OCR...)",
+        freeMemory: "Free memory",
+        freed: "Freed {mb} MB (app: {before} → {after})",
+        freedNothing: "Not much memory to free ({before} → {after}). Try restarting the background service.",
+        restartBackend: "Restart background service",
+        restartTitle: "Restart the background service?",
+        restartMessage: "The background service will stop and start again within a few seconds to free RAM. The phone capture session (QR/LAN) will be disconnected and running operations will be cancelled.",
+        restartConfirm: "Restart",
+        restartDone: "Background service restarted",
+        restartFailed: "Could not restart the background service",
+        reasonNotElectron: "Only available in the desktop app",
+        reasonNotOwned: "The background service is running externally (dev mode) — cannot restart it from here",
+        reasonBusy: "Auto-sync is running — please wait until it finishes"
       }
     },
     common: {
@@ -1474,6 +1540,10 @@ export const translations = {
         dashboardKPIs: {
           title: "Key Performance Indicators (KPIs)",
           desc: "Quickly track total estimated TEUs volume, uncleared customs count, unpaid port infrastructure fees, and containers currently in the yard."
+        },
+        dashboardResources: {
+          title: "System Resources",
+          desc: "Live CPU and RAM usage of the app and the whole machine. When things slow down, use 'Free memory' or 'Restart background service' to release RAM."
         },
         dashboardAlerts: {
           title: "Critical Operations Alerts",

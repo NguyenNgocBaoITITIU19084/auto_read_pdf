@@ -31,6 +31,7 @@ from backend.app.api.dashboard import router as dashboard_router
 from backend.app.api.settings import router as settings_router
 from backend.app.api.logs import router as logs_router
 from backend.app.api.mobile import router as mobile_router
+from backend.app.api.system import router as system_router
 from backend.app.services.mobile_bridge import bridge
 from backend.app.services.lan_server import lan_server
 
@@ -86,6 +87,7 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(logs_router, prefix="/api/v1")
 app.include_router(mobile_router, prefix="/api/v1")
+app.include_router(system_router, prefix="/api/v1")
 
 if __name__ == "__main__":
     import multiprocessing
