@@ -307,7 +307,7 @@ def init_db():
                 FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             );
         """)
-        _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT")])
+        _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT")])
 
         # Legacy vessel_schedules without collection_id are dropped and recreated
         vs_exists = conn.execute(
@@ -557,8 +557,8 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         INSERT INTO bookings (
             collection_id, pdf_name, booking_no, carrier, port_of_discharging, place_of_delivery, block_val,
             ts_port, equipment_type, qty, empty_pickup_cy, full_return_cy,
-            cutoff_time, vessel, etd
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            cutoff_time, vessel, etd, note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, (
         col_id,
         data.get("Tên file PDF", data.get("pdf_name", "")),
@@ -574,7 +574,8 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         data.get("Full return CY", data.get("full_return_cy", "")),
         data.get("Port Cargo Cut-off", data.get("cutoff_time", "")),
         data.get("Vessel", data.get("vessel", "")),
-        data.get("ETD", data.get("etd", ""))
+        data.get("ETD", data.get("etd", "")),
+        data.get("Ghi chú", data.get("note", "")) or ""
     ))
     return cursor.lastrowid
 
@@ -589,6 +590,7 @@ BOOKING_FIELD_MAP = {
     "Port of Discharging": "port_of_discharging", "Place of Delivery": "place_of_delivery", "Block": "block_val",
     "T/S Port": "ts_port", "Equipment Type": "equipment_type", "Q'ty": "qty", "Empty Pick Up CY": "empty_pickup_cy",
     "Full return CY": "full_return_cy", "Port Cargo Cut-off": "cutoff_time", "Vessel": "vessel", "ETD": "etd",
+    "Ghi chú": "note",
 }
 
 
@@ -628,10 +630,10 @@ def get_booking_collection_id(booking_id: int) -> int | None:
 
 BOOKING_SEARCH_COLUMNS = {
     "pdf_name", "booking_no", "carrier", "port_of_discharging", "place_of_delivery", "block_val",
-    "ts_port", "equipment_type", "qty", "empty_pickup_cy", "full_return_cy", "cutoff_time", "vessel", "etd"
+    "ts_port", "equipment_type", "qty", "empty_pickup_cy", "full_return_cy", "cutoff_time", "vessel", "etd", "note"
 }
 _BOOKING_ALL_FIELDS = ("pdf_name", "booking_no", "carrier", "port_of_discharging", "place_of_delivery", "block_val",
-                       "ts_port", "equipment_type", "empty_pickup_cy", "full_return_cy", "vessel", "etd")
+                       "ts_port", "equipment_type", "empty_pickup_cy", "full_return_cy", "vessel", "etd", "note")
 
 
 def _booking_where(col_id: int, search_query: str = None, search_field: str = None) -> tuple[str, list]:
@@ -684,6 +686,7 @@ def _booking_row_to_api(row: dict) -> dict:
         "Port Cargo Cut-off": row["cutoff_time"],
         "Vessel": row["vessel"],
         "ETD": row["etd"],
+        "Ghi chú": row.get("note") or "",
     }
 
 

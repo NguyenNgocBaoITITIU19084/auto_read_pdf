@@ -8,7 +8,7 @@ import { tf } from '../../services/i18nFormat';
 import type { Booking } from '../../types';
 import { CARRIERS } from './carriers';
 import {
-  BOOKING_FORM_SECTIONS, BookingFieldKey, BookingFormValues, bookingToForm, diffBookingForm, validateBookingForm,
+  BOOKING_FORM_SECTIONS, BookingFieldKey, BookingFormValues, NOTE_MAX_LENGTH, bookingToForm, diffBookingForm, validateBookingForm,
 } from './bookingForm';
 
 export interface BookingFormModalProps {
@@ -107,6 +107,30 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({ isOpen, mode
                 const label = t.booking.columns[field.key] || field.key;
                 const err = fieldError(field.key);
                 const identityErr = field.required && errors._identity && (submitted || touched.has(field.key));
+                if (field.kind === 'textarea') {
+                  const len = values[field.key].trim().length;
+                  return (
+                    <div key={field.key} className="sm:col-span-2">
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <label htmlFor={id} className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">{label}</label>
+                        <span className={`text-[10px] tabular-nums ${len > NOTE_MAX_LENGTH ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`}>
+                          {len}/{NOTE_MAX_LENGTH}
+                        </span>
+                      </div>
+                      <textarea
+                        id={id}
+                        rows={3}
+                        value={values[field.key]}
+                        placeholder={f.notePlaceholder}
+                        aria-invalid={!!err}
+                        onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                        onBlur={() => setTouched((prev) => new Set(prev).add(field.key))}
+                        className={`${inputClass(!!err)} resize-y min-h-[64px] leading-relaxed`}
+                      />
+                      {err && <p className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">{err}</p>}
+                    </div>
+                  );
+                }
                 return (
                   <div key={field.key}>
                     <div className="flex items-center gap-1 mb-1">

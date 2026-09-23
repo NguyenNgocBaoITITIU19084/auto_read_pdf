@@ -1,5 +1,5 @@
 import React from 'react';
-import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor, Search, Pencil } from 'lucide-react';
+import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor, Search, Pencil, StickyNote } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Booking } from '../../types';
 import { useApp } from '../../context/AppContext';
@@ -7,6 +7,7 @@ import type { TabId } from '../common/Tabs';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { detectBookingCarrier, getCarrierBadgeClass } from './carriers';
 import { getBookingVesselCandidates } from '../../utils/vessel';
+import { NOTE_KEY, getBookingNote } from './NoteHover';
 
 interface BookingDetailModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
 
   const carrierName = detectBookingCarrier(booking, 'Khác');
   const hasVessel = getBookingVesselCandidates(booking).length > 0;
+  const note = getBookingNote(booking);
 
   const fields: { key: string; label: string; icon?: any }[] = [
     { key: "Carrier", label: t.booking.columns["Carrier"] || "Hãng tàu", icon: Building2 },
@@ -129,6 +131,26 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             </div>
           </div>
         </div>
+
+        {note && (
+          <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                <StickyNote className="w-3.5 h-3.5" />
+                {t.booking.columns[NOTE_KEY]}
+              </span>
+              <button
+                type="button"
+                onClick={() => copyField(note, NOTE_KEY)}
+                className="text-amber-600/70 hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300 p-0.5 rounded transition-colors"
+                title={t.common.copy}
+              >
+                {copiedKey === NOTE_KEY ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            <div className="text-xs text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words leading-relaxed">{note}</div>
+          </div>
+        )}
 
         {/* Detailed Fields Grid */}
         <div className="grid grid-cols-2 gap-2.5 max-h-[60vh] overflow-y-auto pr-1">

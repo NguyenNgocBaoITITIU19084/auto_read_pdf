@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
-  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone
+  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -25,6 +25,7 @@ import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { Tooltip } from '../common/Tooltip';
+import { NoteHover, NOTE_KEY, getBookingNote } from './NoteHover';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
 import { Pagination } from '../common/Pagination';
@@ -79,6 +80,7 @@ interface BookingRowProps {
   onEdit: (booking: Booking) => void;
   vesselTooltip: string;
   editLabel: string;
+  noteLabel: string;
 }
 
 const BookingRow = React.memo(function BookingRow({
@@ -95,7 +97,9 @@ const BookingRow = React.memo(function BookingRow({
   onEdit,
   vesselTooltip,
   editLabel,
+  noteLabel,
 }: BookingRowProps) {
+  const note = getBookingNote(booking);
   return (
     <tr
       onDoubleClick={() => onOpen(booking)}
@@ -116,7 +120,14 @@ const BookingRow = React.memo(function BookingRow({
         />
       </td>
       <td className="py-1.5 px-2.5 text-center font-medium text-slate-400 w-10">
-        {rowNumber}
+        {note ? (
+          <NoteHover note={note} title={noteLabel} className="inline-flex items-center gap-0.5">
+            <span>{rowNumber}</span>
+            <StickyNote aria-label={noteLabel} className="w-3 h-3 text-amber-500 dark:text-amber-400 shrink-0" />
+          </NoteHover>
+        ) : (
+          rowNumber
+        )}
       </td>
       {visibleColumns.map((col) => {
         const val = booking[col.key];
@@ -129,14 +140,26 @@ const BookingRow = React.memo(function BookingRow({
               maxWidth: w ? `${w}px` : undefined,
             }}
             className="py-1.5 px-2.5 truncate"
-            title={String(val || '')}
+            title={note && (col.key === 'Booking No' || col.key === NOTE_KEY) ? undefined : String(val || '')}
           >
-            <ValueBadge
-              table="booking"
-              columnKey={col.key}
-              value={val}
-              fallbackText="null"
-            />
+            {note && (col.key === 'Booking No' || col.key === NOTE_KEY) ? (
+              <NoteHover note={note} title={noteLabel} className="block truncate">
+                {col.key === NOTE_KEY ? (
+                  <span className="text-slate-600 dark:text-slate-300">{note.replace(/\s*\n\s*/g, ' · ')}</span>
+                ) : (
+                  <ValueBadge table="booking" columnKey={col.key} value={val} fallbackText="null" />
+                )}
+              </NoteHover>
+            ) : col.key === NOTE_KEY ? (
+              <span className="text-slate-300 dark:text-slate-600">—</span>
+            ) : (
+              <ValueBadge
+                table="booking"
+                columnKey={col.key}
+                value={val}
+                fallbackText="null"
+              />
+            )}
           </td>
         );
       })}
@@ -266,6 +289,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     { key: "Empty Pick Up CY", label: t.booking.columns["Empty Pick Up CY"], visible: true },
     { key: "Full return CY", label: t.booking.columns["Full return CY"], visible: true },
     { key: "Port Cargo Cut-off", label: t.booking.columns["Port Cargo Cut-off"], visible: true },
+    { key: NOTE_KEY, label: t.booking.columns[NOTE_KEY], visible: false },
   ], [t]);
 
   const defaultWidths = useMemo(() => ({
@@ -283,6 +307,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     "Empty Pick Up CY": 180,
     "Full return CY": 150,
     "Port Cargo Cut-off": 140,
+    [NOTE_KEY]: 220,
   }), []);
 
   const { columns, setColumns, resetColumns, columnWidths, startResize } = useColumnSettings({
@@ -731,6 +756,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             <option value="empty_pickup_cy">{getColLabel("Empty Pick Up CY", t.booking.columns["Empty Pick Up CY"])}</option>
             <option value="full_return_cy">{getColLabel("Full return CY", t.booking.columns["Full return CY"])}</option>
             <option value="pdf_name">{getColLabel("Tên file PDF", t.booking.columns["Tên file PDF"])}</option>
+            <option value="note">{getColLabel(NOTE_KEY, t.booking.columns[NOTE_KEY])}</option>
           </select>
 
           <div className="relative flex-1">
@@ -916,6 +942,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         onEdit={openEditBooking}
                         vesselTooltip={t.booking.quickVessel.rowTooltip}
                         editLabel={t.booking.form.editTooltip}
+                        noteLabel={t.booking.columns["Ghi chú"]}
                       />
                     );
                   })}

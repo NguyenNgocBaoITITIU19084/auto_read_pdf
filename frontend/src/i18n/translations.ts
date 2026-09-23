@@ -383,7 +383,8 @@ export const translations = {
         "Full return CY": "Nơi hạ bãi",
         "Port Cargo Cut-off": "Thời gian cắt máng",
         "Vessel": "Tên tàu / Số chuyến",
-        "ETD": "Ngày tàu chạy (ETD)"
+        "ETD": "Ngày tàu chạy (ETD)",
+        "Ghi chú": "Ghi chú"
       },
       form: {
         addButton: "Thêm booking",
@@ -392,7 +393,9 @@ export const translations = {
         editTitle: "Sửa booking {no}",
         editButton: "Sửa",
         editTooltip: "Sửa dữ liệu dòng này",
-        sections: { main: "Thông tin chính", ports: "Cảng", equipment: "Container", yards: "Bãi & cut-off", source: "Nguồn" },
+        sections: { main: "Thông tin chính", ports: "Cảng", equipment: "Container", yards: "Bãi & cut-off", source: "Nguồn", note: "Ghi chú" },
+        notePlaceholder: "Ghi chú nội bộ cho booking này (hiện khi rê chuột vào dòng booking)",
+        noteTooLong: "Ghi chú tối đa 2000 ký tự",
         datePlaceholder: "DD/MM/YYYY",
         dateTimePlaceholder: "DD/MM/YYYY HH:mm",
         carrierPlaceholder: "Chọn hoặc nhập hãng tàu",
@@ -1202,7 +1205,8 @@ export const translations = {
         "Full return CY": "Full return CY",
         "Port Cargo Cut-off": "Port Cargo Cut-off",
         "Vessel": "Vessel / Voyage",
-        "ETD": "ETD"
+        "ETD": "ETD",
+        "Ghi chú": "Note"
       },
       form: {
         addButton: "Add booking",
@@ -1211,7 +1215,9 @@ export const translations = {
         editTitle: "Edit booking {no}",
         editButton: "Edit",
         editTooltip: "Edit this row",
-        sections: { main: "Main info", ports: "Ports", equipment: "Container", yards: "Yards & cut-off", source: "Source" },
+        sections: { main: "Main info", ports: "Ports", equipment: "Container", yards: "Yards & cut-off", source: "Source", note: "Note" },
+        notePlaceholder: "Internal note for this booking (shown when hovering the booking row)",
+        noteTooLong: "Note can be at most 2000 characters",
         datePlaceholder: "DD/MM/YYYY",
         dateTimePlaceholder: "DD/MM/YYYY HH:mm",
         carrierPlaceholder: "Pick or type a carrier",

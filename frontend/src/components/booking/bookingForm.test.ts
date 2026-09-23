@@ -27,4 +27,12 @@ describe('bookingForm', () => {
     expect(diffBookingForm(initial, { ...initial, Vessel: ' NEW ' })).toEqual({ Vessel: 'NEW' });
     expect(diffBookingForm(initial, initial)).toEqual({});
   });
+
+  it('limits the note length and keeps line breaks when diffing', () => {
+    const v = { ...emptyBookingForm(), 'Booking No': 'A' };
+    expect(validateBookingForm({ ...v, 'Ghi chú': 'x'.repeat(2000) })['Ghi chú']).toBeUndefined();
+    expect(validateBookingForm({ ...v, 'Ghi chú': 'x'.repeat(2001) })['Ghi chú']).toBe('noteTooLong');
+    const initial = bookingToForm({ id: 1, 'Booking No': 'A', 'Ghi chú': '' } as any);
+    expect(diffBookingForm(initial, { ...initial, 'Ghi chú': ' dòng 1\ndòng 2 ' })).toEqual({ 'Ghi chú': 'dòng 1\ndòng 2' });
+  });
 });

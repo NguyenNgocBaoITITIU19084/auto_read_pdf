@@ -1,12 +1,15 @@
 import type { Booking } from '../../types';
 
 export type BookingFieldKey = 'Booking No' | 'Carrier' | 'Vessel' | 'ETD' | 'Port of Discharging' | 'Place of Delivery'
-  | 'T/S Port' | 'Block' | 'Equipment Type' | "Q'ty" | 'Empty Pick Up CY' | 'Full return CY' | 'Port Cargo Cut-off' | 'Tên file PDF';
+  | 'T/S Port' | 'Block' | 'Equipment Type' | "Q'ty" | 'Empty Pick Up CY' | 'Full return CY' | 'Port Cargo Cut-off' | 'Tên file PDF'
+  | 'Ghi chú';
 
 export type BookingFormValues = Record<BookingFieldKey, string>;
-type FieldKind = 'text' | 'date' | 'datetime' | 'number' | 'carrier';
+type FieldKind = 'text' | 'date' | 'datetime' | 'number' | 'carrier' | 'textarea';
 
-export const BOOKING_FORM_SECTIONS: { titleKey: 'main' | 'ports' | 'equipment' | 'yards' | 'source'; fields: { key: BookingFieldKey; kind: FieldKind; required?: boolean }[] }[] = [
+export const NOTE_MAX_LENGTH = 2000;
+
+export const BOOKING_FORM_SECTIONS: { titleKey: 'main' | 'ports' | 'equipment' | 'yards' | 'source' | 'note'; fields: { key: BookingFieldKey; kind: FieldKind; required?: boolean }[] }[] = [
   { titleKey: 'main', fields: [
     { key: 'Booking No', kind: 'text', required: true }, { key: 'Carrier', kind: 'carrier' },
     { key: 'Vessel', kind: 'text', required: true }, { key: 'ETD', kind: 'date' },
@@ -20,6 +23,7 @@ export const BOOKING_FORM_SECTIONS: { titleKey: 'main' | 'ports' | 'equipment' |
     { key: 'Empty Pick Up CY', kind: 'text' }, { key: 'Full return CY', kind: 'text' }, { key: 'Port Cargo Cut-off', kind: 'datetime' },
   ] },
   { titleKey: 'source', fields: [{ key: 'Tên file PDF', kind: 'text' }] },
+  { titleKey: 'note', fields: [{ key: 'Ghi chú', kind: 'textarea' }] },
 ];
 
 const ALL_KEYS = BOOKING_FORM_SECTIONS.flatMap((s) => s.fields.map((f) => f.key));
@@ -56,6 +60,7 @@ export function validateBookingForm(v: BookingFormValues): Partial<Record<Bookin
   if (!isValidBookingDate(v['Port Cargo Cut-off'], true)) errors['Port Cargo Cut-off'] = 'dateTimeInvalid';
   const qty = v["Q'ty"].trim();
   if (qty && !(/^\d+$/.test(qty) && Number(qty) >= 1 && Number(qty) <= 999)) errors["Q'ty"] = 'qtyInvalid';
+  if (v['Ghi chú'].trim().length > NOTE_MAX_LENGTH) errors['Ghi chú'] = 'noteTooLong';
   return errors;
 }
 

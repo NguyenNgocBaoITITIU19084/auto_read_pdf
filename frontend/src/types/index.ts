@@ -25,6 +25,7 @@ export interface Booking {
   "Port Cargo Cut-off"?: string;
   "Vessel"?: string;
   "ETD"?: string;
+  "Ghi chú"?: string;
   "Pre Carrier"?: string;
   "ETD_Pre"?: string;
   "Trunk Vessel"?: string;

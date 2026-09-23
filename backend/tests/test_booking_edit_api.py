@@ -68,3 +68,37 @@ def test_update_does_not_warn_about_itself(client):
     assert res.json()["warnings"] == []
     assert db.find_duplicate_booking_ids(col, " same ") == [bid]
     assert db.find_duplicate_booking_ids(col, "SAME", exclude_id=bid) == []
+
+
+def test_booking_note_saved_updated_cleared_and_searchable(client):
+    col = db.create_collection("Notes")
+    note = "Khách hẹn đóng hàng thứ 5\nGọi anh Nam trước khi kéo cont"
+    res = client.post(f"{API}/bookings/manual-save", json={"collection_id": col, "booking": {"Booking No": "sgn1", "Ghi chú": f"  {note}  "}})
+    assert res.status_code == 200
+    item = res.json()["item"]
+    assert item["Ghi chú"] == note  # trimmed, not uppercased, newlines kept
+    bid = item["id"]
+
+    page = client.get(f"{API}/bookings/page", params={"collection_id": col, "search_query": "anh Nam"}).json()
+    assert [b["id"] for b in page["items"]] == [bid]
+    page = client.get(f"{API}/bookings/page", params={"collection_id": col, "search_query": "thứ 5", "search_field": "note"}).json()
+    assert [b["id"] for b in page["items"]] == [bid]
+
+    res = client.put(f"{API}/bookings/{bid}", json={"booking": {"Ghi chú": "Đã xác nhận"}})
+    assert res.status_code == 200 and res.json()["item"]["Ghi chú"] == "Đã xác nhận"
+    assert res.json()["item"]["Booking No"] == "SGN1"
+
+    res = client.put(f"{API}/bookings/{bid}", json={"booking": {"Ghi chú": ""}})
+    assert res.json()["item"]["Ghi chú"] == ""
+
+
+def test_booking_note_length_limit(client):
+    col = db.create_collection("Notes limit")
+    res = client.post(f"{API}/bookings/manual-save", json={"collection_id": col, "booking": {"Booking No": "X", "Ghi chú": "a" * 2001}})
+    assert res.status_code == 400 and "Ghi chú" in res.json()["detail"]
+
+
+def test_booking_without_note_returns_empty_string(client):
+    col = db.create_collection("No note")
+    db.insert_booking(col, {"Booking No": "OLD1"})
+    assert db.get_bookings(col)[0]["Ghi chú"] == ""

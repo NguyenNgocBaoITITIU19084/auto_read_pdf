@@ -4,6 +4,8 @@ from datetime import datetime
 from backend.app.services.extractor import parse_date_str, normalize_field_case
 
 DATE_FIELDS = ("ETD", "Port Cargo Cut-off")
+NOTE_FIELD = "Ghi chú"
+NOTE_MAX_LEN = 2000
 _DMY_RE = re.compile(r"^\d{2}/\d{2}/\d{4}( \d{2}:\d{2})?$")
 
 
@@ -45,6 +47,8 @@ def normalize_manual_booking(data: dict, require_identity: bool = True) -> tuple
     qty = str(out.get("Q'ty", "") or "")
     if qty and not (qty.isdigit() and 1 <= int(qty) <= 999):
         errors.append("Q'ty: phải là số nguyên từ 1 đến 999")
+    if len(str(out.get(NOTE_FIELD, "") or "")) > NOTE_MAX_LEN:
+        errors.append(f"{NOTE_FIELD}: tối đa {NOTE_MAX_LEN} ký tự")
     if require_identity and not (out.get("Booking No") or out.get("Vessel")):
         errors.append("Cần nhập ít nhất Booking No hoặc Tàu (Vessel)")
     return out, errors
