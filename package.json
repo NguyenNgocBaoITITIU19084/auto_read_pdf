@@ -72,14 +72,17 @@
         "zip"
       ],
       "category": "public.app-category.productivity",
-      "artifactName": "${productName}-${version}-Mac-${arch}.${ext}"
+      "artifactName": "Auto-Read-PDF-Pro-${version}-Mac-${arch}.${ext}"
     },
     "win": {
       "target": [
         "nsis",
         "portable"
       ],
-      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
+      "artifactName": "Auto-Read-PDF-Pro-${version}-Windows-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Auto-Read-PDF-Pro-${version}-Windows-${arch}-Portable.${ext}"
     },
     "nsis": {
       "oneClick": false,
