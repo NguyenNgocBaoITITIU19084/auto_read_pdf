@@ -84,3 +84,6 @@ frontend/dist/
 *.sqlite3
 booking_data.db
 backend/booking_data.db
+
+# graphify knowledge graph output
+graphify-out/
