@@ -10,7 +10,7 @@ import { usePhoneQueueDrain } from '../../hooks/usePhoneQueueDrain';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
-  uploadPDFs, deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi
+  uploadPDFs, deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi
 } from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
@@ -25,7 +25,8 @@ import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { Tooltip } from '../common/Tooltip';
-import { NoteHover, NOTE_KEY, getBookingNote } from './NoteHover';
+import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteHover';
+import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
 import { Pagination } from '../common/Pagination';
@@ -81,6 +82,9 @@ interface BookingRowProps {
   vesselTooltip: string;
   editLabel: string;
   noteLabel: string;
+  noteAddLabels: NoteQuickAddLabels;
+  onSaveNote: (booking: Booking, note: string) => Promise<void>;
+  timeLabels: RelativeTimeLabels;
 }
 
 const BookingRow = React.memo(function BookingRow({
@@ -98,8 +102,13 @@ const BookingRow = React.memo(function BookingRow({
   vesselTooltip,
   editLabel,
   noteLabel,
+  noteAddLabels,
+  onSaveNote,
+  timeLabels,
 }: BookingRowProps) {
   const note = getBookingNote(booking);
+  const saveNote = (text: string) => onSaveNote(booking, text);
+  const noteHoverProps = { note, onSave: saveNote, addLabels: noteAddLabels };
   return (
     <tr
       onDoubleClick={() => onOpen(booking)}
@@ -120,14 +129,14 @@ const BookingRow = React.memo(function BookingRow({
         />
       </td>
       <td className="py-1.5 px-2.5 text-center font-medium text-slate-400 w-10">
-        {note ? (
-          <NoteHover note={note} title={noteLabel} className="inline-flex items-center gap-0.5">
-            <span>{rowNumber}</span>
+        <NoteHover {...noteHoverProps} title={note ? noteLabel : noteAddLabels.title} className="inline-flex items-center gap-0.5">
+          <span>{rowNumber}</span>
+          {note ? (
             <StickyNote aria-label={noteLabel} className="w-3 h-3 text-amber-500 dark:text-amber-400 shrink-0" />
-          </NoteHover>
-        ) : (
-          rowNumber
-        )}
+          ) : (
+            <StickyNote aria-hidden="true" className="w-3 h-3 text-slate-300 dark:text-slate-500 shrink-0 group-hover:text-amber-400 dark:group-hover:text-amber-500 transition-colors" />
+          )}
+        </NoteHover>
       </td>
       {visibleColumns.map((col) => {
         const val = booking[col.key];
@@ -140,18 +149,20 @@ const BookingRow = React.memo(function BookingRow({
               maxWidth: w ? `${w}px` : undefined,
             }}
             className="py-1.5 px-2.5 truncate"
-            title={note && (col.key === 'Booking No' || col.key === NOTE_KEY) ? undefined : String(val || '')}
+            title={col.key === 'Booking No' || col.key === NOTE_KEY || col.key === CREATED_KEY ? undefined : String(val || '')}
           >
-            {note && (col.key === 'Booking No' || col.key === NOTE_KEY) ? (
-              <NoteHover note={note} title={noteLabel} className="block truncate">
-                {col.key === NOTE_KEY ? (
+            {col.key === CREATED_KEY ? (
+              <AddedAt value={val} labels={timeLabels} />
+            ) : col.key === 'Booking No' || col.key === NOTE_KEY ? (
+              <NoteHover {...noteHoverProps} title={note ? noteLabel : noteAddLabels.title} className="block truncate">
+                {col.key !== NOTE_KEY ? (
+                  <ValueBadge table="booking" columnKey={col.key} value={val} fallbackText="null" />
+                ) : note ? (
                   <span className="text-slate-600 dark:text-slate-300">{note.replace(/\s*\n\s*/g, ' · ')}</span>
                 ) : (
-                  <ValueBadge table="booking" columnKey={col.key} value={val} fallbackText="null" />
+                  <span className="text-slate-300 dark:text-slate-600">—</span>
                 )}
               </NoteHover>
-            ) : col.key === NOTE_KEY ? (
-              <span className="text-slate-300 dark:text-slate-600">—</span>
             ) : (
               <ValueBadge
                 table="booking"
@@ -290,6 +301,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     { key: "Full return CY", label: t.booking.columns["Full return CY"], visible: true },
     { key: "Port Cargo Cut-off", label: t.booking.columns["Port Cargo Cut-off"], visible: true },
     { key: NOTE_KEY, label: t.booking.columns[NOTE_KEY], visible: false },
+    { key: CREATED_KEY, label: t.booking.columns[CREATED_KEY], visible: true },
   ], [t]);
 
   const defaultWidths = useMemo(() => ({
@@ -308,6 +320,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     "Full return CY": 150,
     "Port Cargo Cut-off": 140,
     [NOTE_KEY]: 220,
+    [CREATED_KEY]: 120,
   }), []);
 
   const { columns, setColumns, resetColumns, columnWidths, startResize } = useColumnSettings({
@@ -536,11 +549,30 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
   const handleBookingSaved = useStableCallback(async (item: Booking, mode: 'create' | 'edit') => {
     if (mode === 'create') {
-      // new rows are appended (ORDER BY id ASC) -> jump to the last page so the user sees it
-      setCurrentPage(Math.max(1, Math.ceil((total + 1) / pageSize)));
+      // newest bookings are listed first -> go to the first page so the user sees it
+      setCurrentPage(1);
     }
     if (selectedBooking?.id === item.id) setSelectedBooking(item);
     await loadData('refresh');
+  });
+
+  const noteAddLabels = useMemo<NoteQuickAddLabels>(() => ({
+    title: t.booking.noteQuick.title,
+    placeholder: t.booking.noteQuick.placeholder,
+    hint: t.booking.noteQuick.hint,
+    save: t.booking.form.save,
+    saving: t.booking.form.saving,
+  }), [t]);
+
+  const saveBookingNote = useStableCallback(async (booking: Booking, note: string) => {
+    try {
+      const { item } = await updateBookingApi(booking.id, { [NOTE_KEY]: note } as Partial<Booking>);
+      addToast(t.booking.noteQuick.saved, 'success');
+      await handleBookingSaved(item, 'edit');
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      throw new Error((typeof detail === 'string' && detail) || e?.message || t.common.error);
+    }
   });
 
   // ---------------------------------------------------------------------------
@@ -943,6 +975,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         vesselTooltip={t.booking.quickVessel.rowTooltip}
                         editLabel={t.booking.form.editTooltip}
                         noteLabel={t.booking.columns["Ghi chú"]}
+                        noteAddLabels={noteAddLabels}
+                        onSaveNote={saveBookingNote}
+                        timeLabels={t.common.relativeTime}
                       />
                     );
                   })}

@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -102,3 +104,33 @@ def test_booking_without_note_returns_empty_string(client):
     col = db.create_collection("No note")
     db.insert_booking(col, {"Booking No": "OLD1"})
     assert db.get_bookings(col)[0]["Ghi chú"] == ""
+
+
+def test_bookings_listed_newest_first(client):
+    col = db.create_collection("Order")
+    ids = [db.insert_booking(col, {"Booking No": no}) for no in ("OLD", "MID", "NEW")]
+    newest_first = list(reversed(ids))
+    assert [b["id"] for b in db.get_bookings(col)] == newest_first
+    page = client.get(f"{API}/bookings/page", params={"collection_id": col, "limit": 2}).json()
+    assert [b["Booking No"] for b in page["items"]] == ["NEW", "MID"]
+    assert client.get(f"{API}/bookings/ids", params={"collection_id": col}).json()["ids"] == newest_first
+    assert [b["id"] for b in db.get_bookings_by_ids(ids)] == newest_first
+    # backups keep the original insertion order so a restore does not flip it
+    backup = next(c for c in db.export_backup_data()["collections"] if c["name"] == "Order")
+    assert [b["Booking No"] for b in backup["bookings"]] == ["OLD", "MID", "NEW"]
+
+
+def test_booking_created_at_stamped_and_kept_on_edit_and_backup(client):
+    col = db.create_collection("Created")
+    res = client.post(f"{API}/bookings/manual-save", json={"collection_id": col, "booking": {"Booking No": "T1"}})
+    item = res.json()["item"]
+    created = item["Thời gian thêm"]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", created)
+    # editing never changes when the booking was added, even if the client sends the field
+    res = client.put(f"{API}/bookings/{item['id']}", json={"booking": {"Vessel": "X", "Thời gian thêm": "2000-01-01 00:00:00"}})
+    assert res.json()["item"]["Thời gian thêm"] == created
+    # a restored backup keeps the original timestamp
+    db.import_backup_data({"collections": [{"name": "Restored", "bookings": [
+        {"Booking No": "OLD", "Thời gian thêm": "2026-01-02 03:04:05"}]}]}, mode="merge")
+    restored = next(c for c in db.get_collections() if c["name"] == "Restored")
+    assert db.get_bookings(restored["id"])[0]["Thời gian thêm"] == "2026-01-02 03:04:05"

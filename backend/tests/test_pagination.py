@@ -102,7 +102,7 @@ def test_bookings_page_ids_and_by_ids(fresh_db):
     for i in range(5):
         db.insert_booking(col, {"Booking No": f"SGN{i}", "Vessel": "KOTA", "Carrier": "PIL"})
     body = client.get(f"{API}/bookings/page", params={"collection_id": col, "limit": 2}).json()
-    assert body["total"] == 5 and [b["Booking No"] for b in body["items"]] == ["SGN0", "SGN1"]
+    assert body["total"] == 5 and [b["Booking No"] for b in body["items"]] == ["SGN4", "SGN3"]  # newest first
     ids = client.get(f"{API}/bookings/ids", params={"collection_id": col, "search_query": "SGN4"}).json()["ids"]
     assert len(ids) == 1
     rows = client.post(f"{API}/bookings/by-ids", json={"ids": ids}).json()

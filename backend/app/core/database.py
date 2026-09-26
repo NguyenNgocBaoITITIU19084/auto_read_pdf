@@ -209,6 +209,25 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "container", "column_key": "event_type", "match_value": "OUTGATE", "match_type": "contains", "preset_id": "amber", "is_enabled": 1},
     {"target_table": "container", "column_key": "event_type", "match_value": "STACK", "match_type": "contains", "preset_id": "purple", "is_enabled": 1},
     {"target_table": "container", "column_key": "event_type", "match_value": "LOAD", "match_type": "contains", "preset_id": "teal", "is_enabled": 1},
+    # Shipping lines (Hãng tàu) — short codes match exactly so e.g. "ONE" never colours "PHONE"
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "DONGJIN", "match_type": "contains", "preset_id": "cyan", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "CULINES", "match_type": "contains", "preset_id": "teal", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "PIL", "match_type": "exact", "preset_id": "rose", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "ONE", "match_type": "exact", "preset_id": "fuchsia", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "SITC", "match_type": "contains", "preset_id": "amber", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "COSCO", "match_type": "contains", "preset_id": "blue", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "MAERSK", "match_type": "contains", "preset_id": "sky", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "CMA", "match_type": "contains", "preset_id": "indigo", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "EVERGREEN", "match_type": "contains", "preset_id": "emerald", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "WAN HAI", "match_type": "contains", "preset_id": "orange", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "HMM", "match_type": "exact", "preset_id": "violet", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "MSC", "match_type": "exact", "preset_id": "yellow", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "HAPAG", "match_type": "contains", "preset_id": "red", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "YANG MING", "match_type": "contains", "preset_id": "lime", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "OOCL", "match_type": "contains", "preset_id": "pink", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "KMTC", "match_type": "contains", "preset_id": "green", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "TS LINES", "match_type": "contains", "preset_id": "purple", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "ZIM", "match_type": "exact", "preset_id": "stone", "is_enabled": 1},
 ]
 
 COLOR_RULES_UNIQUE_INDEX = "ux_color_rules_rule"
@@ -307,7 +326,7 @@ def init_db():
                 FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             );
         """)
-        _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT")])
+        _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT"), ("created_at", "TEXT")])
 
         # Legacy vessel_schedules without collection_id are dropped and recreated
         vs_exists = conn.execute(
@@ -557,8 +576,8 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         INSERT INTO bookings (
             collection_id, pdf_name, booking_no, carrier, port_of_discharging, place_of_delivery, block_val,
             ts_port, equipment_type, qty, empty_pickup_cy, full_return_cy,
-            cutoff_time, vessel, etd, note
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            cutoff_time, vessel, etd, note, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, (
         col_id,
         data.get("Tên file PDF", data.get("pdf_name", "")),
@@ -575,7 +594,9 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         data.get("Port Cargo Cut-off", data.get("cutoff_time", "")),
         data.get("Vessel", data.get("vessel", "")),
         data.get("ETD", data.get("etd", "")),
-        data.get("Ghi chú", data.get("note", "")) or ""
+        data.get("Ghi chú", data.get("note", "")) or "",
+        # restored backups keep their original time; everything else is stamped now
+        data.get("Thời gian thêm", data.get("created_at")) or _now_str(),
     ))
     return cursor.lastrowid
 
@@ -687,13 +708,19 @@ def _booking_row_to_api(row: dict) -> dict:
         "Vessel": row["vessel"],
         "ETD": row["etd"],
         "Ghi chú": row.get("note") or "",
+        "Thời gian thêm": row.get("created_at") or "",
     }
 
 
-def get_bookings(col_id: int, search_query: str = None, search_field: str = None) -> list[dict]:
+# Newest bookings first in every list the UI shows
+_BOOKING_ORDER = "ORDER BY id DESC"
+
+
+def get_bookings(col_id: int, search_query: str = None, search_field: str = None, newest_first: bool = True) -> list[dict]:
     where, params = _booking_where(col_id, search_query, search_field)
+    order = _BOOKING_ORDER if newest_first else "ORDER BY id ASC"
     with get_connection() as conn:
-        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} ORDER BY id ASC;", tuple(params))
+        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {order};", tuple(params))
     return [_booking_row_to_api(r) for r in rows]
 
 
@@ -703,7 +730,7 @@ def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int 
     where, params = _booking_where(col_id, search_query, search_field)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
-        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} ORDER BY id ASC LIMIT ? OFFSET ?;",
+        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {_BOOKING_ORDER} LIMIT ? OFFSET ?;",
                              (*params, limit, offset))
     return {"items": [_booking_row_to_api(r) for r in rows], "total": total}
 
@@ -711,7 +738,7 @@ def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int 
 def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
     where, params = _booking_where(col_id, search_query, search_field)
     with get_connection() as conn:
-        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} ORDER BY id ASC;",
+        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {_BOOKING_ORDER};",
                                            tuple(params)).fetchall()]
 
 
@@ -722,7 +749,7 @@ def get_bookings_by_ids(ids: list[int]) -> list[dict]:
         for chunk in _chunks(clean):
             placeholders = ",".join(["?"] * len(chunk))
             rows.extend(_select_dicts(conn, f"SELECT * FROM bookings WHERE id IN ({placeholders});", tuple(chunk)))
-    rows.sort(key=lambda r: r["id"])
+    rows.sort(key=lambda r: r["id"], reverse=True)
     return [_booking_row_to_api(r) for r in rows]
 
 
@@ -769,7 +796,8 @@ def export_backup_data() -> dict:
     backup_data = []
 
     for col in collections:
-        bookings = _strip_keys(get_bookings(col["id"]))
+        # oldest first so a restore re-inserts them in their original order
+        bookings = _strip_keys(get_bookings(col["id"], newest_first=False))
         with get_connection() as conn:
             vessels = _strip_keys(_select_dicts(
                 conn, "SELECT * FROM vessel_schedules WHERE collection_id = ? ORDER BY queried_at DESC, id ASC;", (col["id"],)))

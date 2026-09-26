@@ -11,7 +11,7 @@ import { Booking, ImageExtractEngine } from '../../types';
 import { extractBookingImageDetailedApi, saveManualBookingApi } from '../../services/api';
 import { AISettingsCard } from '../common/AISettingsCard';
 import { tf } from '../../services/i18nFormat';
-import { getCarrierBadgeClass } from './carriers';
+import { useCarrierBadge } from './useCarrierBadge';
 import { isImageFile, isPdfFile, readClipboardImageFile } from './clipboard';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { getBookingVesselCandidates } from '../../utils/vessel';
@@ -87,6 +87,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
   
   // Form fields
   const [fields, setFields] = useState<Partial<Booking>>(EMPTY_FIELDS);
+  const carrierBadge = useCarrierBadge(fields["Carrier"]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Incremented for every extraction / reset so stale responses are ignored */
@@ -453,7 +454,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 {t.booking.imageModal.detectedCarrier}
               </span>
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${getCarrierBadgeClass(fields["Carrier"])}`}>
+              <span style={carrierBadge.style} className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg border ${carrierBadge.className}`}>
                 {fields["Carrier"] && fields["Carrier"] !== 'null' ? fields["Carrier"] : 'Chưa nhận diện'}
               </span>
               {engineBadge && !extracting && (

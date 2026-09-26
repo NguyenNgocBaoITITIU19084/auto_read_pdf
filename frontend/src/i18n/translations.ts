@@ -116,6 +116,7 @@ export const translations = {
       }
     },
     common: {
+      relativeTime: { justNow: "Vừa xong", minutes: "{n} phút trước", hours: "{n} giờ trước", days: "{n} ngày trước" },
       all: "Tất cả",
       search: "Tìm kiếm...",
       searchField: "Cột tìm kiếm",
@@ -407,7 +408,14 @@ export const translations = {
         "Port Cargo Cut-off": "Thời gian cắt máng",
         "Vessel": "Tên tàu / Số chuyến",
         "ETD": "Ngày tàu chạy (ETD)",
-        "Ghi chú": "Ghi chú"
+        "Ghi chú": "Ghi chú",
+        "Thời gian thêm": "Thời gian thêm"
+      },
+      noteQuick: {
+        title: "Thêm ghi chú",
+        placeholder: "Nhập ghi chú cho booking này...",
+        hint: "Ctrl/⌘ + Enter để lưu · Esc để đóng",
+        saved: "Đã lưu ghi chú"
       },
       form: {
         addButton: "Thêm booking",
@@ -961,6 +969,7 @@ export const translations = {
       }
     },
     common: {
+      relativeTime: { justNow: "Just now", minutes: "{n} min ago", hours: "{n} h ago", days: "{n} days ago" },
       all: "All",
       search: "Search...",
       searchField: "Search field",
@@ -1252,7 +1261,14 @@ export const translations = {
         "Port Cargo Cut-off": "Port Cargo Cut-off",
         "Vessel": "Vessel / Voyage",
         "ETD": "ETD",
-        "Ghi chú": "Note"
+        "Ghi chú": "Note",
+        "Thời gian thêm": "Added"
+      },
+      noteQuick: {
+        title: "Add note",
+        placeholder: "Type a note for this booking...",
+        hint: "Ctrl/⌘ + Enter to save · Esc to close",
+        saved: "Note saved"
       },
       form: {
         addButton: "Add booking",

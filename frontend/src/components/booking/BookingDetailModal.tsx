@@ -5,7 +5,8 @@ import { Booking } from '../../types';
 import { useApp } from '../../context/AppContext';
 import type { TabId } from '../common/Tabs';
 import { QuickVesselSearch } from './QuickVesselSearch';
-import { detectBookingCarrier, getCarrierBadgeClass } from './carriers';
+import { detectBookingCarrier } from './carriers';
+import { useCarrierBadge } from './useCarrierBadge';
 import { getBookingVesselCandidates } from '../../utils/vessel';
 import { NOTE_KEY, getBookingNote } from './NoteHover';
 
@@ -33,6 +34,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   React.useEffect(() => {
     if (!isOpen) setQuickVesselOpen(false);
   }, [isOpen]);
+
+  const carrierBadge = useCarrierBadge(booking ? detectBookingCarrier(booking, 'Khác') : null);
 
   if (!booking) return null;
 
@@ -76,7 +79,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-md border uppercase tracking-wider ${getCarrierBadgeClass(carrierName)}`}>
+                <span style={carrierBadge.style} className={`text-xs font-bold px-2.5 py-0.5 rounded-md border uppercase tracking-wider ${carrierBadge.className}`}>
                   Hãng tàu: {carrierName}
                 </span>
               </div>
