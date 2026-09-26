@@ -1,6 +1,6 @@
 {
   "name": "auto-read-pdf-pro",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Auto Read PDF Pro - Modern Desktop Application for PDF Extraction and ePort Vessel/Container Tracking",
   "main": "electron/main.js",
   "scripts": {
