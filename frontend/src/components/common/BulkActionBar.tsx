@@ -30,6 +30,8 @@ export interface BulkActionBarProps {
   className?: string;
   /** Max non-danger actions shown as labelled buttons before the rest collapse into "Thêm". Default 3. */
   maxVisibleActions?: number;
+  /** The bar only appears from this many selected rows (a single row is served by its right-click menu). Default 2. */
+  minCount?: number;
 }
 
 const actionButtonClass = (danger?: boolean) =>
@@ -47,6 +49,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
   extra,
   className = '',
   maxVisibleActions = 3,
+  minCount = 2,
 }) => {
   const { t } = useApp();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
@@ -68,7 +71,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
     };
   }, [isMoreOpen]);
 
-  if (count <= 0) return null;
+  if (count <= 0 || count < minCount) return null;
 
   const dangerActions = actions.filter((a) => a.danger);
   const mainCandidates = actions.filter((a) => !a.danger);

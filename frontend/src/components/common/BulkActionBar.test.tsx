@@ -50,7 +50,17 @@ describe('BulkActionBar', () => {
 
   it('does not render an overflow menu when there are 3 or fewer non-danger actions', () => {
     const actions = makeActions().filter((a) => ['watch-add', 'resync', 'delete'].includes(a.key));
-    render(<BulkActionBar count={1} onClear={vi.fn()} actions={actions} />);
+    render(<BulkActionBar count={2} onClear={vi.fn()} actions={actions} />);
     expect(screen.queryByRole('button', { name: translations.vi.bulk.more })).toBeNull();
+  });
+
+  it('stays hidden for a single selected row and appears from two (minCount)', () => {
+    const { rerender } = render(<BulkActionBar count={1} onClear={vi.fn()} actions={makeActions()} />);
+    expect(screen.queryByRole('button', { name: /Thêm/ })).toBeNull();
+    expect(screen.queryByText(/Xuất/)).toBeNull();
+    rerender(<BulkActionBar count={2} onClear={vi.fn()} actions={makeActions()} />);
+    expect(screen.getByRole('button', { name: /Thêm/ })).toBeInTheDocument();
+    rerender(<BulkActionBar count={1} minCount={1} onClear={vi.fn()} actions={makeActions()} />);
+    expect(screen.getByRole('button', { name: /Thêm/ })).toBeInTheDocument();
   });
 });
