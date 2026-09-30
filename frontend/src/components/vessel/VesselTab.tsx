@@ -289,6 +289,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
       const res = await searchVesselsApi(activeCollection.id, siteId, vesselName.trim(), voyage.trim());
       if (res.count > 0) {
         addToast(`Tìm thấy ${res.count} kết quả lịch tàu khớp!`, 'success');
+        selection.clear(); // re-queried rows get new ids (ON CONFLICT REPLACE)
         await loadData('refresh');
       } else {
         addToast(res.message || 'Không tìm thấy thông tin chuyến tàu khớp trên ePort', 'info');

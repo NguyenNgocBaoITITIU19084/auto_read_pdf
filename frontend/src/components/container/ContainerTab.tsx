@@ -412,6 +412,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       } else {
         addToast(res.message || 'Không tìm thấy thông tin container trên ePort', 'info');
       }
+      selection.clear(); // re-queried rows get new ids (ON CONFLICT REPLACE)
       await loadData('refresh');
     } catch (e: any) {
       addToast(errorMessage(e, t.common.error), 'error');
