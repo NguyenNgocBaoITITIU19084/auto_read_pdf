@@ -5,6 +5,9 @@ import { VesselSchedule } from '../../types';
 import { useApp } from '../../context/AppContext';
 import { formatTimeAgo, isRecentUpdate } from '../../utils/formatters';
 import { getPortDisplayName } from '../../utils/ports';
+import { useFieldSelection } from '../../hooks/useFieldSelection';
+import { FieldCheck, FieldCopyBar } from '../common/FieldCopyBar';
+import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface VesselDetailModalProps {
   isOpen: boolean;
@@ -19,6 +22,7 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
 }) => {
   const { t, language, addToast } = useApp();
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
+  const picked = useFieldSelection(`${isOpen}:${schedule?.id}`);
 
   if (!schedule) return null;
 
@@ -48,6 +52,8 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
     { key: "haz_open_ts", label: t.vessel.columns["haz_open_ts"] },
     { key: "remarks", label: t.vessel.columns["remarks"] },
   ];
+
+  const entries: CopyEntry[] = fields.map((f) => ({ key: f.key, label: f.label, value: String(schedule[f.key] ?? '') }));
 
   return (
     <Modal
@@ -101,6 +107,8 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
           </div>
         </div>
 
+        <FieldCopyBar entries={entries} selected={picked.selected} onSelectAll={picked.setAll} onClear={picked.clear} />
+
         {/* Detailed Fields Grid */}
         <div className="grid grid-cols-2 gap-2.5 max-h-[55vh] overflow-y-auto pr-1">
           {fields.map((f) => {
@@ -116,7 +124,10 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    {!isNull && (
+                      <FieldCheck checked={picked.selected.has(f.key)} onToggle={() => picked.toggle(f.key)} label={t.common.fieldCopy.pick} />
+                    )}
                     {f.label}
                   </span>
                   {!isNull && (

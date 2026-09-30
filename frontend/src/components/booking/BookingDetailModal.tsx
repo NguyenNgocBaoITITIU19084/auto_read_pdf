@@ -9,6 +9,9 @@ import { detectBookingCarrier } from './carriers';
 import { useCarrierBadge } from './useCarrierBadge';
 import { getBookingVesselCandidates } from '../../utils/vessel';
 import { NOTE_KEY, getBookingNote } from './NoteHover';
+import { useFieldSelection } from '../../hooks/useFieldSelection';
+import { FieldCheck, FieldCopyBar } from '../common/FieldCopyBar';
+import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface BookingDetailModalProps {
   isOpen: boolean;
@@ -30,6 +33,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
   const [quickVesselOpen, setQuickVesselOpen] = React.useState(false);
   const closeQuickVessel = React.useCallback(() => setQuickVesselOpen(false), []);
+  const picked = useFieldSelection(`${isOpen}:${booking?.id}`);
 
   React.useEffect(() => {
     if (!isOpen) setQuickVesselOpen(false);
@@ -67,6 +71,13 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
     { key: "Port Cargo Cut-off", label: t.booking.columns["Port Cargo Cut-off"], icon: Calendar },
     { key: "Tên file PDF", label: t.booking.columns["Tên file PDF"] },
   ];
+
+  const entries: CopyEntry[] = fields.map((f) => ({
+    key: f.key,
+    label: f.label,
+    value: String((f.key === "Carrier" ? carrierName : booking[f.key]) ?? ''),
+  }));
+  if (note) entries.push({ key: NOTE_KEY, label: t.booking.columns[NOTE_KEY], value: note });
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Chi tiết Booking: ${booking["Booking No"] || ''}`} maxWidth="max-w-2xl">
@@ -139,6 +150,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
             <div className="flex items-center justify-between mb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                <FieldCheck checked={picked.selected.has(NOTE_KEY)} onToggle={() => picked.toggle(NOTE_KEY)} label={t.common.fieldCopy.pick} />
                 <StickyNote className="w-3.5 h-3.5" />
                 {t.booking.columns[NOTE_KEY]}
               </span>
@@ -154,6 +166,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             <div className="text-xs text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-words leading-relaxed">{note}</div>
           </div>
         )}
+
+        <FieldCopyBar entries={entries} selected={picked.selected} onSelectAll={picked.setAll} onClear={picked.clear} />
 
         {/* Detailed Fields Grid */}
         <div className="grid grid-cols-2 gap-2.5 max-h-[60vh] overflow-y-auto pr-1">
@@ -176,6 +190,9 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    {!isNull && (
+                      <FieldCheck checked={picked.selected.has(f.key)} onToggle={() => picked.toggle(f.key)} label={t.common.fieldCopy.pick} />
+                    )}
                     {Icon && <Icon className="w-3.5 h-3.5 text-slate-400" />}
                     <span>{f.label}</span>
                   </span>

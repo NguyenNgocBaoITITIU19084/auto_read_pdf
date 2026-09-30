@@ -8,6 +8,9 @@ import { getPortDisplayName } from '../../utils/ports';
 import { ValueBadge } from '../common/ValueBadge';
 import { copyTextToClipboard } from '../../utils/formatters';
 import { CustomsStatusBadge, ImdgLink, getCustomsStatus, getImdgInfo, sanitizeDisplayValue } from './customs';
+import { useFieldSelection } from '../../hooks/useFieldSelection';
+import { FieldCheck, FieldCopyBar } from '../common/FieldCopyBar';
+import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface ContainerDetailModalProps {
   isOpen: boolean;
@@ -22,6 +25,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
 }) => {
   const { t, language, addToast } = useApp();
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
+  const picked = useFieldSelection(`${isOpen}:${container?.id}`);
 
   if (!container) return null;
 
@@ -78,6 +82,25 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
       fields: ["event_time", "trans_in", "trans_out", "cont_in_ts", "cont_out_ts", "queried_at", "note"]
     }
   ];
+
+  const labelOf = (key: string) => (t.container.columns as Record<string, string>)[key] || key;
+  const entries: CopyEntry[] = sections.flatMap((section) =>
+    section.fields.map((key) => {
+      let value = '';
+      if (key === 'customs_status') {
+        const status = getCustomsStatus(container);
+        const approval = container.cust_approval_date && container.cust_approval_date !== 'null' ? String(container.cust_approval_date) : '';
+        value = status ? (approval ? `${status} (${approval})` : status) : '';
+      } else if (key === 'haz') {
+        const { text, url } = getImdgInfo(container);
+        value = url || text || '';
+      } else {
+        const raw = container[key] !== undefined && container[key] !== null ? String(sanitizeDisplayValue(container[key])) : '';
+        value = key === 'site_id' && raw && raw !== 'null' ? `${raw} - ${portName}` : raw;
+      }
+      return { key, label: labelOf(key), value };
+    })
+  );
 
   return (
     <Modal
@@ -156,6 +179,8 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
           </div>
         </div>
 
+        <FieldCopyBar entries={entries} selected={picked.selected} onSelectAll={picked.setAll} onClear={picked.clear} />
+
         {/* Detailed Sections */}
         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
           {sections.map((section, sIdx) => {
@@ -185,6 +210,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                              {status && <FieldCheck checked={picked.selected.has(key)} onToggle={() => picked.toggle(key)} label={t.common.fieldCopy.pick} />}
                               <ShieldCheck className="w-3 h-3" />
                               {label}
                             </span>
@@ -217,6 +243,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                              {hasValue && <FieldCheck checked={picked.selected.has(key)} onToggle={() => picked.toggle(key)} label={t.common.fieldCopy.pick} />}
                               {url && <AlertTriangle className="w-3 h-3 text-amber-500" />}
                               {label}
                             </span>
@@ -253,7 +280,8 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                          <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
+                            {!isNull && <FieldCheck checked={picked.selected.has(key)} onToggle={() => picked.toggle(key)} label={t.common.fieldCopy.pick} />}
                             {label}
                           </span>
                           {!isNull && renderCopyButton(String(val), key)}
