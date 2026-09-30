@@ -49,4 +49,23 @@ describe('AlertsSection', () => {
     expect(timeLeft('2026-09-23T18:00', now)?.hours).toBe(6);
     expect(timeLeft(undefined, now)).toBeNull();
   });
+
+  it('marks a cut-off that comes from ePort and shows the booking\'s original time', () => {
+    render(
+      <AlertsSection
+        onNavigateTab={vi.fn()}
+        alerts={{
+          critical_cutoffs: [
+            { id: 1, booking_no: 'SGN1', cutoff_time: '23/09/2026 11:00', cutoff_source: 'eport', original_cutoff: '20/09/2026 03:00' },
+            { id: 2, booking_no: 'SGN2', cutoff_time: '25/09/2026 10:00', cutoff_source: 'booking', original_cutoff: null },
+          ],
+          uncleared_containers: [],
+          upcoming_vessels: [],
+        }}
+      />,
+    );
+    expect(screen.getAllByText(a.eportBadge)).toHaveLength(1);       // only the ePort-sourced row
+    expect(screen.getByText('20/09/2026 03:00')).toBeInTheDocument(); // original shown struck through
+    expect(screen.getByText('25/09/2026 10:00')).toBeInTheDocument();
+  });
 });

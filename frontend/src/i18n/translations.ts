@@ -44,6 +44,9 @@ export const translations = {
         windowHint: "Trong {days} ngày tới",
         showing: "Hiển thị {shown}/{total}",
         emptyCutoffs: "Không có booking nào tới hạn cut-off trong {days} ngày tới.",
+        eportBadge: "ePort",
+        eportBadgeTip: "Giờ cắt máng cập nhật từ ePort",
+        originalCutoff: "Giờ gốc trong booking: {value}",
         emptyContainers: "Không có container nào chưa thông quan hoặc chưa đóng phí.",
         emptyVessels: "Không có tàu nào cập bến trong {days} ngày tới.",
         vessel: "Tàu",
@@ -518,6 +521,13 @@ export const translations = {
         start: "Bắt đầu tra cứu",
         cancel: "Huỷ"
       },
+      eportCutoff: {
+        badge: "ePort",
+        tooltip: "Cắt máng ePort: {eport} · Giờ gốc trong booking: {original}",
+        tooltipNoOriginal: "Cắt máng ePort: {eport}",
+        label: "Cắt máng ePort",
+        updatedAt: "cập nhật {time}",
+      },
       quickVessel: {
         button: "Tra tàu",
         rowTooltip: "Tra lịch tàu nhanh trên ePort",
@@ -906,6 +916,9 @@ export const translations = {
         windowHint: "Next {days} days",
         showing: "Showing {shown}/{total}",
         emptyCutoffs: "No booking reaches its cut-off in the next {days} days.",
+        eportBadge: "ePort",
+        eportBadgeTip: "Closing time updated from ePort",
+        originalCutoff: "Original in booking: {value}",
         emptyContainers: "No container is uncleared or has unpaid fees.",
         emptyVessels: "No vessel berths in the next {days} days.",
         vessel: "Vessel",
@@ -1379,6 +1392,13 @@ export const translations = {
         siteLabel: "Port:",
         start: "Start lookup",
         cancel: "Cancel"
+      },
+      eportCutoff: {
+        badge: "ePort",
+        tooltip: "ePort closing time: {eport} · Original in booking: {original}",
+        tooltipNoOriginal: "ePort closing time: {eport}",
+        label: "ePort closing time",
+        updatedAt: "updated {time}",
       },
       quickVessel: {
         button: "Look up vessel",

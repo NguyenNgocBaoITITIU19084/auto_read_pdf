@@ -26,6 +26,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { Tooltip } from '../common/Tooltip';
 import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteHover';
+import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, eportTooltip } from './EportCutoff';
 import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
@@ -85,6 +86,7 @@ interface BookingRowProps {
   noteAddLabels: NoteQuickAddLabels;
   onSaveNote: (booking: Booking, note: string) => Promise<void>;
   timeLabels: RelativeTimeLabels;
+  eportLabels: EportCutoffLabels;
 }
 
 const BookingRow = React.memo(function BookingRow({
@@ -105,10 +107,12 @@ const BookingRow = React.memo(function BookingRow({
   noteAddLabels,
   onSaveNote,
   timeLabels,
+  eportLabels,
 }: BookingRowProps) {
   const note = getBookingNote(booking);
   const saveNote = (text: string) => onSaveNote(booking, text);
   const noteHoverProps = { note, onSave: saveNote, addLabels: noteAddLabels };
+  const eport = String(booking[EPORT_CUTOFF_KEY] || '').trim();
   return (
     <tr
       onDoubleClick={() => onOpen(booking)}
@@ -149,7 +153,13 @@ const BookingRow = React.memo(function BookingRow({
               maxWidth: w ? `${w}px` : undefined,
             }}
             className="py-1.5 px-2.5 truncate"
-            title={col.key === 'Booking No' || col.key === NOTE_KEY || col.key === CREATED_KEY ? undefined : String(val || '')}
+            title={
+              col.key === 'Booking No' || col.key === NOTE_KEY || col.key === CREATED_KEY
+                ? undefined
+                : col.key === CUTOFF_KEY && eport
+                ? eportTooltip(eportLabels, eport, val)
+                : String(val || '')
+            }
           >
             {col.key === CREATED_KEY ? (
               <AddedAt value={val} labels={timeLabels} />
@@ -163,6 +173,8 @@ const BookingRow = React.memo(function BookingRow({
                   <span className="text-slate-300 dark:text-slate-600">—</span>
                 )}
               </NoteHover>
+            ) : col.key === CUTOFF_KEY && eport ? (
+              <EportCutoffCell eport={eport} original={val} badge={eportLabels.badge} />
             ) : (
               <ValueBadge
                 table="booking"
@@ -556,6 +568,12 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     await loadData('refresh');
   });
 
+  const eportLabels = useMemo<EportCutoffLabels>(() => ({
+    badge: t.booking.eportCutoff.badge,
+    tooltip: t.booking.eportCutoff.tooltip,
+    tooltipNoOriginal: t.booking.eportCutoff.tooltipNoOriginal,
+  }), [t]);
+
   const noteAddLabels = useMemo<NoteQuickAddLabels>(() => ({
     title: t.booking.noteQuick.title,
     placeholder: t.booking.noteQuick.placeholder,
@@ -672,6 +690,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (mountedRef.current) {
       setVesselLookupProgress(null);
       selection.clear();
+      // lookups refresh each booking's ePort cut-off on the server: show it without a manual reload
+      await loadData('refresh');
     }
     const summary = tf(t.booking.bulkActions.lookupSummary, { total: list.length, found, notFound, errors });
     const skippedText = skipped > 0 ? ` · ${tf(t.booking.bulkActions.lookupSkipped, { count: skipped })}` : '';
@@ -981,6 +1001,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         noteAddLabels={noteAddLabels}
                         onSaveNote={saveBookingNote}
                         timeLabels={t.common.relativeTime}
+                        eportLabels={eportLabels}
                       />
                     );
                   })}

@@ -23,6 +23,9 @@ export interface Booking {
   "Empty Pick Up CY"?: string;
   "Full return CY"?: string;
   "Port Cargo Cut-off"?: string;
+  /** Cắt máng from ePort for this booking's vessel + voyage (derived; "" when unknown) */
+  "Cut-off ePort"?: string;
+  "Cut-off ePort cập nhật"?: string;
   "Vessel"?: string;
   "ETD"?: string;
   "Ghi chú"?: string;
@@ -196,6 +199,10 @@ export interface CriticalCutoffAlert {
   port_of_discharging?: string;
   /** Parsed cut-off, VN wall-clock "YYYY-MM-DDTHH:mm" (newer backends only) */
   alert_at?: string;
+  /** "eport" when cutoff_time is ePort's closing time rather than the booking's own */
+  cutoff_source?: 'eport' | 'booking';
+  /** The booking's own cut-off, when ePort's differs */
+  original_cutoff?: string | null;
 }
 
 export interface UnclearedContainerAlert {

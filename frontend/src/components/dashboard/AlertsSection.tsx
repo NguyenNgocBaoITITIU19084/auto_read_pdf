@@ -108,7 +108,23 @@ export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts,
             </div>
           </div>
           <div className="text-right shrink-0 space-y-0.5">
-            <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{b.cutoff_time}</div>
+            <div
+              className="flex items-center justify-end gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 tabular-nums"
+              title={b.original_cutoff ? tf(a.originalCutoff, { value: b.original_cutoff }) : undefined}
+            >
+              {b.cutoff_source === 'eport' && (
+                <span
+                  title={a.eportBadgeTip}
+                  className="px-1 rounded border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 text-[9px] font-bold text-sky-700 dark:text-sky-300"
+                >
+                  {a.eportBadge}
+                </span>
+              )}
+              {b.cutoff_time}
+            </div>
+            {b.original_cutoff && (
+              <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500 line-through tabular-nums">{b.original_cutoff}</div>
+            )}
             {renderTimeLeft(b.alert_at)}
           </div>
         </button>

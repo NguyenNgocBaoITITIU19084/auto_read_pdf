@@ -3,6 +3,7 @@ import { Copy, Check, Ship, Calendar, MapPin, Package, Building2, Anchor, Search
 import { Modal } from '../common/Modal';
 import { Booking } from '../../types';
 import { useApp } from '../../context/AppContext';
+import { tf } from '../../services/i18nFormat';
 import type { TabId } from '../common/Tabs';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { detectBookingCarrier } from './carriers';
@@ -54,6 +55,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   const carrierName = detectBookingCarrier(booking, 'Khác');
   const hasVessel = getBookingVesselCandidates(booking).length > 0;
   const note = getBookingNote(booking);
+  const eportCutoff = String(booking["Cut-off ePort"] || '').trim();
+  const eportUpdatedAt = String(booking["Cut-off ePort cập nhật"] || '').trim();
 
   const fields: { key: string; label: string; icon?: any }[] = [
     { key: "Carrier", label: t.booking.columns["Carrier"] || "Hãng tàu", icon: Building2 },
@@ -226,6 +229,19 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                 <div className={`text-xs font-semibold break-words ${f.key === "Carrier" ? 'text-sm font-bold text-primary-700 dark:text-primary-300' : isNull ? 'text-slate-400 dark:text-slate-500 italic font-normal' : 'text-slate-900 dark:text-slate-100'}`}>
                   {String(val)}
                 </div>
+                {f.key === "Port Cargo Cut-off" && eportCutoff && (
+                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-sky-200 dark:border-sky-900 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+                    <span className="px-1 rounded border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 text-[9px] font-bold text-sky-700 dark:text-sky-300">
+                      {t.booking.eportCutoff.badge}
+                    </span>
+                    <strong className="text-sky-700 dark:text-sky-300">{eportCutoff}</strong>
+                    {eportUpdatedAt && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                        {tf(t.booking.eportCutoff.updatedAt, { time: eportUpdatedAt })}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

@@ -7,6 +7,7 @@ import threading
 from datetime import datetime, timedelta
 from backend.app.core import config
 from backend.app.core.timezone import VN_TZ, now_vn_str
+from backend.app.services.vessel_match import build_schedule_index, find_eport_cutoff
 
 logger = logging.getLogger("backend.database")
 
@@ -326,7 +327,8 @@ def init_db():
                 FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
             );
         """)
-        _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT"), ("created_at", "TEXT")])
+        _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT"), ("created_at", "TEXT"),
+                                           ("eport_cutoff", "TEXT"), ("eport_cutoff_at", "TEXT")])
 
         # Legacy vessel_schedules without collection_id are dropped and recreated
         vs_exists = conn.execute(
@@ -498,6 +500,13 @@ def init_db():
             );
         """)
 
+        # Vessels looked up before this feature existed already know their cut-off: fill it in once at startup
+        try:
+            for (col_id,) in conn.execute("SELECT id FROM collections;").fetchall():
+                _sync_booking_eport_cutoffs(conn, col_id)
+        except Exception:
+            logger.exception("Could not backfill bookings' ePort cut-off")
+
     if removed_color_rules > 0:
         # VACUUM cannot run inside a transaction; reclaim the space freed by the dedupe.
         try:
@@ -576,8 +585,8 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         INSERT INTO bookings (
             collection_id, pdf_name, booking_no, carrier, port_of_discharging, place_of_delivery, block_val,
             ts_port, equipment_type, qty, empty_pickup_cy, full_return_cy,
-            cutoff_time, vessel, etd, note, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            cutoff_time, vessel, etd, note, created_at, eport_cutoff, eport_cutoff_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, (
         col_id,
         data.get("Tên file PDF", data.get("pdf_name", "")),
@@ -597,13 +606,51 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         data.get("Ghi chú", data.get("note", "")) or "",
         # restored backups keep their original time; everything else is stamped now
         data.get("Thời gian thêm", data.get("created_at")) or _now_str(),
+        # ePort cut-off is derived data; only restored backups carry it in (new bookings get it from _sync_...)
+        data.get("Cut-off ePort", data.get("eport_cutoff")) or "",
+        data.get("Cut-off ePort cập nhật", data.get("eport_cutoff_at")) or "",
     ))
     return cursor.lastrowid
 
 
+def _sync_booking_eport_cutoffs(conn: sqlite3.Connection, col_id: int, booking_ids: list[int] | None = None) -> int:
+    """Copy the ePort closing time ("Cắt máng") of each booking's vessel + voyage into bookings.eport_cutoff.
+
+    The booking's own cut-off (cutoff_time) is never touched. A booking with no unambiguous match keeps
+    whatever it had; callers that change the vessel clear the old value first.
+    Returns the number of bookings changed.
+    """
+    schedules = _select_dicts(
+        conn, "SELECT vessel_name, in_out_voyage, closing_time FROM vessel_schedules "
+              "WHERE collection_id = ? AND COALESCE(closing_time, '') != '';", (col_id,))
+    if not schedules:
+        return 0
+    index = build_schedule_index(schedules)
+    if booking_ids is None:
+        rows = conn.execute("SELECT id, vessel, eport_cutoff FROM bookings WHERE collection_id = ?;", (col_id,)).fetchall()
+    else:
+        rows = []
+        for chunk in _chunks(_clean_ids(booking_ids)):
+            placeholders = ",".join(["?"] * len(chunk))
+            rows.extend(conn.execute(
+                f"SELECT id, vessel, eport_cutoff FROM bookings WHERE collection_id = ? AND id IN ({placeholders});",
+                (col_id, *chunk)).fetchall())
+    now = _now_str()
+    changed = 0
+    for booking_id, vessel, current in rows:
+        found = find_eport_cutoff(vessel, index)
+        if found and found != (current or ""):
+            conn.execute("UPDATE bookings SET eport_cutoff = ?, eport_cutoff_at = ? WHERE id = ?;", (found, now, booking_id))
+            changed += 1
+    return changed
+
+
 def insert_booking(col_id: int, data: dict) -> int:
     with get_connection() as conn:
-        return _insert_booking_row(conn.cursor(), col_id, data)
+        booking_id = _insert_booking_row(conn.cursor(), col_id, data)
+        # a vessel looked up earlier already knows its cut-off
+        _sync_booking_eport_cutoffs(conn, col_id, [booking_id])
+        return booking_id
 
 
 BOOKING_FIELD_MAP = {
@@ -623,11 +670,18 @@ def update_booking(booking_id: int, data: dict) -> dict | None:
         if col:
             updates[col] = "" if value is None else str(value)
     with get_connection() as conn:
-        if not conn.execute("SELECT 1 FROM bookings WHERE id = ?;", (booking_id,)).fetchone():
+        current = conn.execute("SELECT collection_id, vessel FROM bookings WHERE id = ?;", (booking_id,)).fetchone()
+        if not current:
             return None
+        if "vessel" in updates and (updates["vessel"] or "").strip() != (current[1] or "").strip():
+            # another vessel: the old ePort cut-off no longer applies
+            updates["eport_cutoff"] = ""
+            updates["eport_cutoff_at"] = ""
         if updates:
             assignments = ", ".join(f"{c} = ?" for c in updates)
             conn.execute(f"UPDATE bookings SET {assignments} WHERE id = ?;", (*updates.values(), booking_id))
+        if "vessel" in updates:
+            _sync_booking_eport_cutoffs(conn, current[0], [booking_id])
     rows = get_bookings_by_ids([booking_id])
     return rows[0] if rows else None
 
@@ -709,6 +763,8 @@ def _booking_row_to_api(row: dict) -> dict:
         "ETD": row["etd"],
         "Ghi chú": row.get("note") or "",
         "Thời gian thêm": row.get("created_at") or "",
+        "Cut-off ePort": row.get("eport_cutoff") or "",
+        "Cut-off ePort cập nhật": row.get("eport_cutoff_at") or "",
     }
 
 
@@ -983,7 +1039,10 @@ def _insert_vessel_rows(cursor: sqlite3.Cursor, col_id: int, schedules: list[dic
 
 def insert_vessel_schedules(col_id: int, schedules: list[dict]) -> list[int]:
     with get_connection() as conn:
-        return _insert_vessel_rows(conn.cursor(), col_id, schedules, _now_str())
+        ids = _insert_vessel_rows(conn.cursor(), col_id, schedules, _now_str())
+        # every live ePort lookup / resync / auto-sync ends here: refresh the bookings' cut-off from it
+        _sync_booking_eport_cutoffs(conn, col_id)
+        return ids
 
 
 _VESSEL_ORDER = "ORDER BY queried_at DESC, id ASC"
@@ -1710,12 +1769,26 @@ def get_dashboard_summary(collection_id: int = None, now: datetime | None = None
         # Dates are stored as display strings in several formats, so ordering/windowing is done in
         # Python on parsed datetimes (SQL string order would sort by day-of-month).
         cursor.execute(f"""
-            SELECT id, booking_no, carrier, cutoff_time, vessel, port_of_discharging
+            SELECT id, booking_no, carrier, cutoff_time, eport_cutoff, vessel, port_of_discharging
             FROM bookings
-            {where_clause} {and_or_where} cutoff_time IS NOT NULL AND cutoff_time != ''
+            {where_clause} {and_or_where} (COALESCE(cutoff_time, '') != '' OR COALESCE(eport_cutoff, '') != '')
         """, params)
+        cutoff_rows = []
+        for r in cursor.fetchall():
+            row = dict(r)
+            eport = (row.pop("eport_cutoff") or "").strip()
+            original = row.get("cutoff_time") or ""
+            row["cutoff_source"] = "booking"
+            row["original_cutoff"] = None
+            if eport:
+                # ePort's closing time supersedes the booking's; keep the original for comparison
+                row["cutoff_time"] = eport
+                row["cutoff_source"] = "eport"
+                if original.strip() and _parse_alert_datetime(original) != _parse_alert_datetime(eport):
+                    row["original_cutoff"] = original
+            cutoff_rows.append(row)
         critical_cutoffs, total_cutoffs = _upcoming(
-            [dict(r) for r in cursor.fetchall()], "cutoff_time",
+            cutoff_rows, "cutoff_time",
             lambda r: (r.get("booking_no") or "").strip().upper() or f"#{r['id']}", now)
 
         # Uncleared containers (customs not cleared / under supervision, or infras fee unpaid)
