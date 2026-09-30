@@ -9,7 +9,7 @@ import { ValueBadge } from '../common/ValueBadge';
 import { copyTextToClipboard } from '../../utils/formatters';
 import { CustomsStatusBadge, ImdgLink, getCustomsStatus, getImdgInfo, sanitizeDisplayValue } from './customs';
 import { useFieldSelection } from '../../hooks/useFieldSelection';
-import { FieldCheck, FieldCopyBar } from '../common/FieldCopyBar';
+import { FieldCopyBar } from '../common/FieldCopyBar';
 import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface ContainerDetailModalProps {
@@ -202,7 +202,8 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                       return (
                         <div
                           key={key}
-                          className={`col-span-2 p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                          {...picked.cardProps(key, !status)}
+                          className={`col-span-2 p-2.5 rounded-xl border flex flex-col justify-between transition-all ${picked.cardClass(key, !status)} ${
                             status
                               ? 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-xs'
                               : 'bg-slate-50/50 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
@@ -210,7 +211,6 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
-                              {status && <FieldCheck checked={picked.selected.has(key)} onToggle={() => picked.toggle(key)} label={t.common.fieldCopy.pick} />}
                               <ShieldCheck className="w-3 h-3" />
                               {label}
                             </span>
@@ -235,7 +235,8 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                       return (
                         <div
                           key={key}
-                          className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                          {...picked.cardProps(key, !hasValue)}
+                          className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${picked.cardClass(key, !hasValue)} ${
                             hasValue
                               ? 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-xs'
                               : 'bg-slate-50/50 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
@@ -243,7 +244,6 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                         >
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
-                              {hasValue && <FieldCheck checked={picked.selected.has(key)} onToggle={() => picked.toggle(key)} label={t.common.fieldCopy.pick} />}
                               {url && <AlertTriangle className="w-3 h-3 text-amber-500" />}
                               {label}
                             </span>
@@ -271,7 +271,8 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                     return (
                       <div
                         key={key}
-                        className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                        {...picked.cardProps(key, isNull)}
+                        className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${picked.cardClass(key, isNull)} ${
                           isNote ? 'col-span-2 md:col-span-3' : ''
                         } ${
                           isNull
@@ -280,8 +281,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
-                            {!isNull && <FieldCheck checked={picked.selected.has(key)} onToggle={() => picked.toggle(key)} label={t.common.fieldCopy.pick} />}
+                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider">
                             {label}
                           </span>
                           {!isNull && renderCopyButton(String(val), key)}

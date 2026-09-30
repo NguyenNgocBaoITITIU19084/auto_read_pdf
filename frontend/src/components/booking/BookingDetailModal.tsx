@@ -10,7 +10,7 @@ import { useCarrierBadge } from './useCarrierBadge';
 import { getBookingVesselCandidates } from '../../utils/vessel';
 import { NOTE_KEY, getBookingNote } from './NoteHover';
 import { useFieldSelection } from '../../hooks/useFieldSelection';
-import { FieldCheck, FieldCopyBar } from '../common/FieldCopyBar';
+import { FieldCopyBar } from '../common/FieldCopyBar';
 import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface BookingDetailModalProps {
@@ -147,10 +147,12 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
         </div>
 
         {note && (
-          <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+          <div
+            {...picked.cardProps(NOTE_KEY)}
+            className={`p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 ${picked.cardClass(NOTE_KEY)}`}
+          >
             <div className="flex items-center justify-between mb-1">
               <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
-                <FieldCheck checked={picked.selected.has(NOTE_KEY)} onToggle={() => picked.toggle(NOTE_KEY)} label={t.common.fieldCopy.pick} />
                 <StickyNote className="w-3.5 h-3.5" />
                 {t.booking.columns[NOTE_KEY]}
               </span>
@@ -180,7 +182,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             return (
               <div
                 key={f.key}
-                className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                {...picked.cardProps(f.key, isNull)}
+                className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${picked.cardClass(f.key, isNull)} ${
                   f.key === "Carrier"
                     ? 'col-span-2 bg-primary-50/40 dark:bg-primary-950/20 border-primary-200/80 dark:border-primary-800/80'
                     : isNull
@@ -190,9 +193,6 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    {!isNull && (
-                      <FieldCheck checked={picked.selected.has(f.key)} onToggle={() => picked.toggle(f.key)} label={t.common.fieldCopy.pick} />
-                    )}
                     {Icon && <Icon className="w-3.5 h-3.5 text-slate-400" />}
                     <span>{f.label}</span>
                   </span>

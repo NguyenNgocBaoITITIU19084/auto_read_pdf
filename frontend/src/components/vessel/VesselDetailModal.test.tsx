@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { translations } from '../../i18n/translations';
 
 const addToast = vi.fn();
@@ -15,6 +15,10 @@ const schedule: any = {
 const f = translations.vi.common.fieldCopy;
 const writeText = vi.fn().mockResolvedValue(undefined);
 
+/** The selectable card holding `text` (the header banner repeats some values). */
+const cardWith = (text: string) =>
+  screen.getAllByText(text).map((el) => el.closest('[role=checkbox]')).find(Boolean) as HTMLElement;
+
 describe('VesselDetailModal – copy several fields', () => {
   beforeEach(() => {
     addToast.mockReset();
@@ -24,9 +28,8 @@ describe('VesselDetailModal – copy several fields', () => {
 
   it('copies only the ticked fields, with names', async () => {
     render(<VesselDetailModal isOpen onClose={() => undefined} schedule={schedule} />);
-    const ticks = screen.getAllByRole('checkbox', { name: f.pick });
-    fireEvent.click(ticks[2]); // vessel_name (site_id, agent, vessel_name)
-    fireEvent.click(ticks[3]); // in_out_voyage
+    fireEvent.click(cardWith('HMM HOPE'));
+    fireEvent.click(cardWith('062E-062E'));
     expect(screen.getByText('Đã chọn 2 ô')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: f.copyLabeled }));
@@ -50,8 +53,18 @@ describe('VesselDetailModal – copy several fields', () => {
     expect(screen.queryByRole('button', { name: f.copyValues })).toBeNull();
   });
 
-  it('has no tick box for empty fields', () => {
+  it('selects by clicking a card (toggle), not when clicking its copy button, and skips empty fields', () => {
     render(<VesselDetailModal isOpen onClose={() => undefined} schedule={schedule} />);
-    expect(screen.getAllByRole('checkbox', { name: f.pick })).toHaveLength(5);
+    const cards = screen.getAllByRole('checkbox');
+    expect(cards).toHaveLength(5); // only fields holding a value are selectable
+
+    const card = cardWith('HMM HOPE');
+    fireEvent.click(card);
+    expect(card).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(card);
+    expect(card).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(within(card).getByRole('button', { name: translations.vi.common.copy }));
+    expect(card).toHaveAttribute('aria-checked', 'false');
   });
 });

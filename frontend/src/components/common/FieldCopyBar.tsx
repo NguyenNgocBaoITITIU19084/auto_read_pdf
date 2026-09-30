@@ -5,24 +5,6 @@ import { copyTextToClipboard } from '../../utils/formatters';
 import { tf } from '../../services/i18nFormat';
 import { CopyEntry, FieldCopyMode, copyableEntries, formatEntriesForCopy } from '../../utils/fieldCopy';
 
-interface FieldCheckProps {
-  checked: boolean;
-  onToggle: () => void;
-  label: string;
-}
-
-/** Small tick box shown in a field card header. */
-export const FieldCheck: React.FC<FieldCheckProps> = ({ checked, onToggle, label }) => (
-  <input
-    type="checkbox"
-    checked={checked}
-    onChange={onToggle}
-    aria-label={label}
-    title={label}
-    className="rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500 cursor-pointer shrink-0"
-  />
-);
-
 interface FieldCopyBarProps {
   entries: CopyEntry[];
   selected: ReadonlySet<string>;

@@ -6,7 +6,7 @@ import { useApp } from '../../context/AppContext';
 import { formatTimeAgo, isRecentUpdate } from '../../utils/formatters';
 import { getPortDisplayName } from '../../utils/ports';
 import { useFieldSelection } from '../../hooks/useFieldSelection';
-import { FieldCheck, FieldCopyBar } from '../common/FieldCopyBar';
+import { FieldCopyBar } from '../common/FieldCopyBar';
 import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface VesselDetailModalProps {
@@ -117,17 +117,15 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
             return (
               <div
                 key={f.key}
-                className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${
+                {...picked.cardProps(f.key, isNull)}
+                className={`p-2.5 rounded-xl border flex flex-col justify-between transition-all ${picked.cardClass(f.key, isNull)} ${
                   isNull
                     ? 'bg-slate-50/40 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
                     : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-xs'
                 }`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                    {!isNull && (
-                      <FieldCheck checked={picked.selected.has(f.key)} onToggle={() => picked.toggle(f.key)} label={t.common.fieldCopy.pick} />
-                    )}
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider ">
                     {f.label}
                   </span>
                   {!isNull && (
