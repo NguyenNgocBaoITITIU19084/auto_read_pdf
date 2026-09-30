@@ -120,7 +120,7 @@ export const uploadFiles = uploadPDFs;
  * Extract booking fields from an image. Returns the full result
  * `{data, engine_used, warnings}` so callers can surface engine failures.
  */
-export const extractBookingImageDetailedApi = async (file: File, apiKey?: string): Promise<ImageExtractResult> => {
+export const extractBookingImageDetailedApi = async (file: File, apiKey?: string, signal?: AbortSignal): Promise<ImageExtractResult> => {
   const formData = new FormData();
   formData.append('file', file);
   if (apiKey) {
@@ -131,14 +131,19 @@ export const extractBookingImageDetailedApi = async (file: File, apiKey?: string
     data: Partial<Booking>;
     engine_used?: ImageExtractResult['engine_used'];
     warnings?: string[];
+    model_used?: string | null;
+    gemini_error_kind?: string | null;
   }>('/bookings/extract-image', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: LONG_TIMEOUT,
+    signal,
   });
   return {
     data: res.data?.data || {},
     engine_used: res.data?.engine_used || 'none',
     warnings: Array.isArray(res.data?.warnings) ? res.data.warnings : [],
+    model_used: res.data?.model_used ?? null,
+    gemini_error_kind: res.data?.gemini_error_kind ?? null,
   };
 };
 
@@ -147,6 +152,10 @@ export const extractBookingImageApi = async (file: File, apiKey?: string): Promi
   const result = await extractBookingImageDetailedApi(file, apiKey);
   return result.data;
 };
+
+/** Which of these Booking Nos already exist in the collection. */
+export const checkBookingDuplicatesApi = async (collectionId: number, bookingNos: string[]): Promise<string[]> =>
+  (await apiClient.post<{ existing: string[] }>('/bookings/check-duplicates', { collection_id: collectionId, booking_nos: bookingNos })).data.existing || [];
 
 export const saveManualBookingApi = async (collectionId: number, booking: Partial<Booking>): Promise<{ item: Booking; warnings: string[] }> => {
   const res = await apiClient.post<{ status: string; id: number; item: Booking; warnings?: string[] }>('/bookings/manual-save', {

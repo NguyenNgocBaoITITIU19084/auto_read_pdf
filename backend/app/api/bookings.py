@@ -30,6 +30,10 @@ class SaveBookingRequest(BaseModel):
     collection_id: int
     booking: Dict[str, Any]
 
+class CheckDuplicatesRequest(BaseModel):
+    collection_id: int
+    booking_nos: List[str] = []
+
 class BatchDeleteRequest(BaseModel):
     ids: List[int] = []
 
@@ -148,6 +152,8 @@ async def upload_bookings(
 def _extract_preview(file_bytes: bytes, filename: str, file_ext: str, api_key: Optional[str]) -> dict:
     engine_used = "none"
     warnings: List[str] = []
+    model_used: Optional[str] = None
+    gemini_error_kind: Optional[str] = None
     if file_ext == ".pdf":
         data = _extract_pdf_bytes(file_bytes)
         # PDF text layer parsing (no AI); reported as local extraction
@@ -163,12 +169,15 @@ def _extract_preview(file_bytes: bytes, filename: str, file_ext: str, api_key: O
             data = result["data"]
             engine_used = result.get("engine_used") or "none"
             warnings = list(result.get("warnings") or [])
+            model_used = result.get("model_used")
+            gemini_error_kind = result.get("gemini_error_kind")
         else:
             data = result
 
     data["Tên file PDF"] = filename
     _resolve_vessel_etd(data)
-    return {"status": "success", "data": data, "engine_used": engine_used, "warnings": warnings}
+    return {"status": "success", "data": data, "engine_used": engine_used, "warnings": warnings,
+            "model_used": model_used, "gemini_error_kind": gemini_error_kind}
 
 @router.post("/extract-image")
 async def extract_image_preview(
@@ -197,6 +206,13 @@ async def extract_image_preview(
         raise HTTPException(status_code=500, detail=f"Failed to extract image: {e}")
     logger.info(f"Image extract engine={result['engine_used']} warnings={len(result['warnings'])}")
     return result
+
+@router.post("/check-duplicates")
+def check_duplicate_bookings(req: CheckDuplicatesRequest):
+    """Which of these Booking Nos already exist in the collection (case/space-insensitive). Used by the image queue."""
+    existing = [no for no in dict.fromkeys(n.strip() for n in req.booking_nos if n and n.strip())
+                if find_duplicate_booking_ids(req.collection_id, no)]
+    return {"existing": existing}
 
 @router.post("/manual-save")
 def save_manual_booking(req: SaveBookingRequest):

@@ -274,6 +274,10 @@ export interface ImageExtractResult {
   data: Partial<Booking>;
   engine_used: ImageExtractEngine;
   warnings: string[];
+  /** Gemini model that produced the result (null when read by OCR) */
+  model_used?: string | null;
+  /** Why Gemini did not produce the result: no_key | quota | invalid_key | network | model_not_found | bad_response | unknown */
+  gemini_error_kind?: string | null;
 }
 
 export interface ExtractImageResponse extends Partial<ImageExtractResult> {

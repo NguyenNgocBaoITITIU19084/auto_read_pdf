@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
-  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote
+  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useMobileBridge } from '../../context/MobileBridgeContext';
-import { usePhoneQueueDrain } from '../../hooks/usePhoneQueueDrain';
+import { useImageQueue } from '../../context/ImageQueueContext';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
@@ -271,9 +271,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const [exportRows, setExportRows] = useState<Booking[]>([]);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
+  const [focusImageId, setFocusImageId] = useState<string | null>(null);
   const [isPhoneCaptureOpen, setIsPhoneCaptureOpen] = useState(false);
   const mobile = useMobileBridge();
+  const imageQueue = useImageQueue();
   const [quickVesselBooking, setQuickVesselBooking] = useState<Booking | null>(null);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
   const [isBulkVesselLookupOpen, setIsBulkVesselLookupOpen] = useState(false);
@@ -295,7 +296,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   useEffect(() => {
     const unsubscribe = subscribeTourActions((action) => {
       if (action === 'openImageModal') {
-        setActiveImageFile(null);
+        setFocusImageId(null);
         setIsImageModalOpen(true);
       } else if (action === 'closeImageModal') {
         setIsImageModalOpen(false);
@@ -459,6 +460,15 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     }
   });
 
+  /** Adds images to the app-wide reading queue and opens the review window on the first new one. */
+  const queueImages = useStableCallback((images: File[], source: 'upload' | 'paste' | 'drop') => {
+    const res = imageQueue.enqueue(images, source);
+    if (res.ids.length === 0) return;
+    if (res.added > 1) addToast(tf(t.booking.imageQueue.added, { count: res.added }), 'info');
+    setFocusImageId(res.ids[0]);
+    setIsImageModalOpen(true);
+  });
+
   const handleFilesUpload = async (files: FileList | File[]) => {
     if (!activeCollection || files.length === 0) return;
 
@@ -469,16 +479,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       return;
     }
 
-    // If exactly 1 image file is uploaded/dropped, open the interactive review modal
-    const isSingleImage = fileArray.length === 1 && !isPdfFile(fileArray[0]);
-    if (isSingleImage) {
-      setActiveImageFile(fileArray[0]);
-      setIsImageModalOpen(true);
-      return;
-    }
-
-    // Batch upload processing
-    await uploadFiles(fileArray);
+    // Images go to the reading queue (reviewed before saving); PDFs are read and saved straight away
+    const images = fileArray.filter((f) => !isPdfFile(f));
+    const pdfs = fileArray.filter(isPdfFile);
+    if (images.length > 0) queueImages(images, 'drop');
+    if (pdfs.length > 0) await uploadFiles(pdfs);
   };
 
   // Files pasted anywhere in the app (App-level paste handler)
@@ -493,25 +498,18 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       }
       void uploadFiles(pdfs);
     }
-    if (images.length > 0) {
-      if (images.length > 1) {
-        addToast(tf(t.booking.paste.multipleImages, { count: images.length }), 'info');
-      }
-      setActiveImageFile(images[0]);
-      setIsImageModalOpen(true);
-    }
+    if (images.length > 0) queueImages(images, 'paste');
     onPasteRequestHandled?.(id);
-  }, [pasteRequest, activeCollection, addToast, t, uploadFiles, onPasteRequestHandled]);
+  }, [pasteRequest, activeCollection, addToast, t, uploadFiles, queueImages, onPasteRequestHandled]);
 
-  // Photos arriving from a paired phone: open them one at a time in the review modal, only
-  // once the previous one has been saved/dismissed, so a fresh photo never clobbers an
-  // in-progress edit. See usePhoneQueueDrain.ts for why this needs to guard on the queue
-  // head's identity rather than its length.
-  const handlePhoneQueuePhoto = useStableCallback((file: File) => {
-    setActiveImageFile(file);
-    setIsImageModalOpen(true);
-  });
-  usePhoneQueueDrain(mobile, isImageModalOpen, handlePhoneQueuePhoto);
+  // Bookings saved from the reading queue (any tab, phone photos included): refresh this table
+  const seenSavedVersion = useRef(imageQueue.savedVersion);
+  useEffect(() => {
+    if (imageQueue.savedVersion === seenSavedVersion.current) return;
+    seenSavedVersion.current = imageQueue.savedVersion;
+    if (imageQueue.lastSaved?.collectionId === activeCollection?.id) void loadData('refresh');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageQueue.savedVersion]);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -882,13 +880,22 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             <Tooltip content={t.booking.scanImageTooltip}>
               <button
                 onClick={() => {
-                  setActiveImageFile(null);
+                  setFocusImageId(null);
                   setIsImageModalOpen(true);
                 }}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm transition-all"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>{t.booking.scanImage}</span>
+                {imageQueue.stats.total > imageQueue.stats.saved && (
+                  <span
+                    title={tf(t.booking.imageQueue.queuedBadge, { done: imageQueue.stats.finished, total: imageQueue.stats.total })}
+                    className="flex items-center gap-1 ml-0.5 px-1.5 py-px rounded-full bg-white/25 text-[10px] font-bold tabular-nums"
+                  >
+                    {imageQueue.stats.queued + imageQueue.stats.reading > 0 && <Loader2 className="w-3 h-3 animate-spin" />}
+                    {imageQueue.stats.finished - imageQueue.stats.saved}/{imageQueue.stats.total - imageQueue.stats.saved}
+                  </span>
+                )}
               </button>
             </Tooltip>
           </div>
@@ -1141,10 +1148,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       <ImageBookingModal
         isOpen={isImageModalOpen}
         onClose={() => setIsImageModalOpen(false)}
-        initialFile={activeImageFile}
-        onSavedSuccess={() => loadData('refresh')}
+        focusItemId={focusImageId}
         onPdfFiles={(files) => void uploadFiles(files)}
-        pendingCount={mobile.queue.length}
       />
 
       <PhoneCaptureModal

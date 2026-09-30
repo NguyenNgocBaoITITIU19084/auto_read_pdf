@@ -64,6 +64,7 @@ W_NO_KEY = "Chưa cấu hình Gemini API key — đang dùng OCR offline (độ 
 W_INVALID_KEY = "Gemini API key không hợp lệ hoặc không có quyền truy cập. Vui lòng kiểm tra lại key trong Cài đặt."
 W_MODEL_NOT_FOUND = "Model Gemini \"{model}\" không khả dụng (có thể đã ngừng hỗ trợ). Vui lòng chọn model khác trong Cài đặt."
 W_MODEL_REPLACED = "Model Gemini \"{model}\" không khả dụng, đã tự động dùng \"{fallback}\". Nên cập nhật model trong Cài đặt."
+W_UNAVAILABLE = "Gemini đang quá tải (lỗi tạm thời từ phía Google). Hãy thử lại sau ít phút."
 W_QUOTA = "Đã vượt hạn mức (quota) của Gemini API. Vui lòng thử lại sau hoặc dùng API key khác."
 W_NETWORK = "Không kết nối được tới Gemini (lỗi mạng hoặc quá thời gian chờ)."
 W_GEMINI_OTHER = "Gemini trả về lỗi ({status}): {message}"
@@ -76,7 +77,7 @@ W_NO_FIELDS = "Không tìm thấy thông tin booking trong ảnh. Vui lòng ki�
 class GeminiError(Exception):
     """Gemini call failure with a classified kind.
 
-    kind in {"invalid_key", "model_not_found", "quota", "network", "bad_response", "unknown"}
+    kind in {"invalid_key", "model_not_found", "quota", "unavailable", "network", "bad_response", "unknown"}
     """
 
     def __init__(self, kind: str, message: str = "", status: Optional[int] = None):
@@ -105,6 +106,9 @@ def classify_gemini_http_error(status: int, message: str) -> str:
         return "quota"
     if status in (401, 403) or "api key not valid" in low or "api_key_invalid" in low or "api key expired" in low:
         return "invalid_key"
+    # 500/502/503/504 and "high demand" answers are Google-side and pass on their own
+    if status in (500, 502, 503, 504) or "unavailable" in low or "overloaded" in low or "high demand" in low:
+        return "unavailable"
     return "unknown"
 
 
@@ -115,6 +119,8 @@ def gemini_error_warning(err: GeminiError, model: str = "") -> str:
         return W_MODEL_NOT_FOUND.format(model=model)
     if err.kind == "quota":
         return W_QUOTA
+    if err.kind == "unavailable":
+        return W_UNAVAILABLE
     if err.kind == "network":
         return W_NETWORK
     if err.kind == "bad_response":
@@ -379,12 +385,16 @@ def extract_booking_from_image_detailed(
 ) -> Dict[str, Any]:
     """
     Image booking extraction with diagnostics.
-    Returns {"data": dict, "engine_used": "gemini"|"ocr"|"none", "warnings": [str]}.
+    Returns {"data": dict, "engine_used": "gemini"|"ocr"|"none", "warnings": [str],
+             "model_used": str|None, "gemini_error_kind": str|None}.
+    `gemini_error_kind` is machine-readable ("no_key", "quota", "invalid_key", "network", ...) so callers
+    (e.g. the batch image queue) can react without parsing the warning text.
     - Gemini Vision first (when a key is configured); on 404 for a non-default model it retries once
       with DEFAULT_MODEL.
     - Falls back to local OCR (macOS Vision via swift / pytesseract) + text parser.
     """
     warnings: List[str] = []
+    gemini_error_kind: Optional[str] = None
 
     if not api_key:
         api_key = get_system_setting("gemini_api_key", os.environ.get("GEMINI_API_KEY", ""))
@@ -403,6 +413,7 @@ def extract_booking_from_image_detailed(
             remaining = GEMINI_TIMEOUT_S - (time.monotonic() - started)
             if remaining <= 2:
                 warnings.append(W_NETWORK)
+                gemini_error_kind = "network"
                 break
             try:
                 data = extract_booking_from_image_ai(image_bytes, filename, api_key, m, timeout=remaining)
@@ -410,7 +421,8 @@ def extract_booking_from_image_detailed(
                     warnings.append(W_MODEL_REPLACED.format(model=chosen_model, fallback=m))
                 if not has_booking_fields(data):
                     warnings.append(W_NO_FIELDS)
-                return {"data": data, "engine_used": "gemini", "warnings": warnings}
+                return {"data": data, "engine_used": "gemini", "warnings": warnings,
+                        "model_used": m, "gemini_error_kind": None}
             except GeminiError as err:
                 print(f"AI Vision extraction error with model {m} ({err.kind}: {err}), falling back...")
                 if err.kind == "model_not_found":
@@ -429,26 +441,32 @@ def extract_booking_from_image_detailed(
                         i += 1
                         continue
                 warnings.append(gemini_error_warning(err, m))
+                gemini_error_kind = err.kind
                 break
             except Exception as err:  # defensive: never fail silently
                 print(f"AI Vision extraction unexpected error ({err}), falling back to Local OCR...")
                 warnings.append(W_GEMINI_OTHER.format(status="?", message=str(err)[:200]))
+                gemini_error_kind = "unknown"
                 break
     else:
         warnings.append(W_NO_KEY)
+        gemini_error_kind = "no_key"
 
     # Local OCR fallback
     ocr_text, tried = run_local_ocr(image_bytes)
     data = extract_booking_from_text(ocr_text, filename)
     if not tried:
         warnings.append(W_NO_OCR)
-        return {"data": data, "engine_used": "none", "warnings": warnings}
+        return {"data": data, "engine_used": "none", "warnings": warnings,
+                "model_used": None, "gemini_error_kind": gemini_error_kind}
     if not ocr_text.strip():
         warnings.append(W_OCR_NO_TEXT)
-        return {"data": data, "engine_used": "none", "warnings": warnings}
+        return {"data": data, "engine_used": "none", "warnings": warnings,
+                "model_used": None, "gemini_error_kind": gemini_error_kind}
     if not has_booking_fields(data):
         warnings.append(W_NO_FIELDS)
-    return {"data": data, "engine_used": "ocr", "warnings": warnings}
+    return {"data": data, "engine_used": "ocr", "warnings": warnings,
+            "model_used": None, "gemini_error_kind": gemini_error_kind}
 
 
 def extract_booking_from_image(
