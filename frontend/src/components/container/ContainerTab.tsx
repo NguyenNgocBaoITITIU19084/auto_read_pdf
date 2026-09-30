@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
-  Box, Search, RefreshCw, Trash2, FileSpreadsheet,
+  Box, Search, RefreshCw, Trash2, FileSpreadsheet, Eye, Copy, BookmarkCheck,
   SlidersHorizontal, BookmarkPlus, BookmarkMinus, Filter, ClipboardCopy, FolderInput, RotateCw
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -17,6 +17,7 @@ import { tf } from '../../services/i18nFormat';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
+import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
 import { ContainerDetailModal } from './ContainerDetailModal';
 import { ContainerWatchlistModal } from './ContainerWatchlistModal';
@@ -605,6 +606,40 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
   ];
 
+  // Right-click menu: the clicked row's own actions, then the tab's bulk actions for the selection
+  const rowMenu = useRowContextMenu<ContainerInfo>();
+  const handleRowContextMenu = useStableCallback((item: ContainerInfo, e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!selection.selectedIds.has(item.id)) {
+      selection.clear();
+      selection.selectIds([item.id], true);
+    }
+    rowMenu.open(item, e.clientX, e.clientY);
+  });
+
+  const buildRowMenu = (item: ContainerInfo): MenuGroup[] => {
+    const m = t.common.rowMenu;
+    const watched = !!findWatchlistItem(item);
+    const rowItems: MenuGroup['items'] = [
+      { key: 'view', label: m.view, icon: Eye, onClick: () => setSelectedContainer(item) },
+      {
+        key: 'watch-row',
+        label: watched ? m.removeWatch : m.addWatch,
+        icon: watched ? BookmarkCheck : BookmarkPlus,
+        onClick: () => handleToggleWatchlist(item),
+      },
+    ];
+    if (selection.count <= 1) rowItems.push({ key: 'copy-row', label: m.copyRow, icon: Copy, onClick: () => handleCopyRow(item) });
+    const bulk = bulkMenuItems(bulkActions, selection.count);
+    const dangerRow: MenuGroup['items'] =
+      selection.count <= 1 ? [{ key: 'delete-row', label: m.deleteRow, icon: Trash2, onClick: () => handleDelete(item.id), danger: true }] : [];
+    return [
+      { items: rowItems },
+      { label: tf(m.selectedCount, { count: selection.count }), items: bulk.filter((a) => !a.danger) },
+      { items: [...dangerRow, ...bulk.filter((a) => a.danger)] },
+    ];
+  };
+
   const exportData = exportRows;
 
   const exportColumns = useMemo(() => [
@@ -958,6 +993,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                         onCopy={handleCopyRow}
                         onToggleWatchlist={handleToggleWatchlist}
                         onDelete={handleDelete}
+                        onContextMenu={handleRowContextMenu}
                       />
                     );
                   })}
@@ -981,6 +1017,12 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           onPageSizeChange={setPageSize}
         />
       </div>
+
+      <RowContextMenu
+        position={rowMenu.state}
+        groups={rowMenu.state ? buildRowMenu(rowMenu.state.row) : []}
+        onClose={rowMenu.close}
+      />
 
       <BulkActionBar
         count={selection.count}

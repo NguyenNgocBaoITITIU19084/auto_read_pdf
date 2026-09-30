@@ -3,6 +3,7 @@ import { Eye, BookmarkPlus, BookmarkCheck, Copy, Trash2 } from 'lucide-react';
 import { ContainerInfo } from '../../types';
 import { ColumnDef } from '../common/ColumnConfigModal';
 import { Tooltip } from '../common/Tooltip';
+import { isEditableTarget } from '../booking/clipboard';
 import { ValueBadge } from '../common/ValueBadge';
 import type { AppContextType } from '../../context/AppContext';
 import { QueriedAtBadge } from '../vessel/QueriedAtBadge';
@@ -23,6 +24,7 @@ export interface ContainerRowProps {
   onCopy: (item: ContainerInfo) => void;
   onToggleWatchlist: (item: ContainerInfo) => void;
   onDelete: (id: number) => void;
+  onContextMenu: (item: ContainerInfo, e: React.MouseEvent) => void;
 }
 
 const noop = () => undefined;
@@ -40,10 +42,15 @@ const ContainerRowInner: React.FC<ContainerRowProps> = ({
   onCopy,
   onToggleWatchlist,
   onDelete,
+  onContextMenu,
 }) => {
   return (
     <tr
       onDoubleClick={() => onOpen(item)}
+      onContextMenu={(e) => {
+        // keep the native menu inside text fields
+        if (!isEditableTarget(e.target)) onContextMenu(item, e);
+      }}
       className={`hover:bg-sky-100/80 dark:hover:bg-sky-950/70 hover:shadow-xs transition-colors group cursor-pointer ${
         isSelected
           ? 'bg-sky-50 dark:bg-sky-950/50 ring-1 ring-inset ring-sky-300 dark:ring-sky-800'

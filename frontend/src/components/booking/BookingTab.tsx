@@ -34,6 +34,7 @@ import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
 import { ValueBadge } from '../common/ValueBadge';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
+import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
 import { subscribeTourActions } from '../../services/tourEvents';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
@@ -41,7 +42,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
 import { tf } from '../../services/i18nFormat';
 import type { TabId } from '../common/Tabs';
-import { isImageFile, isPdfFile } from './clipboard';
+import { isEditableTarget, isImageFile, isPdfFile } from './clipboard';
 
 /** Files pasted anywhere in the app (routed here by App's global paste handler). */
 export interface BookingPasteRequest {
@@ -80,6 +81,7 @@ interface BookingRowProps {
   onDelete: (id: number) => void;
   onQuickVessel: (booking: Booking) => void;
   onEdit: (booking: Booking) => void;
+  onContextMenu: (booking: Booking, e: React.MouseEvent) => void;
   vesselTooltip: string;
   editLabel: string;
   noteLabel: string;
@@ -101,6 +103,7 @@ const BookingRow = React.memo(function BookingRow({
   onDelete,
   onQuickVessel,
   onEdit,
+  onContextMenu,
   vesselTooltip,
   editLabel,
   noteLabel,
@@ -116,6 +119,10 @@ const BookingRow = React.memo(function BookingRow({
   return (
     <tr
       onDoubleClick={() => onOpen(booking)}
+      onContextMenu={(e) => {
+        // keep the native menu inside text fields (e.g. the quick note box)
+        if (!isEditableTarget(e.target)) onContextMenu(booking, e);
+      }}
       className={`hover:bg-sky-100/80 dark:hover:bg-sky-950/70 hover:shadow-xs transition-colors group cursor-pointer ${
         selected ? 'bg-primary-50/70 dark:bg-primary-950/30' : ''
       }`}
@@ -712,6 +719,17 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     }
   };
 
+  // Right-click menu: the clicked row's own actions, then the tab's bulk actions for the selection
+  const rowMenu = useRowContextMenu<Booking>();
+  const handleRowContextMenu = useStableCallback((booking: Booking, e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!selection.selectedIds.has(booking.id)) {
+      selection.clear();
+      selection.selectIds([booking.id], true);
+    }
+    rowMenu.open(booking, e.clientX, e.clientY);
+  });
+
   const bulkActions: BulkAction[] = [
     {
       key: 'lookup-vessels',
@@ -749,6 +767,26 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       loading: bulkDeleting,
     },
   ];
+
+  const buildRowMenu = (booking: Booking): MenuGroup[] => {
+    const m = t.common.rowMenu;
+    const rowItems: MenuGroup['items'] = [
+      { key: 'view', label: m.view, icon: Eye, onClick: () => openBooking(booking) },
+      { key: 'edit', label: m.edit, icon: Pencil, onClick: () => openEditBooking(booking) },
+      { key: 'quick-vessel', label: m.quickVessel, icon: Ship, onClick: () => openQuickVessel(booking) },
+    ];
+    if (selection.count <= 1) {
+      rowItems.push(
+        { key: 'copy-row', label: m.copyRow, icon: Copy, onClick: () => copyRow(booking) },
+        { key: 'delete-row', label: m.deleteRow, icon: Trash2, onClick: () => handleDelete(booking.id), danger: true },
+      );
+    }
+    return [
+      { items: rowItems.filter((i) => !i.danger) },
+      { label: tf(m.selectedCount, { count: selection.count }), items: bulkMenuItems(bulkActions, selection.count).filter((a) => !a.danger) },
+      { items: [...rowItems.filter((i) => i.danger), ...bulkMenuItems(bulkActions, selection.count).filter((a) => a.danger)] },
+    ];
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
@@ -995,6 +1033,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         onDelete={handleDelete}
                         onQuickVessel={openQuickVessel}
                         onEdit={openEditBooking}
+                        onContextMenu={handleRowContextMenu}
                         vesselTooltip={t.booking.quickVessel.rowTooltip}
                         editLabel={t.booking.form.editTooltip}
                         noteLabel={t.booking.columns["Ghi chú"]}
@@ -1025,6 +1064,12 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           onPageSizeChange={setPageSize}
         />
       </div>
+
+      <RowContextMenu
+        position={rowMenu.state}
+        groups={rowMenu.state ? buildRowMenu(rowMenu.state.row) : []}
+        onClose={rowMenu.close}
+      />
 
       <BulkActionBar
         count={selection.count}

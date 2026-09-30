@@ -155,6 +155,16 @@ export const translations = {
       loading: "Đang tải...",
       noData: "Chưa có dữ liệu nào",
       copySuccess: "Đã sao chép vào bộ nhớ tạm!",
+      rowMenu: {
+        selectedCount: "Đã chọn {count} dòng",
+        view: "Xem chi tiết",
+        edit: "Sửa booking",
+        quickVessel: "Tra tàu nhanh",
+        copyRow: "Sao chép dòng",
+        deleteRow: "Xóa dòng",
+        addWatch: "Thêm vào Watchlist",
+        removeWatch: "Bỏ khỏi Watchlist",
+      },
       fieldCopy: {
         hint: "Bấm vào các ô cần lấy để chọn, rồi sao chép cùng lúc",
         selected: "Đã chọn {count} ô",
@@ -1045,6 +1055,16 @@ export const translations = {
       loading: "Loading...",
       noData: "No data available",
       copySuccess: "Copied to clipboard!",
+      rowMenu: {
+        selectedCount: "{count} row(s) selected",
+        view: "View details",
+        edit: "Edit booking",
+        quickVessel: "Quick vessel lookup",
+        copyRow: "Copy row",
+        deleteRow: "Delete row",
+        addWatch: "Add to Watchlist",
+        removeWatch: "Remove from Watchlist",
+      },
       fieldCopy: {
         hint: "Click the fields you need to select them, then copy together",
         selected: "{count} selected",
