@@ -8,6 +8,7 @@ import { useApp } from '../../context/AppContext';
 import { TabId } from './Tabs';
 import { Tooltip } from './Tooltip';
 import { CollectionSwitcher } from './CollectionSwitcher';
+import { UpdateButton } from './UpdateButton';
 import { describeAutoSyncSchedule, formatIntervalShort } from '../../services/autoSync';
 import {
   hasCompletedOnboarding,
@@ -107,9 +108,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
             <span className="text-sm font-bold text-slate-900 dark:text-slate-50 tracking-tight">
               Auto Read PDF
             </span>
-            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-primary-50 dark:bg-primary-950 text-primary-600 dark:text-primary-400 border border-primary-200 dark:border-primary-800/80">
-              v2.0
-            </span>
+            <UpdateButton />
           </div>
         </div>
 

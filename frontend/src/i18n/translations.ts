@@ -118,6 +118,24 @@ export const translations = {
         reasonBusy: "Đang đồng bộ tự động — vui lòng đợi xong rồi thử lại"
       }
     },
+    appUpdate: {
+      versionTip: "Phiên bản {version}. Bấm để kiểm tra bản mới",
+      versionTipUnknown: "Bấm để kiểm tra bản mới",
+      checking: "Đang kiểm tra bản mới...",
+      upToDate: "Bạn đang dùng phiên bản mới nhất ({version})",
+      upToDateNoVersion: "Bạn đang dùng phiên bản mới nhất",
+      errorToast: "Không kiểm tra được bản mới: {error}",
+      downloading: "Đang tải bản {version}... {percent}%",
+      downloadingShort: "Đang tải {percent}%",
+      ready: "Cập nhật {version}",
+      readyTip: "Đã tải xong bản {version}. Bấm để khởi động lại và cài đặt",
+      installTitle: "Cài đặt bản cập nhật",
+      installMessage: "App sẽ khởi động lại để cài bản {version}. Dữ liệu của bạn được giữ nguyên.",
+      installConfirm: "Khởi động lại & cài",
+      error: "Không kiểm tra được bản mới: {error}. Bấm để thử lại",
+      openReleases: "Bấm để mở trang tải bản mới",
+      notPackaged: "Tự động cập nhật chỉ có trên bản Windows đã cài. Bấm để mở trang tải về.",
+    },
     common: {
       relativeTime: { justNow: "Vừa xong", minutes: "{n} phút trước", hours: "{n} giờ trước", days: "{n} ngày trước" },
       all: "Tất cả",
@@ -989,6 +1007,24 @@ export const translations = {
         reasonNotOwned: "The background service is running externally (dev mode) — cannot restart it from here",
         reasonBusy: "Auto-sync is running — please wait until it finishes"
       }
+    },
+    appUpdate: {
+      versionTip: "Version {version}. Click to check for updates",
+      versionTipUnknown: "Click to check for updates",
+      checking: "Checking for updates...",
+      upToDate: "You are on the latest version ({version})",
+      upToDateNoVersion: "You are on the latest version",
+      errorToast: "Could not check for updates: {error}",
+      downloading: "Downloading {version}... {percent}%",
+      downloadingShort: "Downloading {percent}%",
+      ready: "Update to {version}",
+      readyTip: "{version} is downloaded. Click to restart and install",
+      installTitle: "Install update",
+      installMessage: "The app will restart to install {version}. Your data is kept.",
+      installConfirm: "Restart & install",
+      error: "Could not check for updates: {error}. Click to retry",
+      openReleases: "Click to open the download page",
+      notPackaged: "Auto-update is only available in the installed Windows app. Click to open the download page.",
     },
     common: {
       relativeTime: { justNow: "Just now", minutes: "{n} min ago", hours: "{n} h ago", days: "{n} days ago" },

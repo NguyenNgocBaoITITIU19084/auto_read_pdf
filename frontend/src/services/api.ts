@@ -482,6 +482,10 @@ export const getDashboardSummaryApi = async (collectionId?: number): Promise<imp
   return res.data;
 };
 
+/** Backend version (from /health, which lives outside the /api/v1 prefix). */
+export const getBackendVersionApi = async (): Promise<string> =>
+  String((await apiClient.get('/health', { baseURL: API_BASE.replace(/\/api\/v1$/, ''), timeout: 5000 })).data?.version || '');
+
 // System resources (dashboard resource monitor)
 export const getSystemResourcesApi = async (): Promise<import('../types').SystemResources> =>
   (await apiClient.get<import('../types').SystemResources>('/system/resources', { timeout: 5000 })).data;
