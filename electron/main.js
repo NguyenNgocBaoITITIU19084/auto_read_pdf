@@ -2,6 +2,7 @@ const {
   app,
   BrowserWindow,
   Menu,
+  Notification,
   Tray,
   clipboard,
   ipcMain,
@@ -16,6 +17,7 @@ const { fileURLToPath } = require('url');
 const { backend, backendRequest } = require('./py_manager');
 const { createTrayIcon, createAppIcon } = require('./tray_icon');
 const updater = require('./updater');
+const { createNotifier } = require('./notifier');
 
 const APP_NAME = 'Auto Read PDF Pro';
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -37,6 +39,16 @@ let splashReady = false;
 let lastStatus = { state: 'starting', message: 'Đang khởi động...' };
 let backendStopPromise = null;
 let updateStatus = updater.getStatus();
+
+// Popups for changes found by the background auto-sync (vessel times, container events)
+const notifier = createNotifier({
+  backendRequest,
+  Notification,
+  showMainWindow: () => showMainWindow(),
+  sendToRenderer: (channel, payload) => sendToRenderer(channel, payload),
+  isAppFocused: () => !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()),
+  log: (msg) => backend.info(`[Notifier] ${msg}`),
+});
 
 // ---------------------------------------------------------------------------
 // Single instance: a second launch focuses the existing window (no 2nd backend)
@@ -429,6 +441,12 @@ function registerIpc() {
     return { before, after: collectAppMetrics().totalWorkingSetBytes };
   });
 
+  // "Send a test notification" in Settings: claim it right away and show the popup even though the app is focused
+  ipcMain.handle('notifications-poll-now', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    await notifier.poll({ force: true });
+  });
+
   ipcMain.handle('restart-backend', async (event) => {
     if (!isFromMainWindow(event)) throw new Error('Forbidden');
     return backend.restartByUser();
@@ -446,6 +464,8 @@ function registerIpc() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 function onReady() {
+  // Windows only shows toasts for an app that has an AppUserModelID (the installer sets the same id on the shortcut)
+  if (process.platform === 'win32') app.setAppUserModelId('com.autoreadpdf.pro');
   registerIpc();
 
   backend.on('status', (status) => {
@@ -455,6 +475,7 @@ function onReady() {
     if (status.state === 'ready') {
       if (page !== 'ui') loadUI();
       initAutoSyncFlag();
+      notifier.start();
       if (tray && !tray.isDestroyed()) tray.setToolTip(APP_NAME);
     } else if (status.state === 'failed') {
       if (tray && !tray.isDestroyed()) tray.setToolTip(`${APP_NAME} — lỗi dịch vụ nền`);
@@ -497,6 +518,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  notifier.stop();
   isQuitting = true;
 });
 

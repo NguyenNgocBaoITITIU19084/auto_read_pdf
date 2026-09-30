@@ -3,7 +3,7 @@ import {
   Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
-  PageResult, ContainerPageResult, TableQuery, MobileSession,
+  PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
 } from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
@@ -579,3 +579,29 @@ export const ackMobilePhotoApi = async (id: string): Promise<void> => {
   await apiClient.delete(`/mobile/photos/${id}`);
 };
 
+
+
+// ---------------------------------------------------------------------------
+// Change notifications
+// ---------------------------------------------------------------------------
+export const getNotificationsApi = async (limit = 50): Promise<{ items: AppNotification[]; unread: number }> =>
+  (await apiClient.get<{ items: AppNotification[]; unread: number }>('/notifications', { params: { limit }, timeout: 8000 })).data;
+
+/** ids omitted = mark everything read */
+export const markNotificationsReadApi = async (ids?: number[]): Promise<void> => {
+  await apiClient.post('/notifications/mark-read', ids ? { ids } : {});
+};
+
+export const clearNotificationsApi = async (readOnly = true): Promise<void> => {
+  await apiClient.delete('/notifications', { params: { read_only: readOnly } });
+};
+
+/** Creates a sample notification that travels the real path (bell, toast, desktop popup). */
+export const sendTestNotificationApi = async (): Promise<AppNotification> =>
+  (await apiClient.post<AppNotification>('/notifications/test')).data;
+
+export const getNotificationSettingsApi = async (): Promise<NotificationSettings> =>
+  (await apiClient.get<NotificationSettings>('/notifications/settings')).data;
+
+export const saveNotificationSettingsApi = async (kinds: string[], osEnabled: boolean): Promise<NotificationSettings> =>
+  (await apiClient.put<NotificationSettings>('/notifications/settings', { kinds, os_enabled: osEnabled })).data;

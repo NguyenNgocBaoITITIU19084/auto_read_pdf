@@ -6,6 +6,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
 import { AISettingsCard } from './AISettingsCard';
 import { UpdateSettingsCard } from './UpdateSettingsCard';
+import { NotificationSettingsCard } from './NotificationSettingsCard';
 import { getBackupDb, restoreBackupDb, RestoreMode, downloadLogsZipApi } from '../../services/api';
 import { errorMessage } from '../vessel/tableHelpers';
 
@@ -103,6 +104,9 @@ export const BackupModal: React.FC<BackupModalProps> = ({
 
         {/* Auto Sync & Interval Configuration */}
         <AutoSyncSettingsCard />
+
+        {/* Which vessel / container changes raise notifications */}
+        <NotificationSettingsCard />
 
         {/* App auto-update (Windows) */}
         <UpdateSettingsCard />

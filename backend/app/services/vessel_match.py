@@ -67,6 +67,12 @@ def parse_closing_time(value) -> str | None:
         return None
 
 
+def same_vessel_name(a, b) -> bool:
+    """Identical vessel names, ignoring case, accents and punctuation (whole words, never a prefix)."""
+    ta = _tokens(a)
+    return bool(ta) and ta == _tokens(b)
+
+
 def build_schedule_index(schedules: list[dict]) -> dict[tuple[str, ...], list[dict]]:
     """Schedules keyed by their vessel-name words."""
     index: dict[tuple[str, ...], list[dict]] = {}
@@ -89,3 +95,13 @@ def find_eport_cutoff(vessel_text, index: dict[tuple[str, ...], list[dict]]) -> 
                 if parsed:
                     times.add(parsed)
     return next(iter(times)) if len(times) == 1 else None
+
+
+def text_matches_schedule(vessel_text, schedule: dict) -> bool:
+    """Does the booking's vessel text name this ePort schedule (same strict rules as find_eport_cutoff)?"""
+    name = tuple(_tokens(schedule.get("vessel_name")))
+    if not name:
+        return False
+    words = booking_vessel_tokens(vessel_text)
+    return any(tuple(words[:k]) == name and match_voyage(words[k:], schedule.get("in_out_voyage") or "")
+               for k in range(1, len(words)))

@@ -1,4 +1,5 @@
 import html
+import json
 import logging
 import os
 import re
@@ -7,7 +8,9 @@ import threading
 from datetime import datetime, timedelta
 from backend.app.core import config
 from backend.app.core.timezone import VN_TZ, now_vn_str
-from backend.app.services.vessel_match import build_schedule_index, find_eport_cutoff
+from backend.app.services import change_detection as cd
+from backend.app.services.eport_client import is_voyage_match
+from backend.app.services.vessel_match import build_schedule_index, find_eport_cutoff, same_vessel_name, text_matches_schedule
 
 logger = logging.getLogger("backend.database")
 
@@ -462,6 +465,28 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vessel_schedules_col_queried ON vessel_schedules(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_queried ON containers(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_event ON containers(collection_id, event_type);")
+
+        # Change notifications (see the "Change notifications" section)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER,
+                kind TEXT NOT NULL,
+                entity_key TEXT NOT NULL,
+                title TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                detail TEXT,
+                nav_tab TEXT,
+                nav_query TEXT,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at TEXT NOT NULL,
+                read_at TEXT,
+                os_notified_at TEXT,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);")
 
         # Create color_rules table
         conn.execute("""
@@ -1037,11 +1062,16 @@ def _insert_vessel_rows(cursor: sqlite3.Cursor, col_id: int, schedules: list[dic
     return inserted_ids
 
 
-def insert_vessel_schedules(col_id: int, schedules: list[dict]) -> list[int]:
+def insert_vessel_schedules(col_id: int, schedules: list[dict], source: str = "manual") -> list[int]:
+    """Stores ePort schedules. `source` ("manual" | "auto_sync") only labels the change notifications."""
+    enabled = get_notification_settings()["kinds"]
     with get_connection() as conn:
+        # compare with what is stored BEFORE INSERT OR REPLACE overwrites it
+        changes = _safely(_detect_vessel_changes, conn, col_id, schedules, enabled)
         ids = _insert_vessel_rows(conn.cursor(), col_id, schedules, _now_str())
         # every live ePort lookup / resync / auto-sync ends here: refresh the bookings' cut-off from it
         _sync_booking_eport_cutoffs(conn, col_id)
+        _safely(_record_notifications, conn, col_id, changes or [], source)
         return ids
 
 
@@ -1301,9 +1331,14 @@ def _insert_container_rows(cursor: sqlite3.Cursor, col_id: int, containers: list
     return inserted_ids
 
 
-def insert_containers(col_id: int, containers: list[dict]) -> list[int]:
+def insert_containers(col_id: int, containers: list[dict], source: str = "manual") -> list[int]:
+    """Stores ePort container events. `source` ("manual" | "auto_sync") only labels the change notifications."""
+    enabled = get_notification_settings()["kinds"]
     with get_connection() as conn:
-        return _insert_container_rows(conn.cursor(), col_id, containers, _now_str())
+        changes = _safely(_detect_container_changes, conn, col_id, containers, enabled)
+        ids = _insert_container_rows(conn.cursor(), col_id, containers, _now_str())
+        _safely(_record_notifications, conn, col_id, changes or [], source)
+        return ids
 
 
 CONTAINER_SEARCH_COLUMNS = {
@@ -1504,6 +1539,290 @@ def move_items_to_collection(entity: str, ids: list[int], target_col_id: int, co
                 )
             total += max(cur.rowcount, 0)
     return total
+
+
+# ---------------------------------------------------------------------------
+# Change notifications
+# ---------------------------------------------------------------------------
+NOTIFY_SOURCE_AUTO = "auto_sync"
+NOTIFY_SOURCE_MANUAL = "manual"
+NOTIFY_DEDUPE_HOURS = 24
+NOTIFY_KEEP_DAYS = 30
+NOTIFY_KEEP_MAX = 500
+NOTIFY_OS_MAX_AGE_HOURS = 1
+_CONTAINER_KINDS = {cd.CONTAINER_CUSTOMS, cd.CONTAINER_INGATE, cd.CONTAINER_OUTGATE}
+_VESSEL_KINDS = {k for _, k, _ in cd.VESSEL_FIELDS}
+
+
+def _safely(fn, *args):
+    """Change detection is a side effect: it must never stop the data itself from being saved."""
+    try:
+        return fn(*args)
+    except Exception:
+        logger.exception(f"{getattr(fn, '__name__', 'notification step')} failed")
+        return None
+
+
+def get_notification_settings() -> dict:
+    """{"kinds": set of enabled kinds (default: all), "os_enabled": bool}"""
+    kinds = set(cd.ALL_KINDS)
+    raw = get_system_setting("notify_kinds", "")
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                kinds = {k for k in parsed if k in cd.ALL_KINDS}
+        except (TypeError, ValueError):
+            pass
+    return {"kinds": kinds, "os_enabled": get_system_setting("notify_os", "1") != "0"}
+
+
+def set_notification_settings(kinds, os_enabled: bool) -> dict:
+    clean = [k for k in cd.ALL_KINDS if k in set(kinds or [])]
+    set_system_setting("notify_kinds", json.dumps(clean))
+    set_system_setting("notify_os", "1" if os_enabled else "0")
+    return get_notification_settings()
+
+
+def _vessel_row_from_api(s: dict) -> dict:
+    """The stored columns of an incoming schedule, read exactly the way _insert_vessel_rows writes them."""
+    def g(upper, lower):
+        return s.get(upper, s.get(lower, ""))
+    return {
+        "site_id": g("SITE_ID", "site_id"), "vessel_name": g("VESSELNAME", "vessel_name"),
+        "in_out_voyage": g("IN_OUT_VOYAGE", "in_out_voyage"),
+        "actual_berth_time": g("ACTUAL_BERTH_TIME", "actual_berth_time"),
+        "actual_departure_time": g("ACTUAL_DEPATURE_TIME", "actual_departure_time"),
+        "closing_time": g("CLOSING_TIME", "closing_time"), "closing_time_icd": g("CLOSING_TIME_ICD", "closing_time_icd"),
+        "open_ts": g("OPEN_TS", "open_ts"),
+    }
+
+
+def _detect_vessel_changes(conn: sqlite3.Connection, col_id: int, schedules: list[dict], enabled) -> list[dict]:
+    if not (set(enabled) & _VESSEL_KINDS) or not schedules:
+        return []
+    watch = _select_dicts(conn, "SELECT vessel_name, voyage FROM vessel_watchlists WHERE collection_id = ?;", (col_id,))
+    bookings = conn.execute(
+        "SELECT booking_no, vessel FROM bookings WHERE collection_id = ? AND COALESCE(vessel, '') != '';", (col_id,)).fetchall()
+    out: list[dict] = []
+    for s in schedules:
+        new = _vessel_row_from_api(s)
+        old_rows = _select_dicts(
+            conn, "SELECT * FROM vessel_schedules WHERE collection_id = ? AND site_id = ? AND vessel_name = ? AND in_out_voyage = ?;",
+            (col_id, new["site_id"], new["vessel_name"], new["in_out_voyage"]))
+        if not old_rows:
+            continue  # first time this vessel/voyage is seen here
+        changes = cd.vessel_time_changes(old_rows[0], new, enabled)
+        if not changes:
+            continue
+        watched = any(
+            same_vessel_name(w["vessel_name"], new["vessel_name"])
+            and (not (w.get("voyage") or "").strip() or is_voyage_match(w["voyage"], new["in_out_voyage"] or ""))
+            for w in watch)
+        affected = [b[0] for b in bookings if text_matches_schedule(b[1], new)]
+        if not watched and not affected:
+            continue  # neither on the watchlist nor used by any booking
+        entity = f"{new['site_id']}|{new['vessel_name']}|{new['in_out_voyage']}"
+        label = f"{new['vessel_name']} {new['in_out_voyage']}".strip()
+        for ch in changes:
+            out.append({
+                "kind": ch["kind"], "entity_key": entity, "old": ch["old"], "new": ch["new"],
+                "title": f"Tàu {label}: đổi {ch['label']}",
+                "nav_tab": "vessel", "nav_query": new["vessel_name"],
+                "detail": {"site_id": new["site_id"], "vessel": new["vessel_name"], "voyage": new["in_out_voyage"],
+                           "bookings": affected[:8]},
+            })
+    return out
+
+
+def _detect_container_changes(conn: sqlite3.Connection, col_id: int, containers: list[dict], enabled) -> list[dict]:
+    if not (set(enabled) & _CONTAINER_KINDS) or not containers:
+        return []
+    # A container is followed if it is on the watchlist at all, whatever event type the watch was created for
+    watched = {(w["container_no"] or "").strip().upper()
+               for w in _select_dicts(conn, "SELECT container_no FROM container_watchlists WHERE collection_id = ?;", (col_id,))}
+    if not watched:
+        return []
+
+    incoming: dict[str, list[dict]] = {}
+    for c in containers:
+        cont = _s(c.get("CONTAINERNO", c.get("containerno", ""))).upper()
+        if cont in watched:
+            incoming.setdefault(cont, []).append({
+                "event_time": _s(c.get("EVENT_TIME", c.get("event_time", ""))),
+                "event_type": _s(c.get("EVENT_TYPE", c.get("event_type", ""))),
+                "cust": _s(c.get("CUST", c.get("cust", ""))),
+                "custom_clearance_status": _s(c.get("CUSTOM_CLEARANCE_STATUS", c.get("custom_clearance_status", ""))),
+                "site_id": _s(c.get("SITE", c.get("site_id", ""))).upper(),
+            })
+    if not incoming:
+        return []
+    existing: dict[str, list[dict]] = {}
+    for chunk in _chunks(list(incoming)):
+        placeholders = ",".join(["?"] * len(chunk))
+        for r in _select_dicts(
+                conn, "SELECT containerno, event_time, event_type, cust, custom_clearance_status FROM containers "
+                      f"WHERE collection_id = ? AND containerno IN ({placeholders});", (col_id, *chunk)):
+            existing.setdefault(r["containerno"], []).append(r)
+
+    def status_of(row):
+        return compute_customs_status(row.get("cust"), row.get("custom_clearance_status"))
+
+    out: list[dict] = []
+    for cont, rows in incoming.items():
+        changes = cd.container_changes(existing.get(cont, []), rows, enabled, status_of,
+                                       CUSTOMS_CLEARED, CUSTOMS_NOT_CLEARED)
+        site = rows[0]["site_id"]
+        for ch in changes:
+            if ch["kind"] == cd.CONTAINER_CUSTOMS:
+                title = f"Cont {cont} đã thông quan"
+            elif ch["kind"] == cd.CONTAINER_INGATE:
+                title = f"Cont {cont} đã INGATE"
+            else:
+                title = f"Cont {cont} đã OUTGATE"
+            out.append({
+                "kind": ch["kind"], "entity_key": f"{site}|{cont}", "old": ch["old"], "new": ch["new"], "title": title,
+                "nav_tab": "container", "nav_query": cont,
+                "detail": {"site_id": site, "container": cont, "event_type": ch.get("event_type", "")},
+            })
+    return out
+
+
+def _record_notifications(conn: sqlite3.Connection, col_id: int, changes: list[dict], source: str, now: datetime | None = None) -> int:
+    """Stores the detected changes. An identical change (same collection, kind, entity and new value) seen again within
+    NOTIFY_DEDUPE_HOURS is dropped, so ePort flip-flopping or repeated lookups don't repeat the alert."""
+    if not changes:
+        return 0
+    now = now or datetime.now(VN_TZ).replace(tzinfo=None)
+    stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    since = (now - timedelta(hours=NOTIFY_DEDUPE_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    added, seen = 0, set()
+    for ch in changes:
+        ident = (ch["kind"], ch["entity_key"], ch["new"])
+        if ident in seen:
+            continue
+        seen.add(ident)
+        if conn.execute("SELECT 1 FROM notifications WHERE collection_id = ? AND kind = ? AND entity_key = ? AND new_value = ? "
+                        "AND created_at >= ? LIMIT 1;", (col_id, ch["kind"], ch["entity_key"], ch["new"], since)).fetchone():
+            continue
+        conn.execute(
+            "INSERT INTO notifications (collection_id, kind, entity_key, title, old_value, new_value, detail, nav_tab, nav_query, "
+            "source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            (col_id, ch["kind"], ch["entity_key"], ch["title"], ch.get("old", ""), ch["new"],
+             json.dumps(ch.get("detail") or {}, ensure_ascii=False), ch.get("nav_tab"), ch.get("nav_query"),
+             source if source in (NOTIFY_SOURCE_AUTO, NOTIFY_SOURCE_MANUAL) else NOTIFY_SOURCE_MANUAL, stamp))
+        added += 1
+    if added:
+        old = (now - timedelta(days=NOTIFY_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("DELETE FROM notifications WHERE created_at < ?;", (old,))
+        conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?);",
+                     (NOTIFY_KEEP_MAX,))
+    return added
+
+
+def record_test_notification() -> dict:
+    """A sample notification that travels the real path (bell, toast, desktop popup) so the user can see them work
+    without waiting for ePort to change something. Never deduplicated: every press creates a new one."""
+    now = datetime.now(VN_TZ).replace(tzinfo=None)
+    stamp = now.strftime("%H:%M:%S")
+    with get_connection() as conn:
+        _record_notifications(conn, None, [{
+            "kind": "test", "entity_key": f"test|{now.isoformat()}", "old": "", "new": stamp,
+            "title": "Thông báo thử", "nav_tab": None, "nav_query": None, "detail": {"test": True},
+        }], NOTIFY_SOURCE_AUTO, now=now)
+    return list_notifications(1)["items"][0]
+
+
+def _notification_to_api(row: dict) -> dict:
+    try:
+        detail = json.loads(row.get("detail") or "{}")
+    except (TypeError, ValueError):
+        detail = {}
+    return {
+        "id": row["id"], "collection_id": row["collection_id"], "kind": row["kind"], "title": row["title"],
+        "old_value": row.get("old_value") or "", "new_value": row.get("new_value") or "", "detail": detail,
+        "nav_tab": row.get("nav_tab"), "nav_query": row.get("nav_query"), "source": row["source"],
+        "created_at": row["created_at"], "read": bool(row.get("read_at")),
+    }
+
+
+def list_notifications(limit: int = 50, unread_only: bool = False) -> dict:
+    limit = max(1, min(int(limit or 50), NOTIFY_KEEP_MAX))
+    where = "WHERE read_at IS NULL" if unread_only else ""
+    with get_connection() as conn:
+        rows = _select_dicts(conn, f"SELECT * FROM notifications {where} ORDER BY id DESC LIMIT ?;", (limit,))
+        unread = conn.execute("SELECT COUNT(*) FROM notifications WHERE read_at IS NULL;").fetchone()[0]
+    return {"items": [_notification_to_api(r) for r in rows], "unread": unread}
+
+
+def mark_notifications_read(ids: list[int] | None = None) -> int:
+    """Marks the given notifications (or all when ids is None) as read; returns how many changed."""
+    with get_connection() as conn:
+        if ids is None:
+            cur = conn.execute("UPDATE notifications SET read_at = ? WHERE read_at IS NULL;", (_now_str(),))
+        else:
+            clean = _clean_ids(ids)
+            if not clean:
+                return 0
+            cur = conn.execute(
+                f"UPDATE notifications SET read_at = ? WHERE read_at IS NULL AND id IN ({','.join('?' * len(clean))});",
+                (_now_str(), *clean))
+        return max(cur.rowcount, 0)
+
+
+def clear_notifications(read_only: bool = True) -> int:
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM notifications WHERE read_at IS NOT NULL;" if read_only else "DELETE FROM notifications;")
+        return max(cur.rowcount, 0)
+
+
+def _summarize_for_os(rows: list[dict]) -> dict:
+    """One desktop popup for a whole sync cycle."""
+    if len(rows) == 1:
+        r = rows[0]
+        if r["kind"] == "test":
+            return {"title": r["title"], "body": "Nếu bạn thấy popup này, thông báo hệ thống đang hoạt động.",
+                    "count": 1, "nav_tab": None, "nav_query": None}
+        body = f"{r['old_value']} → {r['new_value']}" if r.get("old_value") else r["new_value"]
+        bookings = r["detail"].get("bookings") or []
+        if bookings:
+            body += " · " + ", ".join(bookings[:3])
+        return {"title": r["title"], "body": body, "count": 1, "nav_tab": r["nav_tab"], "nav_query": r["nav_query"]}
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["kind"]] = counts.get(r["kind"], 0) + 1
+    words = {
+        cd.CONTAINER_CUSTOMS: "cont thông quan", cd.CONTAINER_INGATE: "cont INGATE", cd.CONTAINER_OUTGATE: "cont OUTGATE",
+        cd.VESSEL_CLOSING: "tàu đổi hạn đóng máng", cd.VESSEL_CLOSING_ICD: "tàu đổi giờ đóng ICD",
+        cd.VESSEL_OPEN_GATE: "tàu đổi giờ mở cổng hạ", cd.VESSEL_ETA: "tàu đổi ETA", cd.VESSEL_ETD: "tàu đổi ETD",
+    }
+    body = " · ".join(f"{counts[k]} {words[k]}" for k in cd.ALL_KINDS if k in counts)
+    first = rows[0]
+    return {"title": f"{len(rows)} thay đổi mới", "body": body, "count": len(rows),
+            "nav_tab": first["nav_tab"], "nav_query": first["nav_query"]}
+
+
+def claim_os_notifications() -> dict:
+    """Atomically takes every not-yet-shown background (auto-sync) notification for a desktop popup.
+
+    Returns {"items": [...], "summary": {...} | None}. Rows are marked as taken even when desktop popups are turned
+    off, so switching them on later does not replay old changes. A change the user already read is not popped up.
+    """
+    os_enabled = get_notification_settings()["os_enabled"]
+    fresh_since = (datetime.now(VN_TZ).replace(tzinfo=None) - timedelta(hours=NOTIFY_OS_MAX_AGE_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE;")
+        rows = _select_dicts(
+            conn, "SELECT * FROM notifications WHERE source = ? AND os_notified_at IS NULL ORDER BY id ASC;",
+            (NOTIFY_SOURCE_AUTO,))
+        if rows:
+            conn.execute(f"UPDATE notifications SET os_notified_at = ? WHERE id IN ({','.join('?' * len(rows))});",
+                         (_now_str(), *[r["id"] for r in rows]))
+    # Anything older was found while the app was closed: it is in the bell, but a popup for it now would be stale
+    items = [_notification_to_api(r) for r in rows if not r.get("read_at") and r["created_at"] >= fresh_since]
+    if not os_enabled or not items:
+        return {"items": [], "summary": None}
+    return {"items": items, "summary": _summarize_for_os(items)}
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import { ToastProvider } from './context/ToastContext';
 import { MobileBridgeProvider } from './context/MobileBridgeContext';
 import { ImageQueueProvider } from './context/ImageQueueContext';
 import { PhoneToImageQueue } from './components/booking/PhoneToImageQueue';
+import { NotificationsProvider } from './context/NotificationsContext';
 import { ConfirmProvider } from './hooks/useConfirm';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { installGlobalErrorLogging } from './services/clientLogger';
@@ -21,8 +22,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <MobileBridgeProvider>
             <ConfirmProvider>
               <ImageQueueProvider>
-                <PhoneToImageQueue />
-                <App />
+                <NotificationsProvider>
+                  <PhoneToImageQueue />
+                  <App />
+                </NotificationsProvider>
               </ImageQueueProvider>
             </ConfirmProvider>
           </MobileBridgeProvider>

@@ -15,8 +15,9 @@ from backend.app.core.timezone import VN_TZ, DATETIME_FMT, now_vn_str
 from backend.app.core.database import (
     get_all_watchlists, get_all_container_watchlists,
     insert_vessel_schedules, insert_containers,
-    get_system_setting, set_system_setting,
+    get_system_setting, set_system_setting, get_notification_settings,
 )
+from backend.app.services.change_detection import extra_gate_rows
 from backend.app.services.eport_client import search_vessels_detailed, search_containers
 from backend.app.core.logging_setup import purge_old_logs
 
@@ -187,7 +188,7 @@ async def sync_vessel_watchlists() -> dict:
                 detail = await asyncio.to_thread(search_vessels_detailed, site_id, vessel_name, voyage)
                 schedules = detail.get("items") or []
                 if schedules:
-                    await asyncio.to_thread(insert_vessel_schedules, col_id, schedules)
+                    await asyncio.to_thread(insert_vessel_schedules, col_id, schedules, "auto_sync")
                     result["vessels_ok"] += 1
                     await asyncio.to_thread(_report_watchlist_status, "vessel", wl_id, "ok",
                                             f"Đã cập nhật {len(schedules)} lịch tàu")
@@ -258,8 +259,13 @@ async def sync_container_watchlists() -> dict:
                     if hit:
                         filtered_results.append(r)
 
+                # Keep the gate events (INGATE/OUTGATE) of every watched container, even when the watch was made for
+                # another event type, so they are stored and can raise a notification
+                enabled = (await asyncio.to_thread(get_notification_settings))["kinds"]
+                filtered_results.extend(extra_gate_rows(results, set(unique_cont_nos), filtered_results, enabled))
+
                 if filtered_results:
-                    await asyncio.to_thread(insert_containers, col_id, filtered_results)
+                    await asyncio.to_thread(insert_containers, col_id, filtered_results, "auto_sync")
                     logger.info(f"[Auto-Sync Containers] Updated {len(filtered_results)} container event(s) for {cont_str}")
                 elif results:
                     logger.info(f"[Auto-Sync Containers] No matching events for watched event_types for {cont_str}")

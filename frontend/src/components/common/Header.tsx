@@ -9,6 +9,7 @@ import { TabId } from './Tabs';
 import { Tooltip } from './Tooltip';
 import { CollectionSwitcher } from './CollectionSwitcher';
 import { UpdateButton } from './UpdateButton';
+import { NotificationBell } from './NotificationBell';
 import { describeAutoSyncSchedule, formatIntervalShort } from '../../services/autoSync';
 import {
   hasCompletedOnboarding,
@@ -132,7 +133,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
               }`}
             >
               <RefreshCw className={`w-3.5 h-3.5 ${autoSyncEnabled ? 'text-emerald-600' : ''} ${autoSyncRunning ? 'animate-spin' : ''}`} />
-              <span>{t.common.autoSync}: {autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
+              <span><span className="hidden xl:inline">{t.common.autoSync}: </span>{autoSyncEnabled ? `ON (${intervalLabel})` : 'OFF'}</span>
             </button>
           </Tooltip>
         </div>
@@ -142,10 +143,11 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
           <Tooltip content={t.common.colorConfig} position="bottom">
             <button
               onClick={() => setIsColorConfigOpen(true)}
+              aria-label={t.common.colorConfig}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
             >
               <Palette className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400" />
-              <span>{t.common.colorConfig}</span>
+              <span className="hidden xl:inline">{t.common.colorConfig}</span>
             </button>
           </Tooltip>
         </div>
@@ -155,10 +157,11 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
           <Tooltip content="Cài đặt & Sao lưu/Khôi phục dữ liệu JSON" position="bottom">
             <button
               onClick={() => setIsBackupOpen(true)}
+              aria-label={t.common.settings}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0"
             >
               <Database className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-              <span>{t.common.settings}</span>
+              <span className="hidden xl:inline">{t.common.settings}</span>
             </button>
           </Tooltip>
         </div>
@@ -168,13 +171,17 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
           <Tooltip content={t.tour.helpBtnTooltip} position="bottom">
             <button
               onClick={() => setIsHelpModalOpen(true)}
+              aria-label="Hướng dẫn"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-700 hover:to-indigo-700 text-white shadow-sm shadow-primary-500/20 transition-all shrink-0 cursor-pointer"
             >
               <HelpCircle className="w-3.5 h-3.5" />
-              <span>Hướng dẫn</span>
+              <span className="hidden xl:inline">Hướng dẫn</span>
             </button>
           </Tooltip>
         </div>
+
+        {/* Change notifications */}
+        <NotificationBell onNavigateTab={onNavigateTab} />
 
         {/* Language Switcher */}
         <div data-tour="lang-toggle">

@@ -378,6 +378,12 @@ export interface ElectronAPI {
   onUpdateStatus?: (cb: (status: UpdateStatus) => void) => () => void;
   getUpdateStatus?: () => Promise<UpdateStatus>;
   checkForUpdates?: () => Promise<UpdateStatus>;
+  /** Desktop only: fires when the main process changed notification state (popup shown / clicked). Returns unsubscribe. */
+  onNotificationsChanged?: (callback: () => void) => () => void;
+  /** Desktop only: claim pending notifications now and pop them up even while the app is focused. */
+  pollNotificationsNow?: () => Promise<void>;
+  /** Desktop only: a system popup was clicked — open the matching tab. Returns unsubscribe. */
+  onNotificationNavigate?: (callback: (target: { tab: 'vessel' | 'container' | null; query: string | null }) => void) => () => void;
   /** Quit and install a downloaded update; false when nothing is ready. */
   installUpdate?: () => Promise<boolean>;
   /** CPU/RAM of all Electron processes (dashboard resource monitor). */
@@ -459,3 +465,35 @@ export interface MobileSession {
 }
 
 
+
+
+// ---------------------------------------------------------------------------
+// Change notifications (vessel schedule / container events)
+// ---------------------------------------------------------------------------
+export type NotificationKind =
+  | 'container_customs' | 'container_ingate' | 'container_outgate'
+  | 'vessel_closing' | 'vessel_closing_icd' | 'vessel_open_gate' | 'vessel_eta' | 'vessel_etd'
+  /** the sample sent by the "send a test" button */
+  | 'test';
+
+export interface AppNotification {
+  id: number;
+  collection_id: number | null;
+  kind: NotificationKind;
+  /** Vietnamese fallback text; the UI builds a localized one from kind + detail */
+  title: string;
+  old_value: string;
+  new_value: string;
+  detail: { site_id?: string; vessel?: string; voyage?: string; container?: string; event_type?: string; bookings?: string[] };
+  nav_tab: 'vessel' | 'container' | null;
+  nav_query: string | null;
+  source: 'auto_sync' | 'manual';
+  created_at: string;
+  read: boolean;
+}
+
+export interface NotificationSettings {
+  kinds: NotificationKind[];
+  os_enabled: boolean;
+  all_kinds: NotificationKind[];
+}

@@ -46,6 +46,15 @@ export const App: React.FC = () => {
     setActiveTab(tabId);
   }, []);
 
+  // A desktop popup was clicked: open the tab it is about
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onNotificationNavigate) return;
+    return api.onNotificationNavigate((target) => {
+      if (target?.tab) handleNavigateTab(target.tab, target.query || undefined);
+    });
+  }, [handleNavigateTab]);
+
   // A drill-down keyword is a one-shot hint for the tab it targets: drop it once the user leaves that
   // tab, otherwise every later visit re-applies the stale search (e.g. Vessel tab stuck on one vessel).
   useEffect(() => {

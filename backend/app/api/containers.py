@@ -8,6 +8,8 @@ from backend.app.core.database import (
     update_watchlist_sync_status, get_containers_page, get_container_ids
 )
 from backend.app.services.eport_client import search_containers
+from backend.app.services.change_detection import extra_gate_rows
+from backend.app.core.database import get_notification_settings
 from backend.app.schemas.models import (
     ContainerSearchRequest, ContainerWatchlistAddRequest, BatchDeleteRequest,
     ContainerWatchlistBatchAddRequest, BatchIdsRequest, ResyncRequest, ResyncResponse,
@@ -218,6 +220,8 @@ def sync_collection_container_watchlist(collection_id: int = Query(...)):
                 if matched:
                     filtered_res.append(r)
 
+            # keep the gate events of watched containers too, so they are stored and can raise a notification
+            filtered_res.extend(extra_gate_rows(res, set(unique_cont_nos), filtered_res, get_notification_settings()["kinds"]))
             if filtered_res:
                 insert_containers(collection_id, filtered_res)
                 updated_count += len(filtered_res)

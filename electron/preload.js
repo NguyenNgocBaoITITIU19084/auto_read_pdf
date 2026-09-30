@@ -47,6 +47,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Restart the backend we own → {ok, reason?: 'not_owned'|'busy'|'failed'}. */
   restartBackend: () => ipcRenderer.invoke('restart-backend'),
 
+  // --- Change notifications (popups are shown by the main process) ---
+  /** Fires when the main process claimed new notifications (refresh the bell). Returns an unsubscribe function. */
+  onNotificationsChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = () => callback();
+    ipcRenderer.on('notifications-changed', listener);
+    return () => ipcRenderer.removeListener('notifications-changed', listener);
+  },
+  /** Claim pending notifications now and show the popup even if the app is focused (used by the test button). */
+  pollNotificationsNow: () => ipcRenderer.invoke('notifications-poll-now'),
+  /** A system popup was clicked: {tab: 'vessel'|'container'|null, query}. Returns an unsubscribe function. */
+  onNotificationNavigate: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, target) => callback(target || {});
+    ipcRenderer.on('notification-navigate', listener);
+    return () => ipcRenderer.removeListener('notification-navigate', listener);
+  },
+
   // --- Auto update (Windows only; other platforms report state 'unsupported') ---
   /** Subscribe to update events: {state, version, percent, error, currentVersion, releasesUrl}. */
   onUpdateStatus: (callback) => {

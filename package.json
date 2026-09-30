@@ -13,7 +13,8 @@
     "build": "npm run build:frontend && electron-builder",
     "build:mac": "npm run build:frontend && npm run build:py:mac && electron-builder --mac",
     "build:win": "npm run build:frontend && npm run build:py:win && electron-builder --win",
-    "test:py": "pytest tests/"
+    "test:py": "pytest tests/",
+    "test:electron": "node --test \"electron/**/*.test.js\""
   },
   "keywords": [
     "electron",
@@ -47,6 +48,7 @@
     },
     "files": [
       "electron/**/*",
+      "!electron/**/*.test.js",
       "frontend/dist/**/*",
       "package.json",
       "!**/*.db",
