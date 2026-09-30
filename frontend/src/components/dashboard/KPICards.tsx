@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  FileText, ShieldCheck, ShieldAlert, Coins, 
+  FileText, ShieldCheck, ShieldAlert,
   Warehouse, Eye, Box, Ship, ArrowUpRight
 } from 'lucide-react';
 import { DashboardKPIs } from '../../types';
@@ -16,13 +16,12 @@ export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = f
 
   const totalConts = kpis.total_containers || 1;
   const clearanceRate = Math.round((kpis.customs_cleared / (kpis.customs_cleared + kpis.customs_uncleared || 1)) * 100);
-  const infrasRate = Math.round((kpis.infras_paid / (kpis.infras_paid + kpis.infras_unpaid || 1)) * 100);
   const yardRate = Math.round((kpis.containers_in_yard / totalConts) * 100);
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        {[...Array(5)].map((_, i) => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
           <div key={i} className="h-32 rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse border border-slate-300/40 dark:border-slate-700/50" />
         ))}
       </div>
@@ -30,7 +29,7 @@ export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = f
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {/* 1. Bookings & TEUs */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110" />
@@ -85,34 +84,7 @@ export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = f
         </div>
       </div>
 
-      {/* 3. Port Infrastructure Fee */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
-        <div className={`absolute top-0 right-0 w-24 h-24 ${kpis.infras_unpaid > 0 ? 'bg-amber-500/10' : 'bg-emerald-500/10'} rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110`} />
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-            {t.dashboard.kpis.infrasTitle}
-          </span>
-          <div className={`w-8 h-8 rounded-lg ${kpis.infras_unpaid > 0 ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400' : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400'} flex items-center justify-center`}>
-            <Coins className="w-4 h-4" />
-          </div>
-        </div>
-        <div>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-2xl font-black ${kpis.infras_unpaid > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-900 dark:text-slate-100'} tracking-tight`}>
-              {kpis.infras_unpaid}
-            </span>
-            <span className="text-xs text-amber-600 dark:text-amber-400 font-semibold">
-              {t.dashboard.kpis.infrasUnpaid}
-            </span>
-          </div>
-          <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-            <span>{t.dashboard.kpis.infrasPaid}: <strong className="text-emerald-600 dark:text-emerald-400">{kpis.infras_paid}</strong></span>
-            <span className="font-semibold text-slate-700 dark:text-slate-300">{infrasRate}%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Yard Occupancy */}
+      {/* 3. Yard Occupancy */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-24 h-24 bg-teal-500/10 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110" />
         <div className="flex items-center justify-between mb-2">
@@ -139,8 +111,8 @@ export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = f
         </div>
       </div>
 
-      {/* 5. Watchlists */}
-      <div className="sm:col-span-2 lg:col-span-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
+      {/* 4. Watchlists */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110" />
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">

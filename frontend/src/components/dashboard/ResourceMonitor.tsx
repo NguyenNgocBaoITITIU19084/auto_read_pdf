@@ -52,38 +52,35 @@ const MetricRow: React.FC<MetricRowProps> = ({
 }) => {
   const st = LEVEL_STYLES[level];
   return (
-    <div className={`rounded-lg border ${st.border} p-3 space-y-2 transition-colors`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className={`w-7 h-7 rounded-md ${st.icon} flex items-center justify-center shrink-0`}>{icon}</div>
-          <div className="min-w-0">
-            <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">{title} · {appLabel}</div>
-            <div className="flex items-baseline gap-1">
-              <span className={`text-lg font-black tracking-tight tabular-nums leading-tight ${st.value}`}>{appValue}</span>
-              {appSub && <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">{appSub}</span>}
-            </div>
-          </div>
-        </div>
-        <div className="text-right w-24 shrink-0">
-          <div className="text-[10px] text-slate-500 dark:text-slate-400">
-            {machineLabel}: <strong className="text-slate-700 dark:text-slate-200 tabular-nums">{Math.round(machinePct)}%</strong>
-          </div>
-          <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${machinePct >= 90 ? 'bg-rose-500' : machinePct >= 80 ? 'bg-amber-500' : 'bg-slate-400 dark:bg-slate-500'}`}
-              style={{ width: `${Math.max(0, Math.min(100, machinePct))}%` }}
-            />
-          </div>
+    <div className={`rounded-lg border ${st.border} px-2.5 py-1.5 flex items-center gap-2 transition-colors`}>
+      <div className={`w-6 h-6 rounded-md ${st.icon} flex items-center justify-center shrink-0`}>{icon}</div>
+      <div className="min-w-0 w-[4.75rem] shrink-0">
+        <div className="text-[9px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide truncate" title={`${title} · ${appLabel}`}>{title}</div>
+        <div className="flex items-baseline gap-1">
+          <span className={`text-sm font-black tracking-tight tabular-nums leading-tight ${st.value}`}>{appValue}</span>
         </div>
       </div>
-      <Sparkline
-        capacity={HISTORY_SIZE}
-        height={28}
-        series={[
-          { values: machineSeries, className: 'stroke-slate-400 dark:stroke-slate-500', dashed: true },
-          { values: appSeries, className: 'stroke-sky-500 dark:stroke-sky-400' },
-        ]}
-      />
+      <div className="flex-1 min-w-0" title={appSub ? `${appValue} ${appSub}` : undefined}>
+        <Sparkline
+          capacity={HISTORY_SIZE}
+          height={20}
+          series={[
+            { values: machineSeries, className: 'stroke-slate-400 dark:stroke-slate-500', dashed: true },
+            { values: appSeries, className: 'stroke-sky-500 dark:stroke-sky-400' },
+          ]}
+        />
+      </div>
+      <div className="text-right w-14 shrink-0" title={machineLabel}>
+        <div className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
+          <strong className="text-slate-700 dark:text-slate-200">{Math.round(machinePct)}%</strong>
+        </div>
+        <div className="mt-0.5 h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${machinePct >= 90 ? 'bg-rose-500' : machinePct >= 80 ? 'bg-amber-500' : 'bg-slate-400 dark:bg-slate-500'}`}
+            style={{ width: `${Math.max(0, Math.min(100, machinePct))}%` }}
+          />
+        </div>
+      </div>
     </div>
   );
 };
@@ -225,7 +222,7 @@ export const ResourceMonitor: React.FC<{ onBackendRestarted?: () => void }> = ({
     'w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed';
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm p-4 flex flex-col gap-3 h-full">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm p-3 flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 min-w-0">
           <Activity className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
@@ -300,15 +297,7 @@ export const ResourceMonitor: React.FC<{ onBackendRestarted?: () => void }> = ({
         machineSeries={history.map((s) => s.sysRamPct)}
       />
 
-      <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
-        <span>{r.last5min}</span>
-        <span className="flex items-center gap-2">
-          <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-sky-500 inline-block" />{r.app}</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 border-t border-dashed border-slate-400 inline-block" />{r.machine}</span>
-        </span>
-      </div>
-
-      <div className="mt-auto">
+      <div>
         <button
           type="button"
           onClick={() => setShowDetails((v) => !v)}
@@ -319,6 +308,14 @@ export const ResourceMonitor: React.FC<{ onBackendRestarted?: () => void }> = ({
           {r.details}
         </button>
         {showDetails && (
+          <>
+          <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500">
+            <span>{r.last5min}</span>
+            <span className="flex items-center gap-2">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 bg-sky-500 inline-block" />{r.app}</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-0.5 border-t border-dashed border-slate-400 inline-block" />{r.machine}</span>
+            </span>
+          </div>
           <table className="mt-1.5 w-full text-[11px]">
             <tbody className="text-slate-700 dark:text-slate-200 tabular-nums">
               {detailRows.map((row) => (
@@ -336,6 +333,7 @@ export const ResourceMonitor: React.FC<{ onBackendRestarted?: () => void }> = ({
               )}
             </tbody>
           </table>
+          </>
         )}
       </div>
     </div>

@@ -130,3 +130,14 @@ def test_parse_alert_datetime_formats():
     assert p("00:27  21/08/2026") == datetime(2026, 8, 21, 0, 27)
     for bad in ("30/02/2026 10:00", "25:00 21/08/2026", "null", "", None, "abc"):
         assert p(bad) is None
+
+
+def test_dashboard_equipment_distribution_merges_spelling_variants():
+    init_db()
+    col_id = create_collection(f"Test Equip Col {time.time()}")
+    for i, eq in enumerate(["40'DRY HC", "40HC", "40'HC", "40' HI-CUBE", "20 GP"]):
+        insert_booking(col_id, {"booking_no": f"EQ{i}", "equipment_type": eq, "qty": "1"})
+
+    dist = get_dashboard_summary(collection_id=col_id)["distributions"]["equipment_types"]
+    assert [(d["name"], d["count"]) for d in dist] == [("40HC", 4), ("20GP", 1)]
+    assert dist[0]["percentage"] == 80.0

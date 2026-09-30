@@ -754,7 +754,7 @@ export const translations = {
         },
         dashboardKPIs: {
           title: "Các Chỉ Số Vận Hành (KPIs)",
-          desc: "Theo dõi nhanh tổng sản lượng TEUs, số lượng container chưa duyệt hải quan, chưa đóng phí CSHT cảng biển và số lượng container đang nằm tại bãi."
+          desc: "Theo dõi nhanh tổng sản lượng TEUs, số lượng container chưa duyệt hải quan và số lượng container đang nằm tại bãi."
         },
         dashboardResources: {
           title: "Tài Nguyên Hệ Thống",
@@ -1607,7 +1607,7 @@ export const translations = {
         },
         dashboardKPIs: {
           title: "Key Performance Indicators (KPIs)",
-          desc: "Quickly track total estimated TEUs volume, uncleared customs count, unpaid port infrastructure fees, and containers currently in the yard."
+          desc: "Quickly track total estimated TEUs volume, uncleared customs count, and containers currently in the yard."
         },
         dashboardResources: {
           title: "System Resources",

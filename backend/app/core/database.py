@@ -1537,6 +1537,53 @@ def _calculate_teus(qty_str: str, equip_str: str) -> int:
     return count * multiplier
 
 
+# Carriers spell the same equipment many ways ("40HC", "40'HC", "40' HI-CUBE", "40'DRY HC"...).
+_EQ_ISO_RE = re.compile(r"^([24L])([0-9])([GRUPTV])[0-9]$")
+_EQ_SIZE_RE = re.compile(r"(?<!\d)(20|40|45)(?!\d)")
+_EQ_ISO_SIZE = {"2": "20", "4": "40", "L": "45"}
+_EQ_ISO_KIND = {"G": "GP", "V": "GP", "R": "RF", "U": "OT", "P": "FR", "T": "TK"}
+
+
+def normalize_equipment_type(value) -> str:
+    """Canonical container type code (20GP / 40HC / 40RH / 20OT...) for grouping; unknown text is kept (uppercased)."""
+    text = " ".join(str(value or "").upper().split())
+    if not text:
+        return ""
+    compact = re.sub(r"[\s'’\"`-]", "", text)
+    iso = _EQ_ISO_RE.match(compact)
+    if iso:
+        size, height, kind = _EQ_ISO_SIZE[iso.group(1)], iso.group(2), _EQ_ISO_KIND[iso.group(3)]
+        high_cube = height in "56"
+        if kind == "GP":
+            return f"{size}HC" if high_cube else f"{size}GP"
+        if kind == "RF":
+            return f"{size}RH" if high_cube else f"{size}RF"
+        return f"{size}{kind}"
+
+    sizes = set(_EQ_SIZE_RE.findall(text))
+    if len(sizes) != 1:
+        return text
+    size = sizes.pop()
+    tokens = set(re.findall(r"[A-Z]+", _EQ_SIZE_RE.sub(" ", text)))
+    joined = "".join(re.findall(r"[A-Z]+", _EQ_SIZE_RE.sub(" ", text)))
+    high_cube = bool(tokens & {"HC", "HQ", "HCUBE", "HICUBE", "HIGHCUBE", "RH"}) or any(
+        p in joined for p in ("HICUBE", "HIGHCUBE"))
+    if tokens & {"RF", "RH", "RE", "REF", "REEFER", "RFR"} or "REEFER" in joined:
+        return f"{size}RH" if high_cube else f"{size}RF"
+    if tokens & {"OT", "OPENTOP"} or "OPENTOP" in joined:
+        return f"{size}OT"
+    if tokens & {"FR", "FLAT", "FLATRACK"} or "FLATRACK" in joined:
+        return f"{size}FR"
+    if tokens & {"TK", "TANK"}:
+        return f"{size}TK"
+    if high_cube:
+        return f"{size}HC"
+    generic = {"GP", "DV", "DC", "DRY", "VAN", "STD", "ST", "STANDARD", "GENERAL", "PURPOSE", "FT", "FEET", "X", "FCL"}
+    if tokens <= generic:
+        return f"{size}GP"
+    return text
+
+
 # Cut-off / berthing alerts only cover this many days ahead of "now" (VN time).
 ALERT_WINDOW_DAYS = 7
 ALERT_LIST_LIMIT = 10
@@ -1731,15 +1778,14 @@ def get_dashboard_summary(collection_id: int = None, now: datetime | None = None
         """, (*params, *params) if params else ())
         site_dist = _distribution(cursor.fetchall())
 
-        cursor.execute(f"""
-            SELECT equipment_type as name, COUNT(*) as count
-            FROM bookings
-            {where_clause} {and_or_where} equipment_type IS NOT NULL AND TRIM(equipment_type) != ''
-            GROUP BY equipment_type
-            ORDER BY count DESC
-            LIMIT 8;
-        """, params)
-        eq_dist = _distribution(cursor.fetchall())
+        # Grouped by canonical type so spelling variants of one type count together
+        eq_counts: dict[str, int] = {}
+        for b in booking_rows:
+            eq_name = normalize_equipment_type(b["equipment_type"])
+            if eq_name:
+                eq_counts[eq_name] = eq_counts.get(eq_name, 0) + 1
+        eq_rows = sorted(eq_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+        eq_dist = _distribution([{"name": name, "count": count} for name, count in eq_rows])
 
         cursor.execute(f"""
             SELECT event_type as name, COUNT(*) as count
