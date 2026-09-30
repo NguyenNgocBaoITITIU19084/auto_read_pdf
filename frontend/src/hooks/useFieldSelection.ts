@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 
-const SELECTED_CLASS = 'ring-2 ring-primary-500 border-primary-400 dark:border-primary-500 bg-primary-50/70 dark:bg-primary-950/40';
-const SELECTABLE_CLASS = 'cursor-pointer select-text';
+// Drawn inside the card (border + inset accent bar + tint): an outer ring would be clipped by the scrolling grid
+const SELECTED_CLASS =
+  'border-primary-400 dark:border-primary-500 bg-primary-50/80 dark:bg-primary-950/40 shadow-[inset_3px_0_0_0_theme(colors.primary.500)]';
+const SELECTABLE_CLASS = 'cursor-pointer select-text hover:border-primary-300 dark:hover:border-primary-600';
 
 /** Ticked field keys of a detail modal; cleared whenever `resetKey` changes (other record / modal closed). */
 export function useFieldSelection(resetKey: unknown) {
