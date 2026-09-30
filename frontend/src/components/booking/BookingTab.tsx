@@ -669,7 +669,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         errors += 1;
       }
     }
-    if (mountedRef.current) setVesselLookupProgress(null);
+    if (mountedRef.current) {
+      setVesselLookupProgress(null);
+      selection.clear();
+    }
     const summary = tf(t.booking.bulkActions.lookupSummary, { total: list.length, found, notFound, errors });
     const skippedText = skipped > 0 ? ` · ${tf(t.booking.bulkActions.lookupSkipped, { count: skipped })}` : '';
     addToast(summary + skippedText, errors > 0 ? 'error' : found > 0 ? 'success' : 'info');

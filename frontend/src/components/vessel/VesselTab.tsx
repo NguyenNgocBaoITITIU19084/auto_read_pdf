@@ -428,6 +428,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
       );
       if (notFound.length > 0) addToast(tf(t.vessel.resyncNotFoundDetail, { items: previewList(notFound) }), 'info');
       if (errors.length > 0) addToast(tf(t.vessel.resyncErrorDetail, { items: previewList(errors, 3) }), 'error');
+      // Re-queried rows are re-inserted under new ids (ON CONFLICT REPLACE): the old selection would be stale
+      selection.clear();
       await loadData('refresh');
     });
 

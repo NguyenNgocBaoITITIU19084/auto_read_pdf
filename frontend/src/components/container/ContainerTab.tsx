@@ -548,6 +548,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       );
       if (notFound.length > 0) addToast(tf(t.container.resyncNotFoundDetail, { items: previewList(notFound) }), 'info');
       if (errors.length > 0) addToast(tf(t.container.resyncErrorDetail, { items: previewList(errors, 3) }), 'error');
+      // Re-queried rows are re-inserted under new ids (ON CONFLICT REPLACE): the old selection would be stale
+      selection.clear();
       await loadData('refresh');
     });
 
