@@ -13,6 +13,8 @@ MONTH_MAP = {
 
 # Canonical booking date output format used across the app: DD/MM/YYYY[ HH:MM]
 _RE_DMONY = re.compile(r"^(\d{1,2})[\s-]*([A-Za-z]{3})[\s-]*(\d{4}|\d{2})(?:\s*(\d{1,2}:\d{2}))?$")
+# Month-first, as Hapag-Lloyd prints it: 'Oct-04-2026 23:00'
+_RE_MONDY = re.compile(r"^([A-Za-z]{3})[\s-]+(\d{1,2})[\s,-]+(\d{4})(?:\s+(\d{1,2}:\d{2}))?$")
 # Trailing time-zone tag printed by CargoSmart-style bookings, e.g. '01 Oct 2026 23:59(ICT)'
 _RE_TZ_SUFFIX = re.compile(r"\s*\([A-Z]{2,5}\)$")
 _RE_ISO = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
@@ -22,6 +24,7 @@ _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?
 # reject non-date text (e.g. an address) that a loose label regex swept up on scrambled OCR text.
 _DATE_TOKEN_RE = re.compile(
     r"\d{1,2}[\s-]*[A-Za-z]{3}[\s-]*\d{2,4}(?:\s*\d{1,2}:\d{2})?"
+    r"|[A-Za-z]{3}[\s-]+\d{1,2}[\s,-]+\d{4}(?:\s+\d{1,2}:\d{2})?"
     r"|\d{4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?"
     r"|\d{1,2}[/.]\d{1,2}[/.]\d{4}(?:\s+\d{1,2}:\d{2})?"
 )
@@ -55,6 +58,7 @@ def parse_date_str(date_str: str) -> str:
     - '2026-05-03 13:00' -> '03/05/2026 13:00'
     - '02-Oct-2026 15:00'       -> '02/10/2026 15:00'
     - '01 Oct 2026 23:59(ICT)'  -> '01/10/2026 23:59'
+    - 'Oct-04-2026 23:00'       -> '04/10/2026 23:00'
     Unrecognized strings (including 'null') are returned unchanged (stripped).
     """
     if not date_str:
@@ -69,6 +73,15 @@ def parse_date_str(date_str: str) -> str:
         if mon_num:
             year_full = f"20{yr}" if len(yr) == 2 else yr
             formatted = _fmt_date(day, mon_num, year_full, time_part)
+            if formatted is not None:
+                return formatted
+
+    m = _RE_MONDY.match(date_str)
+    if m:
+        mon, day, yr, time_part = m.groups()
+        mon_num = MONTH_MAP.get(mon.lower(), "")
+        if mon_num:
+            formatted = _fmt_date(day, mon_num, yr, time_part)
             if formatted is not None:
                 return formatted
 

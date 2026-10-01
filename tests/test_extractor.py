@@ -198,6 +198,8 @@ def test_parse_date_str_keeps_invalid_dates_unchanged(raw):
     ("29Feb28", "29/02/2028"),
     ("2026-09-15 23:59", "15/09/2026 23:59"),
     ("1/9/2026", "01/09/2026"),
+    ("Oct-04-2026 23:00", "04/10/2026 23:00"),
+    ("Sep-15-2026", "15/09/2026"),
 ])
 def test_parse_date_str_valid_dates_still_normalized(raw, expected):
     from backend.app.services.extractor import parse_date_str
