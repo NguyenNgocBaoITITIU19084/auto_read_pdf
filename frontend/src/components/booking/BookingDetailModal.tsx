@@ -172,7 +172,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           </div>
         )}
 
-        <FieldCopyBar entries={entries} selected={picked.selected} onSelectAll={picked.setAll} onClear={picked.clear} />
+        <FieldCopyBar entries={entries} {...picked.barProps} />
 
         {/* Detailed Fields Grid */}
         <div className="grid grid-cols-2 gap-2.5 max-h-[60vh] overflow-y-auto pr-1">

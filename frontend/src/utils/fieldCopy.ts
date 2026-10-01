@@ -19,10 +19,19 @@ export const copyableEntries = (entries: CopyEntry[]): CopyEntry[] => entries.fi
  * Text for the ticked entries, in display order.
  *  - 'labeled': one "Label: value" line per entry
  *  - 'values':  one value per line
+ * `parts` replaces a field's value with the part the user highlighted (e.g. "NORFOLK" of "NORFOLK, VA").
  */
-export function formatEntriesForCopy(entries: CopyEntry[], selected: ReadonlySet<string>, mode: FieldCopyMode): string {
+export function formatEntriesForCopy(
+  entries: CopyEntry[],
+  selected: ReadonlySet<string>,
+  mode: FieldCopyMode,
+  parts: ReadonlyMap<string, string> = new Map(),
+): string {
   return copyableEntries(entries)
     .filter((e) => selected.has(e.key))
-    .map((e) => (mode === 'labeled' ? `${e.label}: ${clean(e.value)}` : clean(e.value)))
+    .map((e) => {
+      const value = clean(parts.get(e.key) ?? e.value);
+      return mode === 'labeled' ? `${e.label}: ${value}` : value;
+    })
     .join('\n');
 }

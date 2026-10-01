@@ -179,7 +179,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
           </div>
         </div>
 
-        <FieldCopyBar entries={entries} selected={picked.selected} onSelectAll={picked.setAll} onClear={picked.clear} />
+        <FieldCopyBar entries={entries} {...picked.barProps} />
 
         {/* Detailed Sections */}
         <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">

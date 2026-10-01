@@ -19,6 +19,12 @@ describe('fieldCopy', () => {
     expect(formatEntriesForCopy(entries, picked, 'values')).toBe('SGN123\nWAN HAI 317 W247');
   });
 
+  it('copies only the highlighted part of a field when one was picked', () => {
+    const parts = new Map([['c', 'WAN HAI 317']]);
+    expect(formatEntriesForCopy(entries, new Set(['a', 'c']), 'labeled', parts)).toBe('Số booking: SGN123\nTàu: WAN HAI 317');
+    expect(formatEntriesForCopy(entries, new Set(['a']), 'values', parts)).toBe('SGN123'); // a part of an unticked field is not copied
+  });
+
   it('ignores ticked entries without a value and returns "" for no selection', () => {
     expect(formatEntriesForCopy(entries, new Set(['b', 'd']), 'labeled')).toBe('');
     expect(formatEntriesForCopy(entries, new Set(), 'values')).toBe('');

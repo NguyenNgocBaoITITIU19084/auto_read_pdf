@@ -1,26 +1,32 @@
 import React from 'react';
-import { ClipboardCopy, ListChecks, X } from 'lucide-react';
+import { ClipboardCopy, ListChecks, TextSelect, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { copyTextToClipboard } from '../../utils/formatters';
 import { tf } from '../../services/i18nFormat';
 import { CopyEntry, FieldCopyMode, copyableEntries, formatEntriesForCopy } from '../../utils/fieldCopy';
+import type { PendingPart } from '../../hooks/useFieldSelection';
 
 interface FieldCopyBarProps {
   entries: CopyEntry[];
   selected: ReadonlySet<string>;
   onSelectAll: (keys: string[]) => void;
   onClear: () => void;
+  /** Fields copying only a highlighted part of their value */
+  parts?: ReadonlyMap<string, string>;
+  /** Text currently highlighted inside one field: offered as "pick this part" */
+  pendingPart?: PendingPart | null;
+  onPickPart?: (part: PendingPart) => void;
 }
 
 /** Toolbar above a detail grid: pick several fields, then copy them together. */
-export const FieldCopyBar: React.FC<FieldCopyBarProps> = ({ entries, selected, onSelectAll, onClear }) => {
+export const FieldCopyBar: React.FC<FieldCopyBarProps> = ({ entries, selected, onSelectAll, onClear, parts, pendingPart, onPickPart }) => {
   const { t, addToast } = useApp();
   const f = t.common.fieldCopy;
   const available = copyableEntries(entries);
   const count = available.filter((e) => selected.has(e.key)).length;
 
   const copy = async (mode: FieldCopyMode) => {
-    const text = formatEntriesForCopy(entries, selected, mode);
+    const text = formatEntriesForCopy(entries, selected, mode, parts);
     if (!text) return;
     const ok = await copyTextToClipboard(text);
     addToast(ok ? tf(f.copied, { count }) : t.common.error, ok ? 'success' : 'error');
@@ -28,6 +34,8 @@ export const FieldCopyBar: React.FC<FieldCopyBarProps> = ({ entries, selected, o
 
   const btn =
     'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap';
+  const pendingEntry = pendingPart && onPickPart ? available.find((e) => e.key === pendingPart.key) : undefined;
+  const pendingShort = pendingPart && pendingPart.text.length > 24 ? `${pendingPart.text.slice(0, 24)}…` : pendingPart?.text;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 px-2.5 py-1.5">
@@ -36,6 +44,19 @@ export const FieldCopyBar: React.FC<FieldCopyBarProps> = ({ entries, selected, o
         {count > 0 ? <strong className="text-slate-700 dark:text-slate-200">{tf(f.selected, { count })}</strong> : f.hint}
       </span>
       <div className="flex flex-wrap items-center gap-1.5">
+        {pendingEntry && pendingPart && (
+          <button
+            type="button"
+            // Keep the highlighted text: a normal mousedown would clear the selection before the click
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onPickPart?.(pendingPart)}
+            title={tf(f.pickPartTitle, { text: pendingPart.text, label: pendingEntry.label })}
+            className={`${btn} border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50`}
+          >
+            <TextSelect className="w-3.5 h-3.5" />
+            {tf(f.pickPart, { text: pendingShort || '' })}
+          </button>
+        )}
         {count < available.length && (
           <button
             type="button"

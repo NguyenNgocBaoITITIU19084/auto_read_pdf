@@ -107,7 +107,7 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
           </div>
         </div>
 
-        <FieldCopyBar entries={entries} selected={picked.selected} onSelectAll={picked.setAll} onClear={picked.clear} />
+        <FieldCopyBar entries={entries} {...picked.barProps} />
 
         {/* Detailed Fields Grid */}
         <div className="grid grid-cols-2 gap-2.5 max-h-[55vh] overflow-y-auto pr-1">
