@@ -1,7 +1,7 @@
 import axios from 'axios';
 import {
   Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
-  AutoSyncStatus, AutoSyncMode, ImageExtractResult, BulkEntity,
+  AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
 } from '../types';
@@ -140,6 +140,25 @@ export const extractBookingImageDetailedApi = async (file: File, apiKey?: string
   });
   return {
     data: res.data?.data || {},
+    engine_used: res.data?.engine_used || 'none',
+    warnings: Array.isArray(res.data?.warnings) ? res.data.warnings : [],
+    model_used: res.data?.model_used ?? null,
+    gemini_error_kind: res.data?.gemini_error_kind ?? null,
+  };
+};
+
+/** Reads container number / tare / max gross from a photo of a container door. Saves nothing. */
+export const extractContainerImageApi = async (file: File, apiKey?: string, signal?: AbortSignal): Promise<ContainerImageResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (apiKey) formData.append('api_key', apiKey);
+  const res = await apiClient.post<Partial<ContainerImageResult>>('/containers/extract-image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: LONG_TIMEOUT,
+    signal,
+  });
+  return {
+    data: res.data?.data || { container_no: '', tare_kg: null, max_gross_kg: null, check_digit_ok: null },
     engine_used: res.data?.engine_used || 'none',
     warnings: Array.isArray(res.data?.warnings) ? res.data.warnings : [],
     model_used: res.data?.model_used ?? null,

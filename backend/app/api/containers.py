@@ -1,6 +1,8 @@
+import asyncio
 import logging
+import os
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from backend.app.core.database import (
     get_containers, insert_containers, delete_container, delete_containers_batch, clear_containers,
     get_container_watchlist, add_to_container_watchlist, remove_from_container_watchlist,
@@ -8,6 +10,7 @@ from backend.app.core.database import (
     update_watchlist_sync_status, get_containers_page, get_container_ids
 )
 from backend.app.services.eport_client import search_containers
+from backend.app.services.container_image_extractor import extract_container_from_image_detailed
 from backend.app.services.change_detection import extra_gate_rows
 from backend.app.core.database import get_notification_settings
 from backend.app.schemas.models import (
@@ -18,6 +21,8 @@ from backend.app.schemas.models import (
 
 logger = logging.getLogger("backend.api.containers")
 router = APIRouter(prefix="/containers", tags=["Containers"])
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 # NOTE: every endpoint here is a plain `def` so FastAPI runs it in the threadpool —
 # DB and ePort calls never block the event loop.
@@ -237,3 +242,20 @@ def sync_collection_container_watchlist(collection_id: int = Query(...)):
                 _record_status(it["id"], "error", str(e))
 
     return {"updated_count": updated_count, "errors": errors}
+
+
+@router.post("/extract-image")
+async def extract_container_image(file: UploadFile = File(...), api_key: Optional[str] = Form(None)):
+    """Reads container number / tare / max gross from a photo. Saves nothing: the user reviews the result first."""
+    filename = file.filename or "image"
+    if os.path.splitext(filename)[1].lower() not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ ảnh PNG, JPG, WEBP, BMP")
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Ảnh rỗng")
+    try:
+        result = await asyncio.to_thread(extract_container_from_image_detailed, image_bytes, api_key)
+    except Exception as e:
+        logger.exception("Container image extraction failed")
+        raise HTTPException(status_code=500, detail=f"Không đọc được ảnh: {e}")
+    return {"status": "success", **result}

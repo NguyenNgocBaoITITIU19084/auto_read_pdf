@@ -280,6 +280,23 @@ export interface ImageExtractResult {
   gemini_error_kind?: string | null;
 }
 
+/** What the container photo reader returns (kg values; null when not printed / not readable) */
+export interface ContainerImageData {
+  container_no: string;
+  tare_kg: number | null;
+  max_gross_kg: number | null;
+  /** ISO 6346 check digit matches; null when the number is not in the 4 letters + 7 digits shape */
+  check_digit_ok: boolean | null;
+}
+
+export interface ContainerImageResult {
+  data: ContainerImageData;
+  engine_used: ImageExtractEngine;
+  warnings: string[];
+  model_used?: string | null;
+  gemini_error_kind?: string | null;
+}
+
 export interface ExtractImageResponse extends Partial<ImageExtractResult> {
   status: string;
   data: Partial<Booking>;

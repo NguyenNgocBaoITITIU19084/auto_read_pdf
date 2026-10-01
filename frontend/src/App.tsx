@@ -18,6 +18,8 @@ const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ de
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
   const [drilldownKeywords, setDrilldownKeywords] = useState<{
     booking?: string;
     vessel?: string;
@@ -95,6 +97,8 @@ export const App: React.FC = () => {
       const images = files.filter((f) => isImageFile(f) && !isPdfFile(f));
       const pdfs = files.filter(isPdfFile);
       if (images.length === 0 && pdfs.length === 0) return;
+      // On the Container tab a pasted photo is read as a container photo (handled by ContainerTab)
+      if (activeTabRef.current === 'container' && pdfs.length === 0) return;
 
       // Pasting into a text field: when the clipboard also carries text (e.g. cells copied from
       // Excel/Word include a bitmap rendition) keep the normal text paste — unless PDFs are present.

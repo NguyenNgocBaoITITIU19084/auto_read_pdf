@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Box, Search, RefreshCw, Trash2, FileSpreadsheet, Eye, Copy, BookmarkCheck,
-  SlidersHorizontal, BookmarkPlus, BookmarkMinus, Filter, ClipboardCopy, FolderInput, RotateCw
+  SlidersHorizontal, BookmarkPlus, BookmarkMinus, Filter, ClipboardCopy, FolderInput, RotateCw, ScanLine
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -20,6 +20,9 @@ import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
 import { ContainerDetailModal } from './ContainerDetailModal';
+import { ContainerImageModal, ContainerLookupResult } from './ContainerImageModal';
+import { useContainerImageQueue } from '../../context/ContainerImageQueueContext';
+import { extractClipboardFiles, isEditableTarget, isImageFile } from '../booking/clipboard';
 import { ContainerWatchlistModal } from './ContainerWatchlistModal';
 import { ContainerRow } from './ContainerRow';
 import { ResizableTh } from '../common/ResizableTh';
@@ -98,6 +101,9 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
   const [selectedContainer, setSelectedContainer] = useState<ContainerInfo | null>(null);
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
+  const [isImageOcrOpen, setIsImageOcrOpen] = useState(false);
+  const imageQueue = useContainerImageQueue();
+  const enqueueContainerImages = imageQueue.enqueue;
   const [watchlist, setWatchlist] = useState<ContainerWatchlist[]>([]);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
@@ -383,6 +389,33 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       addToast(errorMessage(e, t.common.error), 'error');
     }
   });
+
+  // A reviewed container photo: look the number up on ePort (current terminal and options) and add it to the table
+  const lookupFromImage = async (containerNo: string): Promise<ContainerLookupResult> => {
+    if (!activeCollection) return { count: 0 };
+    localStorage.setItem('last_container_site_id', siteId);
+    const res = await searchContainersApi(activeCollection.id, siteId, containerNo, isSearchByInYard, isSearchByBatch);
+    const count = Number(res?.count) || 0;
+    if (count > 0) {
+      selection.clear(); // re-queried rows get new ids (ON CONFLICT REPLACE)
+      await loadData('refresh');
+    }
+    return { count, message: res?.message };
+  };
+
+  // Pasting a photo on this tab reads it as a container photo (App's global paste handler leaves it to us here)
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented) return;
+      const images = extractClipboardFiles(e.clipboardData).filter(isImageFile);
+      if (images.length === 0) return;
+      if (isEditableTarget(e.target) && (e.clipboardData?.getData('text/plain') || '').trim() !== '') return;
+      e.preventDefault();
+      if (enqueueContainerImages(images) > 0) setIsImageOcrOpen(true);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [enqueueContainerImages]);
 
   const handleQueryEport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -709,6 +742,21 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
             >
               <Search className={`w-3.5 h-3.5 ${querying ? 'animate-spin' : ''}`} />
               <span>{querying ? t.common.loading : t.container.queryBtn}</span>
+            </button>
+
+            <button
+              type="button"
+              data-tour="container-ocr-btn"
+              onClick={() => setIsImageOcrOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shrink-0"
+            >
+              <ScanLine className="w-3.5 h-3.5" />
+              <span>{t.container.imageOcr.button}</span>
+              {imageQueue.items.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-primary-100 dark:bg-primary-950 text-primary-700 dark:text-primary-300 text-[10px] font-bold tabular-nums">
+                  {tf(t.container.imageOcr.badge, { done: imageQueue.stats.done, total: imageQueue.stats.total })}
+                </span>
+              )}
             </button>
 
             <div data-tour="container-watchlist-btn" className="ml-auto shrink-0">
@@ -1048,6 +1096,14 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         container={selectedContainer}
       />
 
+      <ContainerImageModal
+        isOpen={isImageOcrOpen}
+        onClose={() => setIsImageOcrOpen(false)}
+        siteId={siteId}
+        onSiteChange={(val) => { setSiteId(val); localStorage.setItem('last_container_site_id', val); }}
+        collectionName={activeCollection?.name}
+        onLookup={lookupFromImage}
+      />
       <ContainerWatchlistModal
         isOpen={isWatchlistOpen}
         onClose={() => setIsWatchlistOpen(false)}

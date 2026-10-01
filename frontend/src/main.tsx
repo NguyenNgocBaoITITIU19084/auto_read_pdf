@@ -7,6 +7,7 @@ import { MobileBridgeProvider } from './context/MobileBridgeContext';
 import { ImageQueueProvider } from './context/ImageQueueContext';
 import { PhoneToImageQueue } from './components/booking/PhoneToImageQueue';
 import { NotificationsProvider } from './context/NotificationsContext';
+import { ContainerImageQueueProvider } from './context/ContainerImageQueueContext';
 import { ConfirmProvider } from './hooks/useConfirm';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { installGlobalErrorLogging } from './services/clientLogger';
@@ -22,10 +23,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <MobileBridgeProvider>
             <ConfirmProvider>
               <ImageQueueProvider>
-                <NotificationsProvider>
-                  <PhoneToImageQueue />
-                  <App />
-                </NotificationsProvider>
+                <ContainerImageQueueProvider>
+                  <NotificationsProvider>
+                    <PhoneToImageQueue />
+                    <App />
+                  </NotificationsProvider>
+                </ContainerImageQueueProvider>
               </ImageQueueProvider>
             </ConfirmProvider>
           </MobileBridgeProvider>
