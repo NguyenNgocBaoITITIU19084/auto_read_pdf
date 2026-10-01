@@ -12,14 +12,16 @@ MONTH_MAP = {
 }
 
 # Canonical booking date output format used across the app: DD/MM/YYYY[ HH:MM]
-_RE_DMONY = re.compile(r"^(\d{1,2})\s*([A-Za-z]{3})\s*(\d{4}|\d{2})(?:\s*(\d{1,2}:\d{2}))?$")
+_RE_DMONY = re.compile(r"^(\d{1,2})[\s-]*([A-Za-z]{3})[\s-]*(\d{4}|\d{2})(?:\s*(\d{1,2}:\d{2}))?$")
+# Trailing time-zone tag printed by CargoSmart-style bookings, e.g. '01 Oct 2026 23:59(ICT)'
+_RE_TZ_SUFFIX = re.compile(r"\s*\([A-Z]{2,5}\)$")
 _RE_ISO = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
 _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 
 # Finds a date-shaped token anywhere in a string (not anchored like the formats above), used to
 # reject non-date text (e.g. an address) that a loose label regex swept up on scrambled OCR text.
 _DATE_TOKEN_RE = re.compile(
-    r"\d{1,2}\s*[A-Za-z]{3}\s*\d{2,4}(?:\s*\d{1,2}:\d{2})?"
+    r"\d{1,2}[\s-]*[A-Za-z]{3}[\s-]*\d{2,4}(?:\s*\d{1,2}:\d{2})?"
     r"|\d{4}-\d{1,2}-\d{1,2}(?:[ T]\d{1,2}:\d{2})?"
     r"|\d{1,2}[/.]\d{1,2}[/.]\d{4}(?:\s+\d{1,2}:\d{2})?"
 )
@@ -51,12 +53,14 @@ def parse_date_str(date_str: str) -> str:
     - '18Jul2617:00'     -> '18/07/2026 17:00'
     - '2026-05-04'       -> '04/05/2026'
     - '2026-05-03 13:00' -> '03/05/2026 13:00'
+    - '02-Oct-2026 15:00'       -> '02/10/2026 15:00'
+    - '01 Oct 2026 23:59(ICT)'  -> '01/10/2026 23:59'
     Unrecognized strings (including 'null') are returned unchanged (stripped).
     """
     if not date_str:
         return ""
 
-    date_str = date_str.strip()
+    date_str = _RE_TZ_SUFFIX.sub("", date_str.strip())
 
     m = _RE_DMONY.match(date_str)
     if m:
@@ -148,10 +152,39 @@ _BOOKING_CODE_PATTERNS: List[Tuple[str, Pattern]] = [
 ]
 
 
+# Barcode noise in the text layer of CargoSmart-style PDFs (COSCO/OOCL), e.g.
+# 'PILLLIPAOCHHJAPILLLIP' or 'A A A AA A A AA ...' — can spell out carrier codes like 'PIL'.
+_BARCODE_TOKEN = re.compile(r"\b[A-Z]{18,}\b")
+_BARCODE_RUN = re.compile(r"(?:\b[A-Z]{1,2}\b[ \t]*){8,}")
+
+
+def strip_barcode_noise(text: str) -> str:
+    return _BARCODE_RUN.sub(" ", _BARCODE_TOKEN.sub(" ", text or ""))
+
+
+_FROM_LINE = re.compile(r"^\s*FROM\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_ISSUER_HEAD_LINES = 8
+
+
+def _detect_issuer(text: str) -> str:
+    """
+    Carrier named by the document's issuer: the 'FROM:' line, else the first header lines
+    (e.g. 'HAPAG-LLOYD (VIETNAM) LTD', 'By OOCL App'). Checked before the whole-text scan so a
+    vessel name such as 'COSCO SHIPPING PANAMA' or 'MANILA MAERSK' cannot win.
+    """
+    lines = [ln.strip().upper() for ln in text.splitlines() if ln.strip()]
+    candidates = [m.group(1).upper() for m in _FROM_LINE.finditer(text)][:2] + lines[:_ISSUER_HEAD_LINES]
+    for line in candidates:
+        for name, patterns, _prefixes, _vessels in CARRIERS:
+            if any(p.search(line) for p in patterns):
+                return name
+    return ""
+
+
 def detect_carrier(text: str = "", booking_no: str = "", vessel: str = "", pdf_name: str = "") -> str:
     """
     Identifies the carrier / shipping line from booking number, text, vessel and file name.
-    Order of evidence: booking-number prefix > document text / file name > vessel name.
+    Order of evidence: booking-number prefix > issuer header > document text / file name > vessel name.
     Uses word boundaries so words like 'PILOT', 'COMPILED', 'PARTICULARS' do not misfire.
     """
     bk = (booking_no or "").strip().upper()
@@ -159,6 +192,11 @@ def detect_carrier(text: str = "", booking_no: str = "", vessel: str = "", pdf_n
         for name, _patterns, prefixes, _vessels in CARRIERS:
             if any(bk.startswith(p) for p in prefixes):
                 return name
+
+    text = strip_barcode_noise(text)
+    issuer = _detect_issuer(text)
+    if issuer:
+        return issuer
 
     # '_' is a word char for \b, so split file names like 'CUL_CULVSGN...pdf'
     haystack = f"{text or ''}\n{pdf_name or ''}".replace("_", " ").upper()
@@ -278,24 +316,59 @@ def normalize_field_case(result: dict) -> dict:
     return result
 
 
-def extract_booking_from_text(text: str, filename: str = "") -> dict:
+_DATE_FIELDS = ("ETD", "ETD_Pre", "ETD_Trunk", "Port Cargo Cut-off")
+
+
+def _find_layout_parser(text: str):
+    from backend.app.services.carrier_parsers import find_parser  # lazy: avoids an import cycle
+
+    return find_parser(text)
+
+
+def _fill_nulls(result: dict) -> dict:
+    for k in result:
+        if k != "Tên file PDF" and k != "STT":
+            if result[k] is None or result[k] == "":
+                result[k] = "null"
+    return result
+
+
+def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd) — see carrier_parsers/."""
+    try:
+        fields = parser.parse(text, pages_words)
+        result.update({k: v for k, v in fields.items() if k in result})
+        for k in _DATE_FIELDS:
+            if result[k]:
+                result[k] = parse_date_str(result[k])
+        if not result["Carrier"]:
+            result["Carrier"] = detect_carrier(text, result["Booking No"], result["Vessel"], filename)
+    except Exception as e:
+        logger.exception(f"Error parsing booking layout ({filename}): {e}")
+    return normalize_field_case(_fill_nulls(result))
+
+
+def extract_booking_from_text(text: str, filename: str = "", pages_words=None) -> dict:
     """
     Parses booking information from raw text extracted from PDF or OCR.
+    `pages_words` (pdfplumber words per page, PDFs only) lets layout parsers split side-by-side columns.
     """
     result = {"STT": "", "Tên file PDF": filename}
     result.update({k: "" for k in BOOKING_KEYS})
 
     if not text:
-        for k in result:
-            if k != "Tên file PDF" and k != "STT":
-                result[k] = "null"
-        return result
+        return _fill_nulls(result)
+
+    parser = _find_layout_parser(text)
+    if parser:
+        return _extract_with_layout_parser(parser, text, filename, result, pages_words)
 
     try:
         # Extract Booking No
         booking_match = re.search(r"Booking\s*No\s*:\s*([A-Z0-9]+)", text, re.IGNORECASE)
         if not booking_match:
-            booking_match = re.search(r"(?:Booking|BKG)\s*(?:No|Number|#)?\s*[:\.]?\s*([A-Z0-9]{6,25})", text, re.IGNORECASE)
+            # Must contain a digit, so words like 'Booking Confirmation' are not taken as the number
+            booking_match = re.search(r"(?:Booking|BKG)\s*(?:No|Number|#)?\s*[:\.]?\s*((?=[A-Z0-9]*\d)[A-Z0-9]{6,25})\b", text, re.IGNORECASE)
         if booking_match:
             result["Booking No"] = booking_match.group(1).strip()
 
@@ -419,12 +492,7 @@ def extract_booking_from_text(text: str, filename: str = "") -> dict:
     except Exception as e:
         logger.exception(f"Error parsing booking text ({filename}): {e}")
 
-    for k in result:
-        if k != "Tên file PDF" and k != "STT":
-            if result[k] is None or result[k] == "":
-                result[k] = "null"
-
-    return normalize_field_case(result)
+    return normalize_field_case(_fill_nulls(result))
 
 
 def read_pdf_text(pdf_path: str) -> str:
@@ -440,6 +508,18 @@ def read_pdf_text(pdf_path: str) -> str:
     return text
 
 
+def read_pdf_words(pdf_path: str) -> Optional[List[List[dict]]]:
+    """Word boxes per page (pdfplumber extract_words), or None if the PDF can't be read."""
+    import pdfplumber
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            return [page.extract_words() for page in pdf.pages]
+    except Exception as e:
+        logger.warning(f"PDF {os.path.basename(pdf_path)}: could not read word boxes: {e}")
+        return None
+
+
 def extract_booking_data(pdf_path: str) -> dict:
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"File not found: {pdf_path}")
@@ -452,7 +532,9 @@ def extract_booking_data(pdf_path: str) -> dict:
         text = ""
     if not text.strip():
         logger.warning(f"PDF {filename}: no text layer extracted (scan, or pdfminer failed)")
-    result = extract_booking_from_text(text, filename)
+    # Word boxes only for layouts that need them (columns merged in the text layer)
+    pages_words = read_pdf_words(pdf_path) if text.strip() and _find_layout_parser(text) else None
+    result = extract_booking_from_text(text, filename, pages_words)
     if text.strip() and not has_booking_fields(result):
         logger.warning(f"PDF {filename}: {len(text)} chars of text but no booking fields matched; head={text[:200]!r}")
     return result
