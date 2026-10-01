@@ -1782,12 +1782,13 @@ def _summarize_for_os(rows: list[dict]) -> dict:
         r = rows[0]
         if r["kind"] == "test":
             return {"title": r["title"], "body": "Nếu bạn thấy popup này, thông báo hệ thống đang hoạt động.",
-                    "count": 1, "nav_tab": None, "nav_query": None}
+                    "count": 1, "nav_tab": None, "nav_query": None, "notification_id": r["id"]}
         body = f"{r['old_value']} → {r['new_value']}" if r.get("old_value") else r["new_value"]
         bookings = r["detail"].get("bookings") or []
         if bookings:
             body += " · " + ", ".join(bookings[:3])
-        return {"title": r["title"], "body": body, "count": 1, "nav_tab": r["nav_tab"], "nav_query": r["nav_query"]}
+        return {"title": r["title"], "body": body, "count": 1, "nav_tab": r["nav_tab"], "nav_query": r["nav_query"],
+                "notification_id": r["id"]}
     counts: dict[str, int] = {}
     for r in rows:
         counts[r["kind"]] = counts.get(r["kind"], 0) + 1
@@ -1799,7 +1800,7 @@ def _summarize_for_os(rows: list[dict]) -> dict:
     body = " · ".join(f"{counts[k]} {words[k]}" for k in cd.ALL_KINDS if k in counts)
     first = rows[0]
     return {"title": f"{len(rows)} thay đổi mới", "body": body, "count": len(rows),
-            "nav_tab": first["nav_tab"], "nav_query": first["nav_query"]}
+            "nav_tab": first["nav_tab"], "nav_query": first["nav_query"], "notification_id": first["id"]}
 
 
 def claim_os_notifications() -> dict:

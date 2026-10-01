@@ -7,11 +7,12 @@ let language: 'vi' | 'en' = 'vi';
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations[language] }) }));
 
 const markRead = vi.fn();
+const openDetail = vi.fn();
 const markAllRead = vi.fn();
 const clearRead = vi.fn();
 let state: { items: AppNotification[]; unread: number } = { items: [], unread: 0 };
 vi.mock('../../context/NotificationsContext', () => ({
-  useNotifications: () => ({ ...state, markRead, markAllRead, clearRead, refresh: vi.fn() }),
+  useNotifications: () => ({ ...state, markRead, markAllRead, clearRead, openDetail, refresh: vi.fn() }),
 }));
 
 import { NotificationBell } from './NotificationBell';
@@ -29,6 +30,7 @@ const container: AppNotification = {
 beforeEach(() => {
   language = 'vi';
   markRead.mockReset().mockResolvedValue(undefined);
+  openDetail.mockReset();
   markAllRead.mockReset().mockResolvedValue(undefined);
   clearRead.mockReset().mockResolvedValue(undefined);
   state = { items: [vessel, container], unread: 1 };
@@ -48,6 +50,14 @@ describe('NotificationBell', () => {
     expect(screen.queryByTestId('notification-badge')).toBeNull();
   });
 
+  it('shakes the bell icon only while there are unread notifications', () => {
+    const { rerender } = render(<NotificationBell />);
+    expect(screen.getByTestId('notification-bell-icon').getAttribute('class')).toContain('animate-bell-ring');
+    state = { items: [], unread: 0 };
+    rerender(<NotificationBell />);
+    expect(screen.getByTestId('notification-bell-icon').getAttribute('class')).not.toContain('animate-bell-ring');
+  });
+
   it('lists the changes with old → new, affected bookings and where they came from', () => {
     render(<NotificationBell />);
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -60,23 +70,12 @@ describe('NotificationBell', () => {
     expect(screen.getByText(/Tra cứu/)).toBeInTheDocument();
   });
 
-  it('opening an unread change marks it read, closes the panel and goes to the right tab with the keyword', () => {
-    const onNavigateTab = vi.fn();
-    render(<NotificationBell onNavigateTab={onNavigateTab} />);
+  it('clicking a change closes the panel and opens its detail dialog', () => {
+    render(<NotificationBell />);
     open();
     fireEvent.click(screen.getByText('Tàu HMM HOPE 062E-062E: đổi hạn đóng máng'));
-    expect(markRead).toHaveBeenCalledWith([2]);
-    expect(onNavigateTab).toHaveBeenCalledWith('vessel', 'HMM HOPE');
+    expect(openDetail).toHaveBeenCalledWith(2);
     expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('an already read change navigates without marking again', () => {
-    const onNavigateTab = vi.fn();
-    render(<NotificationBell onNavigateTab={onNavigateTab} />);
-    open();
-    fireEvent.click(screen.getByText('Cont EMCU1234567 đã OUTGATE'));
-    expect(markRead).not.toHaveBeenCalled();
-    expect(onNavigateTab).toHaveBeenCalledWith('container', 'EMCU1234567');
   });
 
   it('marks all read / clears read ones, disabled when there is nothing to do', () => {

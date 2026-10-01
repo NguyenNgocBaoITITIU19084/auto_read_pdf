@@ -26,7 +26,7 @@ function setup(over = {}) {
   return { notifier, calls };
 }
 
-const one = { items: [{ id: 1 }], summary: { title: 'Cont EMCU1234567 đã OUTGATE', body: '26/09/2026 09:46', count: 1, nav_tab: 'container', nav_query: 'EMCU1234567' } };
+const one = { items: [{ id: 1 }], summary: { title: 'Cont EMCU1234567 đã OUTGATE', body: '26/09/2026 09:46', count: 1, nav_tab: 'container', nav_query: 'EMCU1234567', notification_id: 1 } };
 
 test('claims from the backend and shows one popup for the batch', async () => {
   const { notifier, calls } = setup({ response: one });
@@ -63,7 +63,7 @@ test('clicking a popup brings the window up and opens the matching tab', async (
   assert.equal(notifier.pending, 1);
   FakeNotification.shown[0].emit('click');
   assert.equal(calls.window, 1);
-  assert.deepEqual(calls.sent.at(-1), ['notification-navigate', { tab: 'container', query: 'EMCU1234567' }]);
+  assert.deepEqual(calls.sent.at(-1), ['notification-navigate', { tab: 'container', query: 'EMCU1234567', notificationId: 1 }]);
   assert.equal(notifier.pending, 0);
 });
 

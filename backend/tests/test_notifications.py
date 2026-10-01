@@ -287,6 +287,7 @@ def test_claim_os_single_change_uses_its_own_text_and_skips_read_ones(client, co
     claim = client.post(f"{API}/notifications/claim-os").json()
     assert claim["summary"]["count"] == 1
     assert "→" in claim["summary"]["body"] and claim["summary"]["nav_tab"] == "vessel"
+    assert claim["summary"]["notification_id"] == claim["items"][0]["id"]   # the popup opens this notification's detail
 
 
 def test_claim_os_marks_taken_even_when_popups_are_off(client, col):

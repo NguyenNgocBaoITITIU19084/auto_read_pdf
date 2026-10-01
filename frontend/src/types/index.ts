@@ -382,8 +382,8 @@ export interface ElectronAPI {
   onNotificationsChanged?: (callback: () => void) => () => void;
   /** Desktop only: claim pending notifications now and pop them up even while the app is focused. */
   pollNotificationsNow?: () => Promise<void>;
-  /** Desktop only: a system popup was clicked — open the matching tab. Returns unsubscribe. */
-  onNotificationNavigate?: (callback: (target: { tab: 'vessel' | 'container' | null; query: string | null }) => void) => () => void;
+  /** Desktop only: a system popup was clicked — open that notification's detail (or the matching tab). Returns unsubscribe. */
+  onNotificationNavigate?: (callback: (target: { tab: 'vessel' | 'container' | null; query: string | null; notificationId?: number | null }) => void) => () => void;
   /** Quit and install a downloaded update; false when nothing is ready. */
   installUpdate?: () => Promise<boolean>;
   /** CPU/RAM of all Electron processes (dashboard resource monitor). */

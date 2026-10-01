@@ -181,7 +181,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
         </div>
 
         {/* Change notifications */}
-        <NotificationBell onNavigateTab={onNavigateTab} />
+        <NotificationBell />
 
         {/* Language Switcher */}
         <div data-tour="lang-toggle">

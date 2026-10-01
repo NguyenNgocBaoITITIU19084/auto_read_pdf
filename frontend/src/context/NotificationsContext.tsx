@@ -17,6 +17,11 @@ export interface NotificationsValue {
   markRead: (ids: number[]) => Promise<void>;
   markAllRead: () => Promise<void>;
   clearRead: () => Promise<void>;
+  /** The notification shown in the detail dialog (null = closed) */
+  detailId: number | null;
+  /** Opens the detail dialog and marks the notification read */
+  openDetail: (id: number) => void;
+  closeDetail: () => void;
 }
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
@@ -30,6 +35,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const { addToast } = useToastActions();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const tRef = useRef(t);
   tRef.current = t;
@@ -134,9 +140,18 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     await refresh();
   }, [refresh]);
 
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const openDetail = useCallback((id: number) => {
+    setDetailId(id);
+    const item = itemsRef.current.find((n) => n.id === id);
+    if (item && !item.read) void markRead([id]);
+  }, [markRead]);
+  const closeDetail = useCallback(() => setDetailId(null), []);
+
   const value = useMemo<NotificationsValue>(
-    () => ({ items, unread, refresh, markRead, markAllRead, clearRead }),
-    [items, unread, refresh, markRead, markAllRead, clearRead]
+    () => ({ items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail }),
+    [items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail]
   );
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
 };

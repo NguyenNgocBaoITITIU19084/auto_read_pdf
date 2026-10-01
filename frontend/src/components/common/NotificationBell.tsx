@@ -7,7 +7,6 @@ import { formatTimeAgo } from '../../utils/formatters';
 import { notificationChange, notificationTitle } from '../../utils/notifications';
 import { tf } from '../../services/i18nFormat';
 import { Tooltip } from './Tooltip';
-import type { TabId } from './Tabs';
 
 const KIND_ICON: Record<NotificationKind, React.ReactNode> = {
   container_customs: <ShieldCheck className="w-4 h-4" />,
@@ -21,15 +20,11 @@ const KIND_ICON: Record<NotificationKind, React.ReactNode> = {
   test: <Bell className="w-4 h-4" />,
 };
 
-interface BellProps {
-  onNavigateTab?: (tabId: TabId, searchKeyword?: string) => void;
-}
-
-/** Header bell: unread badge + a panel with the latest vessel / container changes. */
-export const NotificationBell: React.FC<BellProps> = ({ onNavigateTab }) => {
+/** Header bell: unread badge + a panel with the latest vessel / container changes; a click opens its detail dialog. */
+export const NotificationBell: React.FC = () => {
   const { t } = useApp();
   const n = t.notifications;
-  const { items, unread, markRead, markAllRead, clearRead } = useNotifications();
+  const { items, unread, markAllRead, clearRead, openDetail } = useNotifications();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -50,9 +45,8 @@ export const NotificationBell: React.FC<BellProps> = ({ onNavigateTab }) => {
   }, [open]);
 
   const openItem = (item: AppNotification) => {
-    if (!item.read) void markRead([item.id]);
     setOpen(false);
-    if (item.nav_tab && onNavigateTab) onNavigateTab(item.nav_tab, item.nav_query || undefined);
+    openDetail(item.id);
   };
 
   const hasRead = items.some((i) => i.read);
@@ -68,7 +62,10 @@ export const NotificationBell: React.FC<BellProps> = ({ onNavigateTab }) => {
           aria-expanded={open}
           className="relative p-1.5 text-slate-600 dark:text-slate-300 hover:text-primary-600 dark:hover:text-primary-400 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 transition-colors shrink-0"
         >
-          <Bell className="w-4 h-4" />
+          <Bell
+            data-testid="notification-bell-icon"
+            className={`w-4 h-4 origin-top ${unread > 0 ? 'motion-safe:animate-bell-ring' : ''}`}
+          />
           {unread > 0 && (
             <span
               data-testid="notification-badge"

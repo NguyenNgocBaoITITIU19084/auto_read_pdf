@@ -6,7 +6,9 @@ import { TableSkeleton } from './components/common/TableSkeleton';
 import { ToastContainer } from './components/common/Toast';
 import { UpdateBanner } from './components/common/UpdateBanner';
 import { extractClipboardFiles, isEditableTarget, isImageFile, isPdfFile } from './components/booking/clipboard';
+import { NotificationDetailModal } from './components/common/NotificationDetailModal';
 import { useMobileBridge } from './context/MobileBridgeContext';
+import { useNotifications } from './context/NotificationsContext';
 
 const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').then((m) => ({ default: m.DashboardTab })));
 const BookingTab = lazy(() => import('./components/booking/BookingTab').then((m) => ({ default: m.BookingTab })));
@@ -46,14 +48,21 @@ export const App: React.FC = () => {
     setActiveTab(tabId);
   }, []);
 
-  // A desktop popup was clicked: open the tab it is about
+  // A desktop popup was clicked: show that notification's detail, or just open the tab it is about
+  const { items: notificationItems, openDetail } = useNotifications();
+  const notificationItemsRef = useRef(notificationItems);
+  notificationItemsRef.current = notificationItems;
   useEffect(() => {
     const api = window.electronAPI;
     if (!api?.onNotificationNavigate) return;
     return api.onNotificationNavigate((target) => {
-      if (target?.tab) handleNavigateTab(target.tab, target.query || undefined);
+      if (target?.notificationId && notificationItemsRef.current.some((n) => n.id === target.notificationId)) {
+        openDetail(target.notificationId);
+      } else if (target?.tab) {
+        handleNavigateTab(target.tab, target.query || undefined);
+      }
     });
-  }, [handleNavigateTab]);
+  }, [handleNavigateTab, openDetail]);
 
   // A drill-down keyword is a one-shot hint for the tab it targets: drop it once the user leaves that
   // tab, otherwise every later visit re-applies the stale search (e.g. Vessel tab stuck on one vessel).
@@ -107,6 +116,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
       <UpdateBanner />
       <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
+      <NotificationDetailModal onNavigateTab={handleNavigateTab} />
       <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} />
       <main className="flex-1 overflow-hidden flex flex-col">
         <Suspense

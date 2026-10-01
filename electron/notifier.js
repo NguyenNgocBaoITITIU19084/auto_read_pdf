@@ -24,7 +24,7 @@ function createNotifier({ backendRequest, Notification, showMainWindow, sendToRe
     popup.on('click', () => {
       done();
       showMainWindow();
-      sendToRenderer('notification-navigate', { tab: summary.nav_tab || null, query: summary.nav_query || null });
+      sendToRenderer('notification-navigate', { tab: summary.nav_tab || null, query: summary.nav_query || null, notificationId: summary.notification_id || null });
     });
     popup.on('close', done);
     popup.on('failed', done);
