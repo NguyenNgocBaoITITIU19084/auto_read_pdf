@@ -7,7 +7,7 @@ import {
 
 const file = (name: string, size = 10) => new File([new Uint8Array(size)], name, { type: 'image/jpeg', lastModified: 1 });
 const result = (over: Partial<ContainerImageResult['data']> = {}, extra: Partial<ContainerImageResult> = {}): ContainerImageResult => ({
-  data: { container_no: 'HPCU5330042', tare_kg: 3700, max_gross_kg: 32500, check_digit_ok: true, ...over },
+  data: { container_no: 'HPCU5330042', tare_kg: 3700, max_gross_kg: 32500, check_digit_ok: true, seal_no: '', seal_brand: '', ...over },
   engine_used: 'gemini', warnings: [], model_used: 'gemini-2.5-flash', gemini_error_kind: null, ...extra,
 });
 
@@ -34,6 +34,13 @@ describe('classifyContainerResult', () => {
     expect(classifyContainerResult(result({}, { engine_used: 'ocr' }))).toBe('review');
     expect(classifyContainerResult(result({}, { warnings: ['x'] }))).toBe('review');
     expect(classifyContainerResult(result({ container_no: '' }))).toBe('failed');
+  });
+
+  it('treats a seal-only photo as readable, and a photo with neither as failed', () => {
+    const seal = { container_no: '', tare_kg: null, max_gross_kg: null, check_digit_ok: null, seal_no: 'WHA4453729', seal_brand: 'WAN HAI' };
+    expect(classifyContainerResult(result(seal))).toBe('success');
+    expect(classifyContainerResult(result(seal, { engine_used: 'ocr' }))).toBe('review');
+    expect(classifyContainerResult(result({ ...seal, seal_no: '' }))).toBe('failed');
   });
 });
 
@@ -69,6 +76,13 @@ describe('queue reducer', () => {
     expect(items[0].fields).toMatchObject({ container_no: 'HPCU5330042', tare: '3700' });
   });
 
+  it('normalizes seal edits: letters and digits only, brand upper-cased', () => {
+    const it = makeContainerQueueItem(file('a.jpg'));
+    let items = containerQueueReducer([it], { type: 'setField', id: it.id, field: 'seal_no', value: 'wha 4453-729' });
+    items = containerQueueReducer(items, { type: 'setField', id: it.id, field: 'seal_brand', value: 'wan hai' });
+    expect(items[0].fields).toMatchObject({ seal_no: 'WHA4453729', seal_brand: 'WAN HAI' });
+  });
+
   it('retryFailed only requeues failed items, used items can be cleared', () => {
     const [a, b, c] = ['a', 'b', 'c'].map((n) => makeContainerQueueItem(file(`${n}.jpg`)));
     let items = containerQueueReducer([{ ...a, status: 'failed' }, { ...b, status: 'success' }, { ...c, status: 'used' }], { type: 'retryFailed' });
@@ -79,8 +93,8 @@ describe('queue reducer', () => {
   });
 
   it('flags the same container number read from two photos', () => {
-    const a = { ...makeContainerQueueItem(file('a.jpg')), status: 'success' as const, fields: { container_no: 'HPCU5330042', tare: '', max_gross: '' } };
-    const b = { ...makeContainerQueueItem(file('b.jpg')), status: 'review' as const, fields: { container_no: 'HPCU5330042', tare: '', max_gross: '' } };
+    const a = { ...makeContainerQueueItem(file('a.jpg')), status: 'success' as const, fields: { container_no: 'HPCU5330042', tare: '', max_gross: '', seal_no: '', seal_brand: '' } };
+    const b = { ...makeContainerQueueItem(file('b.jpg')), status: 'review' as const, fields: { container_no: 'HPCU5330042', tare: '', max_gross: '', seal_no: '', seal_brand: '' } };
     expect(duplicateContainerIds([a, b])).toEqual(new Set([b.id]));
   });
 

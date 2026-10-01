@@ -10,9 +10,11 @@ export interface ContainerFields {
   container_no: string;
   tare: string;
   max_gross: string;
+  seal_no: string;
+  seal_brand: string;
 }
 
-export const EMPTY_CONTAINER_FIELDS: ContainerFields = { container_no: '', tare: '', max_gross: '' };
+export const EMPTY_CONTAINER_FIELDS: ContainerFields = { container_no: '', tare: '', max_gross: '', seal_no: '', seal_brand: '' };
 
 export interface ContainerQueueItem {
   id: number;
@@ -73,13 +75,21 @@ export const fieldsFromResult = (res: ContainerImageResult): ContainerFields => 
   container_no: res.data.container_no || '',
   tare: res.data.tare_kg != null ? String(res.data.tare_kg) : '',
   max_gross: res.data.max_gross_kg != null ? String(res.data.max_gross_kg) : '',
+  seal_no: res.data.seal_no || '',
+  seal_brand: res.data.seal_brand || '',
 });
 
-/** failed: no container number; success: read by Gemini, valid number, both weights and no warning; otherwise review. */
+/**
+ * failed: neither a container number nor a seal number was read.
+ * success: read by Gemini with no warning, and either a valid container number with both weights, or a seal-only photo.
+ * Otherwise review.
+ */
 export function classifyContainerResult(res: ContainerImageResult): 'success' | 'review' | 'failed' {
   const f = fieldsFromResult(res);
-  if (!f.container_no) return 'failed';
-  const complete = !containerNoIssue(f.container_no) && f.tare !== '' && f.max_gross !== '';
+  if (!f.container_no && !f.seal_no) return 'failed';
+  const complete = f.container_no
+    ? !containerNoIssue(f.container_no) && f.tare !== '' && f.max_gross !== ''
+    : true;
   return res.engine_used === 'gemini' && complete && res.warnings.length === 0 ? 'success' : 'review';
 }
 
@@ -117,6 +127,18 @@ export function containerQueueStats(items: ContainerQueueItem[]) {
   for (const it of items) stats[it.status] += 1;
   stats.done = stats.total - stats.queued - stats.reading;
   return stats;
+}
+
+function normalizeField(field: keyof ContainerFields, value: string): string {
+  switch (field) {
+    case 'container_no':
+    case 'seal_no':
+      return normalizeContainerNo(value).slice(0, field === 'seal_no' ? 30 : 11);
+    case 'seal_brand':
+      return value.toUpperCase().slice(0, 30);
+    default:
+      return value.replace(/[^\d]/g, '');
+  }
 }
 
 export type ContainerQueueAction =
@@ -173,7 +195,7 @@ export function containerQueueReducer(items: ContainerQueueItem[], action: Conta
     case 'setField':
       return patch(action.id, (it) => ({
         ...it,
-        fields: { ...it.fields, [action.field]: action.field === 'container_no' ? normalizeContainerNo(action.value) : action.value.replace(/[^\d]/g, '') },
+        fields: { ...it.fields, [action.field]: normalizeField(action.field, action.value) },
       }));
     case 'saving':
       return patch(action.id, (it) => ({ ...it, saving: action.saving }));

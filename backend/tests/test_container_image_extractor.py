@@ -31,7 +31,7 @@ def test_container_no_warnings():
 def test_parse_text_joins_split_number_and_reads_kg_not_lb():
     text = "HPCU 533004 2\n45G1\nMAX GROSS 32 500 kg 71 650 lb\nTARE 3 700 kg 8 160 lb\nPAYLOAD 28 800 kg"
     assert cx.parse_container_text(text) == {
-        "container_no": "HPCU5330042", "tare_kg": 3700, "max_gross_kg": 32500, "check_digit_ok": True}
+        "container_no": "HPCU5330042", "tare_kg": 3700, "max_gross_kg": 32500, "check_digit_ok": True, "seal_no": "", "seal_brand": ""}
 
 
 def test_parse_text_with_nothing_readable():
@@ -59,7 +59,8 @@ def _detailed(monkeypatch, gemini=None, key="k", ocr_text=""):
 def test_gemini_success_has_no_warnings_for_a_valid_number(monkeypatch):
     res = _detailed(monkeypatch, gemini=cx._build_result("HPCU 533004 2", "3700", 32500.0))
     assert res["engine_used"] == "gemini" and res["gemini_error_kind"] is None and res["warnings"] == []
-    assert res["data"] == {"container_no": "HPCU5330042", "tare_kg": 3700, "max_gross_kg": 32500, "check_digit_ok": True}
+    assert res["data"] == {"container_no": "HPCU5330042", "tare_kg": 3700, "max_gross_kg": 32500, "check_digit_ok": True,
+                           "seal_no": "", "seal_brand": ""}
 
 
 def test_gemini_misread_digit_is_flagged(monkeypatch):
@@ -76,6 +77,27 @@ def test_gemini_failures_are_machine_readable_and_fall_back_to_ocr(monkeypatch, 
 def test_no_key_is_reported(monkeypatch):
     res = _detailed(monkeypatch, key="", ocr_text="")
     assert res["gemini_error_kind"] == "no_key" and res["engine_used"] == "none"
+
+
+@pytest.mark.parametrize("raw,expected", [("WHA4453729", "WHA4453729"), ("A4 26 0194118", "A4260194118"), ("NS 3693307", "NS3693307"),
+                                           ("emcdjs-8885", "EMCDJS8885"), (None, "")])
+def test_seal_numbers_are_normalized(raw, expected):
+    assert cx._build_result(None, None, None, raw)["seal_no"] == expected
+
+
+def test_seal_only_photo_is_a_valid_result_without_container_warnings(monkeypatch):
+    res = _detailed(monkeypatch, gemini=cx._build_result(None, None, None, "WHA 4453729", "wan  hai"))
+    assert res["engine_used"] == "gemini" and res["warnings"] == []
+    assert res["data"]["container_no"] == "" and res["data"]["seal_no"] == "WHA4453729" and res["data"]["seal_brand"] == "WAN HAI"
+
+
+def test_photo_without_container_or_seal_still_warns(monkeypatch):
+    res = _detailed(monkeypatch, gemini=cx._build_result(None, None, None))
+    assert "Không tìm thấy số container" in res["warnings"][0]
+
+
+def test_seal_brand_null_text_is_dropped():
+    assert cx._build_result("HPCU5330042", 3700, 32500, "X1", "null")["seal_brand"] == ""
 
 
 def _png() -> bytes:

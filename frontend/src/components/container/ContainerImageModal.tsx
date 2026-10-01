@@ -13,6 +13,7 @@ import { Modal } from '../common/Modal';
 import { AISettingsCard } from '../common/AISettingsCard';
 import { STATUS_STYLE, useEngineLabel } from '../booking/ImageQueueList';
 import { readClipboardImageFile } from '../booking/clipboard';
+import { copyTextToClipboard } from '../../utils/formatters';
 
 export interface ContainerLookupResult {
   /** Rows ePort returned (and that were added to the table) */
@@ -76,7 +77,7 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
   const previewUrl = useObjectUrl(selected?.file);
   const engine = selected && selected.engine ? engineLabel({ engine: selected.engine, model: selected.model }) : null;
   const noKey = !paused && items.some((i) => i.errorKind === 'no_key');
-  const readyAll = items.filter((i) => i.status === 'success' && !duplicates.has(i.id));
+  const readyAll = items.filter((i) => i.status === 'success' && !!i.fields.container_no && !duplicates.has(i.id));
   const isBusy = !!selected?.saving || savingAll;
 
   // Keep a valid selection: the first photo still to review
@@ -131,6 +132,11 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
     }
   };
 
+  const copySeal = async (seal: string) => {
+    const ok = await copyTextToClipboard(seal);
+    addToast(ok ? tf(L.sealCopied, { no: seal }) : t.common.error, ok ? 'success' : 'error');
+  };
+
   const handleApprove = async () => {
     if (!selected) return;
     const ok = await lookupItem(selected);
@@ -165,7 +171,7 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
           value={item.fields[key]}
           disabled={locked}
           onChange={(e) => queue.setField(item.id, key, e.target.value)}
-          inputMode={key === 'container_no' ? 'text' : 'numeric'}
+          inputMode={key === 'tare' || key === 'max_gross' ? 'numeric' : 'text'}
           className={`${inputCls} ${edited ? editedCls : plainCls} disabled:opacity-60`}
         />
         {extra}
@@ -274,7 +280,11 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
                           </span>
                         )}
                       </div>
-                      {item.fields.container_no && <div className="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate">{item.fields.container_no}</div>}
+                      {(item.fields.container_no || item.fields.seal_no) && (
+                        <div className="text-[11px] font-mono text-slate-600 dark:text-slate-300 truncate">
+                          {item.fields.container_no || `${L.sealNo}: ${item.fields.seal_no}`}
+                        </div>
+                      )}
                       {first && item.status !== 'used' && (
                         <div className={`text-[10px] truncate ${item.status === 'failed' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-400'}`} title={first}>{first}</div>
                       )}
@@ -396,15 +406,6 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
         <div className="w-full md:flex-1 min-w-0 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-800/50 shrink-0">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{L.site}:</span>
-              <select
-                value={siteId}
-                onChange={(e) => onSiteChange(e.target.value)}
-                aria-label={L.site}
-                className="text-[11px] font-bold px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
-              >
-                {SITES.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
               {selected && <Chip status={selected.status} />}
               {engine && (
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${engine.cls}`} title={`${q.readBy}: ${engine.label}`}>{engine.label}</span>
@@ -465,13 +466,38 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
 
                 <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                   <span className="italic">{L.editHint}</span>
-                  <span className="shrink-0 font-semibold">{tf(L.toCollection, { name: collectionName || '—', site: siteId })}</span>
+                  <span className="shrink-0 font-semibold">{tf(L.toCollection, { name: collectionName || '—' })}</span>
                 </div>
 
+                {!selected.fields.container_no && selected.fields.seal_no && (
+                  <div role="status" className="flex items-start gap-1.5 p-2 rounded-lg border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 text-sky-800 dark:text-sky-300 text-[11px]">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />{L.sealOnly}
+                  </div>
+                )}
+                <div>
+                  <label htmlFor="container-ocr-site" className="block text-[11px] font-bold text-slate-600 dark:text-slate-300 mb-1">{L.site}</label>
+                  <select
+                    id="container-ocr-site"
+                    value={siteId}
+                    disabled={selected.status === 'used'}
+                    onChange={(e) => onSiteChange(e.target.value)}
+                    className="w-full text-sm font-semibold rounded-lg px-3 py-1.5 border focus:ring-2 focus:ring-purple-500 focus:outline-none text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 disabled:opacity-60"
+                  >
+                    {SITES.map((s) => <option key={s} value={s}>{(t.vessel as unknown as Record<string, string>)[`site${s}`] || s}</option>)}
+                  </select>
+                </div>
                 {field(selected, 'container_no', `${L.containerNo} *`, issueNote(selected))}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {field(selected, 'tare', L.tare)}
                   {field(selected, 'max_gross', L.maxGross)}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2.5 border-t border-slate-200 dark:border-slate-800">
+                  {field(selected, 'seal_no', L.sealNo, selected.fields.seal_no && (
+                    <button type="button" onClick={() => void copySeal(selected.fields.seal_no)} className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-purple-600 dark:text-purple-400 hover:underline">
+                      <Copy className="w-3 h-3" />{L.copySeal}
+                    </button>
+                  ))}
+                  {field(selected, 'seal_brand', L.sealBrand)}
                 </div>
 
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
@@ -481,7 +507,7 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
                   </button>
                   {showOriginal && (
                     <div className="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800 text-[11px]">
-                      {([['container_no', L.containerNo], ['tare', L.tare], ['max_gross', L.maxGross]] as const).filter(([k]) => selected.original[k]).map(([k, label]) => (
+                      {([['container_no', L.containerNo], ['tare', L.tare], ['max_gross', L.maxGross], ['seal_no', L.sealNo], ['seal_brand', L.sealBrand]] as const).filter(([k]) => selected.original[k]).map(([k, label]) => (
                         <div key={k} className={`flex gap-2 px-2.5 py-1 ${selected.fields[k] !== selected.original[k] ? 'bg-amber-50 dark:bg-amber-950/30' : ''}`}>
                           <span className="w-32 shrink-0 text-slate-500 dark:text-slate-400">{label}</span>
                           <span className="font-semibold text-slate-800 dark:text-slate-100 break-words min-w-0">{selected.original[k]}</span>

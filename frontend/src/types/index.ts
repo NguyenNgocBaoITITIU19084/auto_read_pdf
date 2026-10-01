@@ -287,6 +287,9 @@ export interface ContainerImageData {
   max_gross_kg: number | null;
   /** ISO 6346 check digit matches; null when the number is not in the 4 letters + 7 digits shape */
   check_digit_ok: boolean | null;
+  /** Number printed on a seal in the photo (empty when none) */
+  seal_no: string;
+  seal_brand: string;
 }
 
 export interface ContainerImageResult {

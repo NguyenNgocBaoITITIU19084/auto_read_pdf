@@ -5,6 +5,7 @@ import { translations } from '../../i18n/translations';
 import type { ContainerImageResult } from '../../types';
 
 const addToast = vi.fn();
+vi.mock('../../utils/formatters', async (orig) => ({ ...(await orig<typeof import('../../utils/formatters')>()), copyTextToClipboard: vi.fn().mockResolvedValue(true) }));
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi }) }));
 vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
 vi.mock('../common/AISettingsCard', () => ({ AISettingsCard: () => <div>ai-settings</div> }));
@@ -19,7 +20,7 @@ const L = translations.vi.container.imageOcr;
 const B = translations.vi.booking;
 const png = (name: string) => new File([name], name, { type: 'image/png', lastModified: 1 });
 const read = (no: string, over: Partial<ContainerImageResult> = {}): ContainerImageResult => ({
-  data: { container_no: no, tare_kg: 3700, max_gross_kg: 32500, check_digit_ok: true },
+  data: { container_no: no, tare_kg: 3700, max_gross_kg: 32500, check_digit_ok: true, seal_no: '', seal_brand: '' },
   engine_used: 'gemini', warnings: [], model_used: 'gemini-2.5-flash', gemini_error_kind: null, ...over,
 });
 
@@ -57,7 +58,7 @@ describe('ContainerImageModal', () => {
     expect(screen.getByDisplayValue('3700')).toBeInTheDocument();
     expect(screen.getByDisplayValue('32500')).toBeInTheDocument();
     expect(screen.getByText(L.checkOk)).toBeInTheDocument();
-    expect(screen.getByText('Lưu vào: Bộ A · Cảng: CTL')).toBeInTheDocument();
+    expect(screen.getByText('Lưu vào: Bộ A')).toBeInTheDocument();
   });
 
   it('warns when the check digit does not match and marks the photo for review', async () => {
@@ -110,9 +111,11 @@ describe('ContainerImageModal', () => {
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('Tra cứu thất bại: boom', 'error'));
   });
 
-  it('lets the user pick the terminal used for the lookup', () => {
-    const { onSiteChange } = setup();
-    fireEvent.change(screen.getByLabelText(L.site), { target: { value: 'GNL' } });
+  it('lets the user pick the terminal used for the lookup', async () => {
+    extract.mockResolvedValue(read('HPCU5330042'));
+    const { pick, onSiteChange } = setup();
+    pick(png('a.png'));
+    fireEvent.change(await screen.findByLabelText(L.site), { target: { value: 'GNL' } });
     expect(onSiteChange).toHaveBeenCalledWith('GNL');
   });
 
@@ -128,6 +131,19 @@ describe('ContainerImageModal', () => {
     fireEvent.click(button);
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('Đã thêm 1 cont vào bảng, 1 cont không có trên ePort', 'info'));
     expect(onLookup.mock.calls.map((c) => c[0])).toEqual(['HPCU5330042', 'CSQU3054383']);
+  });
+
+  it('a seal-only photo shows the seal number, can be copied, and cannot be looked up', async () => {
+    extract.mockResolvedValue(read('', { data: { container_no: '', tare_kg: null, max_gross_kg: null, check_digit_ok: null, seal_no: 'WHA4453729', seal_brand: 'WAN HAI' } }));
+    const { pick, onLookup } = setup();
+    pick(png('seal.png'));
+    expect(await screen.findByDisplayValue('WHA4453729')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('WAN HAI')).toBeInTheDocument();
+    expect(screen.getByText(L.sealOnly)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: L.lookupAndAdd })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: L.copySeal }));
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith('Đã copy số seal WHA4453729', 'success'));
+    expect(onLookup).not.toHaveBeenCalled();
   });
 
   it('tells the user to resume when Gemini quota is used up', async () => {

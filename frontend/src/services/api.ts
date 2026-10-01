@@ -158,7 +158,7 @@ export const extractContainerImageApi = async (file: File, apiKey?: string, sign
     signal,
   });
   return {
-    data: res.data?.data || { container_no: '', tare_kg: null, max_gross_kg: null, check_digit_ok: null },
+    data: res.data?.data || { container_no: '', tare_kg: null, max_gross_kg: null, check_digit_ok: null, seal_no: '', seal_brand: '' },
     engine_used: res.data?.engine_used || 'none',
     warnings: Array.isArray(res.data?.warnings) ? res.data.warnings : [],
     model_used: res.data?.model_used ?? null,

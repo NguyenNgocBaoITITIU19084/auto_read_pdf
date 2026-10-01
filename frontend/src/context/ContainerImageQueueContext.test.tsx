@@ -15,7 +15,7 @@ import { ContainerImageQueueProvider, MAX_CONTAINER_QUEUE_ITEMS, useContainerIma
 const wrapper = ({ children }: { children: React.ReactNode }) => <ContainerImageQueueProvider>{children}</ContainerImageQueueProvider>;
 const img = (name: string) => new File([name], name, { type: 'image/jpeg', lastModified: 1 });
 const ok = (no = 'HPCU5330042'): ContainerImageResult => ({
-  data: { container_no: no, tare_kg: 3700, max_gross_kg: 32500, check_digit_ok: true }, engine_used: 'gemini', warnings: [], model_used: 'm', gemini_error_kind: null,
+  data: { container_no: no, tare_kg: 3700, max_gross_kg: 32500, check_digit_ok: true, seal_no: '', seal_brand: '' }, engine_used: 'gemini', warnings: [], model_used: 'm', gemini_error_kind: null,
 });
 const deferred = <T,>() => {
   let resolve!: (v: T) => void;

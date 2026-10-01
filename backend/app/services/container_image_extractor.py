@@ -19,13 +19,16 @@ from backend.app.services.image_extractor import (
     classify_gemini_http_error, gemini_error_warning, get_image_mime_type, list_gemini_models, run_local_ocr,
 )
 
-PROMPT = """You read photos of shipping container doors / data plates.
+PROMPT = """You read photos of shipping containers: container doors / data plates and container seals (bolt seals, cable seals, plastic seals with a printed number and barcode).
 Extract these fields and answer with pure JSON only (no markdown):
 {
   "container_no": "owner code + serial + check digit, e.g. HPCU5330042. The number is often printed in pieces ('HPCU 533004 2'): join them, no spaces. Letters O/I are never digits in the 6-digit serial: read them as 0/1.",
   "tare_kg": "TARE weight in KG as an integer (the kg value, not the lb value), e.g. 3700",
-  "max_gross_kg": "MAX GROSS weight in KG as an integer (the kg value, not the lb value), e.g. 32500"
+  "max_gross_kg": "MAX GROSS weight in KG as an integer (the kg value, not the lb value), e.g. 32500",
+  "seal_no": "the number printed on a seal, exactly as printed but without spaces, e.g. WHA4453729, TSF0763639, EMCDJS8885, NS3693307, A4260194118. The text may be rotated or vertical, read it along the barcode label.",
+  "seal_brand": "the carrier / maker name printed on the seal if any, e.g. WAN HAI, EVERGREEN"
 }
+A photo may show a container door, a seal, or both. A seal number is NOT a container number: container_no must be 4 letters (the 4th is U, J or Z) + 7 digits; anything else printed on a seal label belongs in seal_no, and container_no stays null when no container number is visible.
 Use null for anything you cannot read. Do not guess or calculate values that are not printed."""
 
 W_NO_CONTAINER = "Không tìm thấy số container trong ảnh. Vui lòng kiểm tra lại ảnh hoặc nhập tay."
@@ -84,14 +87,28 @@ def _weight(value: Any) -> Optional[int]:
     return n if 100 <= n <= 100000 else None
 
 
-def _build_result(container_no: Any, tare: Any, max_gross: Any) -> Dict[str, Any]:
+def normalize_seal_no(raw: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(raw or "").upper())[:30]
+
+
+def _build_result(container_no: Any, tare: Any, max_gross: Any, seal_no: Any = None, seal_brand: Any = None) -> Dict[str, Any]:
     no = normalize_container_no(container_no)
+    brand = re.sub(r"\s+", " ", str(seal_brand or "")).strip().upper()
     return {
         "container_no": no,
         "tare_kg": _weight(tare),
         "max_gross_kg": _weight(max_gross),
         "check_digit_ok": None if not _CONTAINER_RE.match(no) else not container_no_warnings(no),
+        "seal_no": normalize_seal_no(seal_no),
+        "seal_brand": "" if brand.lower() in ("null", "none") else brand[:30],
     }
+
+
+def result_warnings(data: Dict[str, Any]) -> List[str]:
+    """A seal-only photo has no container number on purpose: no warning for it."""
+    if not data.get("container_no") and data.get("seal_no"):
+        return []
+    return container_no_warnings(data.get("container_no", ""))
 
 
 def parse_container_text(text: str) -> Dict[str, Any]:
@@ -141,7 +158,8 @@ def extract_container_from_image_ai(image_bytes: bytes, api_key: str, model: str
             raise ValueError("Gemini response is not a JSON object")
     except Exception as e:
         raise GeminiError("bad_response", f"Failed to parse Gemini Vision response: {e}")
-    return _build_result(parsed.get("container_no"), parsed.get("tare_kg"), parsed.get("max_gross_kg"))
+    return _build_result(parsed.get("container_no"), parsed.get("tare_kg"), parsed.get("max_gross_kg"),
+                         parsed.get("seal_no"), parsed.get("seal_brand"))
 
 
 def extract_container_from_image_detailed(image_bytes: bytes, api_key: Optional[str] = None,
@@ -169,7 +187,7 @@ def extract_container_from_image_detailed(image_bytes: bytes, api_key: Optional[
                 data = extract_container_from_image_ai(image_bytes, api_key, m, timeout=remaining)
                 if i > 0:
                     warnings.append(W_MODEL_REPLACED.format(model=chosen, fallback=m))
-                warnings.extend(container_no_warnings(data["container_no"]))
+                warnings.extend(result_warnings(data))
                 return {"data": data, "engine_used": "gemini", "warnings": warnings, "model_used": m, "gemini_error_kind": None}
             except GeminiError as err:
                 if err.kind == "model_not_found":
@@ -200,5 +218,5 @@ def extract_container_from_image_detailed(image_bytes: bytes, api_key: Optional[
     if not text.strip():
         warnings.append(W_OCR_NO_TEXT)
         return {"data": data, "engine_used": "none", "warnings": warnings, "model_used": None, "gemini_error_kind": gemini_error_kind}
-    warnings.extend(container_no_warnings(data["container_no"]))
+    warnings.extend(result_warnings(data))
     return {"data": data, "engine_used": "ocr", "warnings": warnings, "model_used": None, "gemini_error_kind": gemini_error_kind}
