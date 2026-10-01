@@ -35,6 +35,8 @@ export interface ContainerQueueItem {
   attempts: number;
   /** Incremented by every (re)start so a stale result of an older run is dropped */
   run: number;
+  /** Another photo of this container number was already added to the table (and left the queue) */
+  inTable?: boolean;
 }
 
 const LETTER_VALUES: Record<string, number> = (() => {
@@ -109,14 +111,14 @@ export function dedupeContainerFiles(incoming: File[], existing: ContainerQueueI
   return { fresh, skipped: incoming.length - fresh.length };
 }
 
-/** The same container read from two photos: ids of the later items. */
+/** The same container read from two photos (or one already added to the table): ids of the later items. */
 export function duplicateContainerIds(items: ContainerQueueItem[]): Set<number> {
   const seen = new Set<string>();
   const dup = new Set<number>();
   for (const it of items) {
     const no = it.fields.container_no;
     if (!no || it.status === 'queued' || it.status === 'reading') continue;
-    if (seen.has(no)) dup.add(it.id);
+    if (seen.has(no) || it.inTable) dup.add(it.id);
     else seen.add(no);
   }
   return dup;
@@ -200,8 +202,12 @@ export function containerQueueReducer(items: ContainerQueueItem[], action: Conta
     case 'saving':
       return patch(action.id, (it) => ({ ...it, saving: action.saving }));
     case 'used': {
+      // Added to the table: the photo leaves the queue; other photos of the same container are marked
       const ids = new Set(action.ids);
-      return items.map((it) => (ids.has(it.id) ? { ...it, status: 'used', saving: false } : it));
+      const added = new Set(items.filter((it) => ids.has(it.id) && it.fields.container_no).map((it) => it.fields.container_no));
+      return items
+        .filter((it) => !ids.has(it.id))
+        .map((it) => (added.has(it.fields.container_no) ? { ...it, inTable: true } : it));
     }
     default:
       return items;

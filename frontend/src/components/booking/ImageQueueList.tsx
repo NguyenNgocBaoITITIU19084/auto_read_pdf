@@ -250,11 +250,6 @@ export const ImageQueueList: React.FC<ListProps> = ({ queue, selectedId, onSelec
             <Plus className="w-3.5 h-3.5" />
             {q.addMore}
           </button>
-          {stats.saved > 0 && (
-            <button type="button" onClick={queue.clearSaved} className={`${btn} border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800`} title={q.clearSaved}>
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          )}
         </div>
       </div>
     </div>

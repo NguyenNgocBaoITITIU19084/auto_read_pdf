@@ -107,8 +107,10 @@ describe('ImageBookingModal (reading queue)', () => {
     fireEvent.click(saveBtn());
     await waitFor(() => expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1X', 'Tên file PDF': 'a.png' })));
     expect(onClose).not.toHaveBeenCalled();                                            // the failed image is still waiting
-    await waitFor(() => expect(screen.getAllByText(q.status.saved).length).toBeGreaterThan(0));
-    expect(screen.getByRole('button', { name: new RegExp(q.saveAll.replace(' ({count})', '')) })).toBeDisabled();
+    // The saved image leaves the queue; only the failed one is left
+    await waitFor(() => expect(screen.queryByText('a.png')).toBeNull());
+    expect(screen.queryByRole('listbox')).toBeNull();                                  // one file left: no list
+    expect(screen.getAllByText(q.status.failed).length).toBeGreaterThan(0);           // ...and it is shown
   });
 
   it('a single image behaves like before: no list, save closes the window', async () => {

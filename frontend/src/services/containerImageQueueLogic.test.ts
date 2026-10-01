@@ -92,6 +92,14 @@ describe('queue reducer', () => {
     expect(containerQueueStats(items)).toMatchObject({ total: 2, queued: 1, success: 1, done: 1 });
   });
 
+  it('a photo added to the table leaves the queue; another photo of that container stays flagged', () => {
+    const [a, b, c] = ['a', 'b', 'c'].map((n) => makeContainerQueueItem(file(`${n}.jpg`)));
+    const withNo = (it: typeof a, no: string) => ({ ...it, status: 'success' as const, fields: { ...it.fields, container_no: no } });
+    const items = containerQueueReducer([withNo(a, 'HPCU5330042'), withNo(b, 'HPCU5330042'), withNo(c, 'TGHU1234567')], { type: 'used', ids: [a.id] });
+    expect(items.map((i) => i.name)).toEqual(['b.jpg', 'c.jpg']);
+    expect([...duplicateContainerIds(items)]).toEqual([b.id]); // still not added a second time by "look up all"
+  });
+
   it('flags the same container number read from two photos', () => {
     const a = { ...makeContainerQueueItem(file('a.jpg')), status: 'success' as const, fields: { container_no: 'HPCU5330042', tare: '', max_gross: '', seal_no: '', seal_brand: '' } };
     const b = { ...makeContainerQueueItem(file('b.jpg')), status: 'review' as const, fields: { container_no: 'HPCU5330042', tare: '', max_gross: '', seal_no: '', seal_brand: '' } };

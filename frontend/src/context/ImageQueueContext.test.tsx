@@ -179,7 +179,7 @@ describe('ImageQueueProvider', () => {
     rerender();
     await act(async () => { await result.current.save(result.current.items[0].id); });
     expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1' }));
-    expect(statuses(result)).toEqual(['saved']);
+    expect(statuses(result)).toEqual([]); // saved -> out of the queue
     expect(result.current.lastSaved?.collectionId).toBe(1);
     expect(result.current.savedVersion).toBe(1);
   });
@@ -198,7 +198,8 @@ describe('ImageQueueProvider', () => {
 
     await act(async () => { await result.current.saveAllSuccessful(); });
     expect(saveManual).toHaveBeenCalledTimes(1);
-    expect(statuses(result)).toEqual(['saved', 'success', 'review', 'success']);
+    expect(statuses(result)).toEqual(['success', 'review', 'success']); // the saved one left the queue
+    expect(result.current.items[0].dbDuplicate).toBe(true);              // its repeat now counts as already in the list
     expect(addToast).toHaveBeenCalledWith(translations.vi.booking.imageQueue.savedAllSkipped.replace('{saved}', '1').replace('{skipped}', '2'), 'success');
   });
 

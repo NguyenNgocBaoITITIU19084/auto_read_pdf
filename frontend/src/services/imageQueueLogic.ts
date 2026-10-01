@@ -163,6 +163,7 @@ export type QueueAction =
   | { type: 'setField'; id: string; key: string; value: string }
   | { type: 'setDbDuplicate'; id: string; value: boolean }
   | { type: 'saving'; id: string; value: boolean }
+  /** saved to the collection: leaves the queue (nothing left to do with it) */
   | { type: 'saved'; id: string; bookingId: number };
 
 const patch = (items: QueueItem[], id: string, fn: (it: QueueItem) => QueueItem): QueueItem[] =>
@@ -220,8 +221,15 @@ export function queueReducer(items: QueueItem[], action: QueueAction): QueueItem
       return patch(items, action.id, (it) => ({ ...it, dbDuplicate: action.value }));
     case 'saving':
       return patch(items, action.id, (it) => ({ ...it, saving: action.value }));
-    case 'saved':
-      return patch(items, action.id, (it) => ({ ...it, status: 'saved', saving: false, savedId: action.bookingId }));
+    case 'saved': {
+      const saved = items.find((it) => it.id === action.id);
+      if (!saved) return items;
+      // Other copies of this Booking No can no longer be told apart within the batch: they are now in the list
+      const key = bookingKey(saved.fields);
+      return items
+        .filter((it) => it.id !== action.id)
+        .map((it) => (key && it.collectionId === saved.collectionId && bookingKey(it.fields) === key ? { ...it, dbDuplicate: true } : it));
+    }
     default:
       return items;
   }

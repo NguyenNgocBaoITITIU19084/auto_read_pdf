@@ -319,11 +319,6 @@ export const ContainerImageModal: React.FC<Props> = ({ isOpen, onClose, siteId, 
                 <button type="button" onClick={() => fileInputRef.current?.click()} className={`${listBtn} flex-1 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800`}>
                   <Plus className="w-3.5 h-3.5" />{L.addMore}
                 </button>
-                {stats.used > 0 && (
-                  <button type="button" onClick={queue.clearUsed} className={`${listBtn} border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800`} title={L.clearUsed} aria-label={L.clearUsed}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
               </div>
             </div>
           </div>

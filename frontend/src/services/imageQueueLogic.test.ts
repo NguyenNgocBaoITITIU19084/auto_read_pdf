@@ -87,6 +87,16 @@ describe('queueReducer', () => {
     expect(items[0]).toMatchObject({ status: 'queued', attempts: 0 });
   });
 
+  it('a saved item leaves the queue and marks its repeats in the same collection as already in the list', () => {
+    const a = item('a.png', { status: 'success', fields: { 'Booking No': 'SGN1' } });
+    const b = item('b.png', { status: 'success', fields: { 'Booking No': 'sgn 1' } });
+    const other = item('c.png', { status: 'success', fields: { 'Booking No': 'SGN1' }, collectionId: 2 });
+    const next = queueReducer([a, b, other], { type: 'saved', id: a.id, bookingId: 9 });
+    expect(next.map((i) => i.name)).toEqual(['b.png', 'c.png']);
+    expect(next[0].dbDuplicate).toBe(true);
+    expect(next[1].dbDuplicate).toBeUndefined();
+  });
+
   it('retryFailed only touches failed items; clearSaved only removes saved ones', () => {
     const ok = item('ok.png', { status: 'success' });
     const bad = item('bad.png', { status: 'failed', error: 'x' });
