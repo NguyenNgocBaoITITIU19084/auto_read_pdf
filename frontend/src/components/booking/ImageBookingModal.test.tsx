@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { translations } from '../../i18n/translations';
 import type { ImageExtractResult } from '../../types';
+import { tf } from '../../services/i18nFormat';
 
 const addToast = vi.fn();
 const collection = { id: 1, name: 'Test' };
@@ -16,8 +17,10 @@ vi.mock('./useCarrierBadge', () => ({ useCarrierBadge: () => ({ style: {}, class
 
 const extract = vi.fn();
 const saveManual = vi.fn();
+const pdfPreview = vi.fn();
 vi.mock('../../services/api', () => ({
   extractBookingImageDetailedApi: (...a: unknown[]) => extract(...a),
+  pdfPreviewApi: (...a: unknown[]) => pdfPreview(...a),
   checkBookingDuplicatesApi: vi.fn().mockResolvedValue([]),
   saveManualBookingApi: (...a: unknown[]) => saveManual(...a),
 }));
@@ -35,6 +38,7 @@ const good = (no: string): ImageExtractResult => ({
 beforeEach(() => {
   addToast.mockReset();
   extract.mockReset();
+  pdfPreview.mockReset().mockResolvedValue({ pages: ['data:image/jpeg;base64,AAA', 'data:image/jpeg;base64,BBB'], page_count: 2, truncated: false });
   saveManual.mockReset().mockImplementation(async (_c: number, b: any) => ({ item: { id: 7, ...b }, warnings: [] }));
   URL.createObjectURL = vi.fn(() => 'blob:x');
   URL.revokeObjectURL = vi.fn();
@@ -42,15 +46,14 @@ beforeEach(() => {
 
 const setup = (props: Partial<React.ComponentProps<typeof ImageBookingModal>> = {}) => {
   const onClose = vi.fn();
-  const onPdfFiles = vi.fn();
   const utils = render(
-    <ImageQueueProvider><ImageBookingModal isOpen onClose={onClose} onPdfFiles={onPdfFiles} {...props} /></ImageQueueProvider>
+    <ImageQueueProvider><ImageBookingModal isOpen onClose={onClose} {...props} /></ImageQueueProvider>
   );
   const pick = (files: File[]) => {
     const input = utils.container.querySelector('input[type=file]') as HTMLInputElement;
     fireEvent.change(input, { target: { files } });
   };
-  return { ...utils, onClose, onPdfFiles, pick };
+  return { ...utils, onClose, pick };
 };
 
 describe('ImageBookingModal (reading queue)', () => {
@@ -118,13 +121,37 @@ describe('ImageBookingModal (reading queue)', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it('hands PDFs back to the parent and keeps only images in the queue', async () => {
-    extract.mockResolvedValue(good('SGN1'));
-    const { pick, onPdfFiles } = setup();
-    const pdf = new File([new Uint8Array(3)], 'b.pdf', { type: 'application/pdf' });
+  it('queues PDFs with images, shows the PDF pages next to the extracted fields and saves after review', async () => {
+    const fromPdf: ImageExtractResult = {
+      data: { 'Booking No': '2338872150', Carrier: 'OOCL', Vessel: 'YM CELEBRITY 107A', ETD: '02/10/2026' },
+      engine_used: 'pdf', warnings: [],
+    };
+    extract.mockImplementation(async (f: File) => (f.name.endsWith('.pdf') ? fromPdf : good('SGN1')));
+    const { pick } = setup();
+    const pdf = new File([new Uint8Array(3)], 'OOCL 1.pdf', { type: 'application/pdf', lastModified: 1 });
     pick([png('a.png'), pdf]);
-    await waitFor(() => expect(onPdfFiles).toHaveBeenCalledWith([pdf]));
-    expect(extract).toHaveBeenCalledTimes(1);
+    const list = await screen.findByRole('listbox');
+    await waitFor(() => expect(within(list).getAllByText(q.status.success)).toHaveLength(2));
+    expect(extract).toHaveBeenCalledTimes(2);
+    expect(saveManual).not.toHaveBeenCalled(); // nothing is saved before the user checks it
+
+    fireEvent.click(within(list).getByText('OOCL 1.pdf'));
+    await waitFor(() => expect(screen.getByDisplayValue('2338872150')).toBeInTheDocument());
+    expect(await screen.findByAltText(tf(q.pdfPage, { n: 2 }))).toBeInTheDocument();
+    expect(pdfPreview).toHaveBeenCalledWith(pdf);
+    expect(screen.queryByTitle(translations.vi.booking.imageModal.rotate)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: translations.vi.booking.imageModal.saveToCollection }));
+    await waitFor(() => expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': '2338872150', 'Tên file PDF': 'OOCL 1.pdf' })));
+  });
+
+  it('says so when a PDF cannot be displayed, but still shows what was read', async () => {
+    extract.mockResolvedValue({ data: { 'Booking No': 'X1', Vessel: 'V', ETD: '01/10/2026' }, engine_used: 'pdf', warnings: [] });
+    pdfPreview.mockRejectedValue({ response: { data: { detail: 'broken' } } });
+    const { pick } = setup();
+    pick([new File([new Uint8Array(3)], 'x.pdf', { type: 'application/pdf' })]);
+    expect(await screen.findByText(tf(q.pdfPreviewError, { error: 'broken' }))).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByDisplayValue('X1')).toBeInTheDocument());
   });
 
   it('warns once, for the whole batch, when Gemini has no key', async () => {

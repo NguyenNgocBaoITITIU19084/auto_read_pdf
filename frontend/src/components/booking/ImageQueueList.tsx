@@ -1,12 +1,12 @@
 import React from 'react';
 import {
-  AlertTriangle, Check, CheckCircle2, Clock, Copy, Loader2, Pause, Play, Plus, RotateCw, Trash2, XCircle,
+  AlertTriangle, Check, CheckCircle2, Clock, Copy, FileText, Loader2, Pause, Play, Plus, RotateCw, Trash2, XCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ImageQueueValue } from '../../context/ImageQueueContext';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { tf } from '../../services/i18nFormat';
-import { QueueItem, QueueStatus, hasValue } from '../../services/imageQueueLogic';
+import { QueueItem, QueueStatus, hasValue, isPdfItem } from '../../services/imageQueueLogic';
 
 export const STATUS_STYLE: Record<QueueStatus, { chip: string; icon: React.ReactNode }> = {
   queued: {
@@ -56,6 +56,9 @@ export function useEngineLabel() {
         cls: 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
       };
     }
+    if (item.engine === 'pdf') {
+      return { label: t.booking.paste.enginePdf, cls: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    }
     if (item.engine === 'ocr') {
       return { label: t.booking.paste.engineOcr, cls: 'bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800' };
     }
@@ -66,7 +69,14 @@ export function useEngineLabel() {
   };
 }
 
-const Thumb: React.FC<{ file: File }> = ({ file }) => {
+const PdfThumb: React.FC = () => (
+  <div className="w-10 h-10 rounded-md shrink-0 flex flex-col items-center justify-center border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
+    <FileText className="w-4 h-4" />
+    <span className="text-[8px] font-black leading-none mt-0.5">PDF</span>
+  </div>
+);
+
+const ImageThumb: React.FC<{ file: File }> = ({ file }) => {
   const url = useObjectUrl(file);
   return url ? (
     <img src={url} alt="" className="w-10 h-10 rounded-md object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-slate-100 dark:bg-slate-800" />
@@ -110,7 +120,7 @@ const QueueRow: React.FC<RowProps> = React.memo(({ item, selected, duplicate, on
           : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-primary-300 dark:hover:border-primary-700'
       }`}
     >
-      <Thumb file={item.file} />
+      {isPdfItem(item) ? <PdfThumb /> : <ImageThumb file={item.file} />}
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center justify-between gap-1.5">
           <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-100 truncate" title={item.name}>{item.name}</span>

@@ -10,7 +10,7 @@ import { useImageQueue } from '../../context/ImageQueueContext';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
-  uploadPDFs, deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi
+  deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi
 } from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
@@ -251,7 +251,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const { t, activeCollection } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
-  const [uploading, setUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
 
@@ -441,28 +440,12 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = pagePartiallySelected;
   }, [pagePartiallySelected]);
 
-  const uploadFiles = useStableCallback(async (fileArray: File[]) => {
-    if (!activeCollection) {
-      addToast(t.booking.paste.noCollection, 'error');
-      return;
-    }
-    if (fileArray.length === 0) return;
-    try {
-      setUploading(true);
-      const res = await uploadPDFs(activeCollection.id, fileArray);
-      addToast(t.booking.uploadSuccess.replace('{count}', res.count.toString()), 'success');
-      if (mountedRef.current) await loadData('refresh');
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      addToast((typeof detail === 'string' && detail) || e.message || t.common.error, 'error');
-    } finally {
-      if (mountedRef.current) setUploading(false);
-    }
-  });
-
-  /** Adds images to the app-wide reading queue and opens the review window on the first new one. */
-  const queueImages = useStableCallback((images: File[], source: 'upload' | 'paste' | 'drop') => {
-    const res = imageQueue.enqueue(images, source);
+  /**
+   * Adds booking PDFs / images to the app-wide reading queue and opens the review window on the first new one:
+   * nothing is saved until the user has checked the extracted fields against the document.
+   */
+  const queueFiles = useStableCallback((files: File[], source: 'upload' | 'paste' | 'drop') => {
+    const res = imageQueue.enqueue(files, source);
     if (res.ids.length === 0) return;
     if (res.added > 1) addToast(tf(t.booking.imageQueue.added, { count: res.added }), 'info');
     setFocusImageId(res.ids[0]);
@@ -479,11 +462,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       return;
     }
 
-    // Images go to the reading queue (reviewed before saving); PDFs are read and saved straight away
-    const images = fileArray.filter((f) => !isPdfFile(f));
-    const pdfs = fileArray.filter(isPdfFile);
-    if (images.length > 0) queueImages(images, 'drop');
-    if (pdfs.length > 0) await uploadFiles(pdfs);
+    // PDFs and images both go to the reading queue and are reviewed before saving
+    queueFiles(fileArray, 'drop');
   };
 
   // Files pasted anywhere in the app (App-level paste handler)
@@ -492,15 +472,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (!pasteRequest || handledPasteIdRef.current === pasteRequest.id) return;
     handledPasteIdRef.current = pasteRequest.id;
     const { images, pdfs, id } = pasteRequest;
-    if (pdfs.length > 0) {
-      if (activeCollection) {
-        addToast(tf(t.booking.paste.pdfUploading, { count: pdfs.length }), 'info');
-      }
-      void uploadFiles(pdfs);
-    }
-    if (images.length > 0) queueImages(images, 'paste');
+    const files = [...pdfs, ...images];
+    if (files.length > 0) queueFiles(files, 'paste');
     onPasteRequestHandled?.(id);
-  }, [pasteRequest, activeCollection, addToast, t, uploadFiles, queueImages, onPasteRequestHandled]);
+  }, [pasteRequest, queueFiles, onPasteRequestHandled]);
 
   // Bookings saved from the reading queue (any tab, phone photos included): refresh this table
   const seenSavedVersion = useRef(imageQueue.savedVersion);
@@ -814,11 +789,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           }}
         />
         <div className="p-2 bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400 rounded-lg shrink-0">
-          <UploadCloud className={`w-5 h-5 ${uploading ? 'animate-pulse' : ''}`} />
+          <UploadCloud className="w-5 h-5" />
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className="font-bold text-slate-800 dark:text-slate-100">
-            {uploading ? t.booking.uploading : t.booking.dropzoneTitle}
+            {t.booking.dropzoneTitle}
           </span>
           <span className="text-slate-400 hidden sm:inline">•</span>
           <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
@@ -1149,7 +1124,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         isOpen={isImageModalOpen}
         onClose={() => setIsImageModalOpen(false)}
         focusItemId={focusImageId}
-        onPdfFiles={(files) => void uploadFiles(files)}
       />
 
       <PhoneCaptureModal

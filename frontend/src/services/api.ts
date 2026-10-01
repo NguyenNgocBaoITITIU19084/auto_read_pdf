@@ -101,21 +101,6 @@ export const getBookingIds = async (collectionId: number, q: TableQuery): Promis
 export const getBookingsByIds = async (ids: number[]): Promise<Booking[]> =>
   (await apiClient.post<Booking[]>('/bookings/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
-export const uploadPDFs = async (collectionId: number, files: File[]): Promise<{ count: number; items: Booking[] }> => {
-  const formData = new FormData();
-  formData.append('collection_id', collectionId.toString());
-  files.forEach((file) => {
-    formData.append('files', file);
-  });
-  const res = await apiClient.post('/bookings/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: LONG_TIMEOUT,
-  });
-  return res.data;
-};
-
-export const uploadFiles = uploadPDFs;
-
 /**
  * Extract booking fields from an image. Returns the full result
  * `{data, engine_used, warnings}` so callers can surface engine failures.
@@ -164,6 +149,26 @@ export const extractContainerImageApi = async (file: File, apiKey?: string, sign
     model_used: res.data?.model_used ?? null,
     gemini_error_kind: res.data?.gemini_error_kind ?? null,
   };
+};
+
+export interface PdfPreview {
+  /** JPEG data URLs, one per rendered page */
+  pages: string[];
+  page_count: number;
+  /** The PDF has more pages than were rendered */
+  truncated: boolean;
+}
+
+/** Page images of a PDF for the review window (nothing is saved). */
+export const pdfPreviewApi = async (file: File, signal?: AbortSignal): Promise<PdfPreview> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await apiClient.post<PdfPreview>('/bookings/pdf-preview', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: LONG_TIMEOUT,
+    signal,
+  });
+  return res.data;
 };
 
 /** Backward-compatible: returns only `.data`. Prefer `extractBookingImageDetailedApi`. */

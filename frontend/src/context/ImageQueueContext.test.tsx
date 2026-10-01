@@ -36,6 +36,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+const q = translations.vi.booking.imageQueue;
 const statuses = (r: { current: ReturnType<typeof useImageQueue> }) => r.current.items.map((i) => i.status);
 
 describe('ImageQueueProvider', () => {
@@ -99,6 +100,22 @@ describe('ImageQueueProvider', () => {
     act(() => { result.current.resume(); });
     await waitFor(() => expect(extract).toHaveBeenCalledTimes(3));
     expect((extract.mock.calls[2][0] as File).name).toBe('b.png');
+  });
+
+  it('accepts PDFs and keeps reading them while Gemini has paused the images', async () => {
+    const pdf = (name: string) => new File([new Uint8Array(4)], name, { type: 'application/pdf', lastModified: 1 });
+    extract
+      .mockResolvedValueOnce(ok('SGN1', { engine_used: 'ocr', gemini_error_kind: 'quota', warnings: ['quota'] }))
+      .mockResolvedValueOnce(ok('PDF1', { engine_used: 'pdf', data: { 'Booking No': 'PDF1', Vessel: 'YM CELEBRITY 107A', ETD: '02/10/2026' } }));
+    const { result } = renderHook(() => useImageQueue(), { wrapper });
+    act(() => { result.current.enqueue([png('a.png'), png('b.png'), pdf('c.pdf')], 'upload'); });
+
+    await waitFor(() => expect(statuses(result)).toEqual(['queued', 'queued', 'success']));
+    expect(result.current.paused).toBe('quota');
+    expect((extract.mock.calls[1][0] as File).name).toBe('c.pdf');
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(extract).toHaveBeenCalledTimes(2); // the images wait for Resume
+    expect(addToast).not.toHaveBeenCalledWith(q.onlyImages, 'info');
   });
 
   it('can be paused by the user; the image already being read still finishes', async () => {

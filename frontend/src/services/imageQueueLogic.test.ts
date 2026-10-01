@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ImageExtractResult } from '../types';
 import {
-  QueueItem, batchDuplicateIds, classifyResult, dedupeIncoming, makeQueueItem, queueReducer, queueStats,
+  QueueItem, batchDuplicateIds, classifyResult, dedupeIncoming, isPdfItem, makeQueueItem, queueReducer, queueStats,
 } from './imageQueueLogic';
 
 const file = (name: string, size = 10, lastModified = 1) => new File([new Uint8Array(size)], name, { type: 'image/png', lastModified });
@@ -19,6 +19,16 @@ describe('classifyResult', () => {
     expect(classifyResult(result({ engine_used: 'ocr' }))).toBe('review');
     expect(classifyResult(result({ warnings: ['Model đã bị thay'] }))).toBe('review');
     expect(classifyResult(result({ data: { Vessel: 'HMM HOPE 062E' } }))).toBe('review');
+  });
+  it('a PDF read is success with Booking No + Vessel + ETD and no warnings, otherwise review', () => {
+    const full = { 'Booking No': '2338872150', Vessel: 'YM CELEBRITY 107A', ETD: '02/10/2026' };
+    expect(classifyResult(result({ engine_used: 'pdf', data: full }))).toBe('success');
+    expect(classifyResult(result({ engine_used: 'pdf', data: { ...full, ETD: 'null' } }))).toBe('review');
+    expect(classifyResult(result({ engine_used: 'pdf', data: full, warnings: ['x'] }))).toBe('review');
+  });
+  it('tells PDF items from images', () => {
+    expect(isPdfItem(makeQueueItem(new File(['x'], 'bk.PDF'), 'upload', col))).toBe(true);
+    expect(isPdfItem(item('a.png'))).toBe(false);
   });
   it('fails when no key field was found (a guessed Carrier alone does not count)', () => {
     expect(classifyResult(result({ data: {}, engine_used: 'none' }))).toBe('failed');

@@ -15,6 +15,7 @@ from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
 from backend.app.services.image_extractor import extract_booking_from_image
 from backend.app.services.booking_validation import normalize_manual_booking
+from backend.app.services.pdf_preview import render_pdf_pages
 
 logger = logging.getLogger("backend.api.bookings")
 
@@ -156,9 +157,9 @@ def _extract_preview(file_bytes: bytes, filename: str, file_ext: str, api_key: O
     gemini_error_kind: Optional[str] = None
     if file_ext == ".pdf":
         data = _extract_pdf_bytes(file_bytes)
-        # PDF text layer parsing (no AI); reported as local extraction
+        # Read from the PDF text layer (no AI / OCR)
         if has_booking_fields(data):
-            engine_used = "ocr"
+            engine_used = "pdf"
         else:
             warnings.append(W_PDF_NO_TEXT)
     else:
@@ -206,6 +207,21 @@ async def extract_image_preview(
         raise HTTPException(status_code=500, detail=f"Failed to extract image: {e}")
     logger.info(f"Image extract engine={result['engine_used']} warnings={len(result['warnings'])}")
     return result
+
+@router.post("/pdf-preview")
+def pdf_preview(file: UploadFile = File(...)):
+    """Page images of a PDF (JPEG data URLs) for the review window; nothing is saved."""
+    filename = file.filename or "booking.pdf"
+    if os.path.splitext(filename)[1].lower() not in PDF_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only PDF files can be previewed")
+    file_bytes = file.file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file uploaded")
+    try:
+        return render_pdf_pages(file_bytes)
+    except Exception as e:
+        logger.warning(f"PDF preview failed for {filename}: {e}")
+        raise HTTPException(status_code=422, detail=f"Không hiển thị được PDF: {e}")
 
 @router.post("/check-duplicates")
 def check_duplicate_bookings(req: CheckDuplicatesRequest):

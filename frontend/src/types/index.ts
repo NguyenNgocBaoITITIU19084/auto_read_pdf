@@ -268,7 +268,8 @@ export interface AISettings {
   ocr_engine: string;
 }
 
-export type ImageExtractEngine = 'gemini' | 'ocr' | 'none';
+/** 'pdf' = read from a PDF's text layer (no AI / OCR) */
+export type ImageExtractEngine = 'gemini' | 'ocr' | 'pdf' | 'none';
 
 export interface ImageExtractResult {
   data: Partial<Booking>;

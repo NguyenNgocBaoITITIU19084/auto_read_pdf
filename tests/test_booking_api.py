@@ -106,10 +106,54 @@ def test_extract_image_pdf_with_text(monkeypatch):
     )
     files = {"file": ("CUL.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")}
     body = client.post("/api/v1/bookings/extract-image", files=files).json()
-    assert body["engine_used"] == "ocr"
+    assert body["engine_used"] == "pdf"
     assert body["warnings"] == []
     assert body["data"]["Carrier"] == "CULINES"
     assert body["data"]["ETD"] == "28/08/2026"
+
+
+def test_extract_image_pdf_does_not_save(monkeypatch, col_id):
+    monkeypatch.setattr(
+        "backend.app.services.extractor.read_pdf_text",
+        lambda p: "Booking No : CULVSGN2601792\nPre Carrier : MTT SENARI 043S ETA/ETD : 2026-08-27/2026-08-28\n",
+    )
+    files = {"file": ("CUL.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")}
+    assert client.post("/api/v1/bookings/extract-image", files=files).status_code == 200
+    assert get_bookings(col_id) == []
+
+
+def _blank_pdf(pages: int) -> bytes:
+    import pypdfium2
+
+    doc = pypdfium2.PdfDocument.new()
+    for _ in range(pages):
+        doc.new_page(595, 842)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_pdf_preview_renders_pages():
+    files = {"file": ("bk.pdf", io.BytesIO(_blank_pdf(2)), "application/pdf")}
+    body = client.post("/api/v1/bookings/pdf-preview", files=files).json()
+    assert body["page_count"] == 2
+    assert body["truncated"] is False
+    assert len(body["pages"]) == 2
+    assert all(p.startswith("data:image/jpeg;base64,") for p in body["pages"])
+
+
+def test_pdf_preview_caps_page_count():
+    from backend.app.services import pdf_preview
+
+    body = pdf_preview.render_pdf_pages(_blank_pdf(3), max_pages=2)
+    assert body["page_count"] == 3 and body["truncated"] is True and len(body["pages"]) == 2
+
+
+def test_pdf_preview_rejects_non_pdf_and_broken_files():
+    files = {"file": ("a.png", io.BytesIO(b"x"), "image/png")}
+    assert client.post("/api/v1/bookings/pdf-preview", files=files).status_code == 400
+    files = {"file": ("a.pdf", io.BytesIO(b"not a pdf"), "application/pdf")}
+    assert client.post("/api/v1/bookings/pdf-preview", files=files).status_code == 422
 
 
 def test_extract_image_rejects_unsupported():

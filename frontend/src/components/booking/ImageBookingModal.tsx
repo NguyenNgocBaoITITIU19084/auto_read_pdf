@@ -3,6 +3,7 @@ import {
   Upload, RefreshCw, Check, RotateCw, ZoomIn, ZoomOut, Maximize2, Image as ImageIcon, AlertTriangle, XCircle,
   ChevronDown, ChevronUp, Key, ClipboardPaste, Loader2, Ship, Play, Clock, Copy, Trash2,
 } from 'lucide-react';
+import { usePdfPreview } from '../../hooks/usePdfPreview';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -11,9 +12,9 @@ import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { Booking } from '../../types';
 import { AISettingsCard } from '../common/AISettingsCard';
 import { tf } from '../../services/i18nFormat';
-import { hasValue } from '../../services/imageQueueLogic';
+import { hasValue, isPdfItem } from '../../services/imageQueueLogic';
 import { useCarrierBadge } from './useCarrierBadge';
-import { isPdfFile, readClipboardImageFile } from './clipboard';
+import { readClipboardImageFile } from './clipboard';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { ImageQueueList, StatusChip, useEngineLabel } from './ImageQueueList';
 import { getBookingVesselCandidates } from '../../utils/vessel';
@@ -21,10 +22,8 @@ import { getBookingVesselCandidates } from '../../utils/vessel';
 interface ImageBookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Select this queue item when the modal opens / when it changes (e.g. the first image just added). */
+  /** Select this queue item when the modal opens / when it changes (e.g. the first file just added). */
   focusItemId?: string | null;
-  /** PDFs picked / dropped inside the modal are handed back to the parent for normal upload */
-  onPdfFiles?: (files: File[]) => void;
 }
 
 const inputCls =
@@ -35,7 +34,7 @@ const smallInputCls =
 
 const norm = (v: unknown) => (hasValue(v) ? String(v).trim() : '');
 
-export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, onClose, focusItemId, onPdfFiles }) => {
+export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, onClose, focusItemId }) => {
   const { t } = useApp();
   const q = t.booking.imageQueue;
   const { addToast } = useToastActions();
@@ -56,7 +55,9 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
   const appliedFocusRef = useRef<string | null>(null);
 
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
-  const previewUrl = useObjectUrl(selected?.file);
+  const selectedIsPdf = !!selected && isPdfItem(selected);
+  const previewUrl = useObjectUrl(selectedIsPdf ? null : selected?.file);
+  const pdf = usePdfPreview(selectedIsPdf ? selected?.file : null);
   const fields = selected?.fields ?? {};
   const carrierBadge = useCarrierBadge(fields['Carrier']);
   const showList = items.length > 1;
@@ -93,26 +94,14 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
 
   const addFiles = useCallback((files: File[], source: 'upload' | 'drop' | 'paste') => {
     if (files.length === 0) return;
-    const pdfs = files.filter(isPdfFile);
-    const images = files.filter((f) => !isPdfFile(f));
-    if (pdfs.length > 0) {
-      if (onPdfFiles) {
-        addToast(t.booking.paste.pdfInImageModal, 'info');
-        onPdfFiles(pdfs);
-        if (images.length === 0 && items.length === 0) onClose();
-      } else {
-        addToast(t.booking.paste.unsupportedFile, 'error');
-      }
+    // PDFs and images share the queue: PDFs are read from their text layer, images by Gemini / OCR
+    const res = queue.enqueue(files, source);
+    if (res.added > 1) addToast(tf(q.added, { count: res.added }), 'info');
+    if (res.ids[0]) {
+      setSelectedId(res.ids[0]);
+      setShowAISettings(false);
     }
-    if (images.length > 0) {
-      const res = queue.enqueue(images, source);
-      if (res.added > 1) addToast(tf(q.added, { count: res.added }), 'info');
-      if (res.ids[0]) {
-        setSelectedId(res.ids[0]);
-        setShowAISettings(false);
-      }
-    }
-  }, [addToast, items.length, onClose, onPdfFiles, q.added, queue, t]);
+  }, [addToast, q.added, queue]);
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -230,7 +219,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
 
         {/* Preview */}
         <div data-tour="ocr-controls" className="w-full md:flex-1 min-w-0 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">
-          {previewUrl ? (
+          {previewUrl || selectedIsPdf ? (
             <>
               <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between bg-slate-900/80 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-700/80 text-white shadow-lg">
                 <div className="flex items-center gap-1">
@@ -246,10 +235,12 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
                   </button>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <button type="button" onClick={() => setRotation((r) => (r + 90) % 360)} title={t.booking.imageModal.rotate} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition-colors">
-                    <RotateCw className="w-3.5 h-3.5" />
-                    <span>{rotation}°</span>
-                  </button>
+                  {!selectedIsPdf && (
+                    <button type="button" onClick={() => setRotation((r) => (r + 90) % 360)} title={t.booking.imageModal.rotate} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition-colors">
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>{rotation}°</span>
+                    </button>
+                  )}
                   <button type="button" onClick={handlePasteFromClipboard} disabled={readingClipboard} title={t.booking.paste.pasteImageButton} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 transition-colors disabled:opacity-50">
                     {readingClipboard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardPaste className="w-3.5 h-3.5" />}
                   </button>
@@ -259,17 +250,49 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
                   </button>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-0 bg-slate-950">
-                <div
-                  style={{ transform: `scale(${zoom}) rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 0.15s ease-out' }}
-                  className="max-w-full max-h-full flex items-center justify-center shadow-2xl"
-                >
-                  <img src={previewUrl} alt="Booking scan" className="max-w-full max-h-[60vh] object-contain rounded-md select-none pointer-events-none" />
+              {selectedIsPdf ? (
+                // Pages stacked for scrolling; zoom changes the width (not a transform) so the scroll area grows with it
+                <div className="flex-1 overflow-auto min-h-0 bg-slate-950 px-4 pb-4 pt-14">
+                  {pdf.loading ? (
+                    <div className="h-full flex items-center justify-center gap-2 text-xs text-slate-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />{q.pdfLoading}
+                    </div>
+                  ) : pdf.error ? (
+                    <div role="alert" className="h-full flex items-center justify-center text-center text-xs text-rose-300 px-6">
+                      {tf(q.pdfPreviewError, { error: pdf.error })}
+                    </div>
+                  ) : (
+                    <div style={{ width: `${zoom * 100}%` }} className="mx-auto space-y-3 transition-[width] duration-150">
+                      {pdf.pages.map((src, i) => (
+                        <img
+                          key={i}
+                          src={src}
+                          alt={tf(q.pdfPage, { n: i + 1 })}
+                          className="block w-full h-auto rounded-md bg-white shadow-2xl select-none pointer-events-none"
+                        />
+                      ))}
+                      {pdf.truncated && (
+                        <p className="text-center text-[11px] text-slate-400">{tf(q.pdfTruncated, { shown: pdf.pages.length, total: pdf.pageCount })}</p>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
+              ) : (
+                <div className="flex-1 overflow-auto flex items-center justify-center p-4 min-h-0 bg-slate-950">
+                  <div
+                    style={{ transform: `scale(${zoom}) rotate(${rotation}deg)`, transformOrigin: 'center center', transition: 'transform 0.15s ease-out' }}
+                    className="max-w-full max-h-full flex items-center justify-center shadow-2xl"
+                  >
+                    <img src={previewUrl ?? undefined} alt="Booking scan" className="max-w-full max-h-[60vh] object-contain rounded-md select-none pointer-events-none" />
+                  </div>
+                </div>
+              )}
               <div className="px-3 py-1.5 bg-slate-900 border-t border-slate-800 text-[11px] font-medium text-slate-400 flex items-center justify-between">
                 <span className="truncate max-w-[200px]" title={selected?.name}>{selected?.name}</span>
-                <span>{selected?.size ? `${Math.round(selected.size / 1024)} KB` : ''}</span>
+                <span>
+                  {selectedIsPdf && pdf.pageCount > 0 ? `${tf(q.pdfPageCount, { count: pdf.pageCount })} · ` : ''}
+                  {selected?.size ? `${Math.round(selected.size / 1024)} KB` : ''}
+                </span>
               </div>
             </>
           ) : (
@@ -281,8 +304,8 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
               <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-white flex items-center justify-center shadow-lg mb-3.5">
                 <ImageIcon className="w-7 h-7" />
               </div>
-              <h4 className="text-sm font-bold text-slate-100 mb-1">{t.booking.imageModal.dropOrPaste}</h4>
-              <p className="text-xs text-slate-400 max-w-xs mb-4">Hỗ trợ các định dạng PNG, JPG, JPEG, WEBP hoặc chụp màn hình rồi nhấn Ctrl+V. Có thể chọn nhiều ảnh cùng lúc.</p>
+              <h4 className="text-sm font-bold text-slate-100 mb-1">{t.booking.imageModal.dropOrPasteFiles}</h4>
+              <p className="text-xs text-slate-400 max-w-xs mb-4">{t.booking.imageModal.dropHint}</p>
               <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
@@ -361,10 +384,10 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
                 </div>
                 <div>
                   <h5 className="font-bold text-slate-800 dark:text-slate-200 text-sm">
-                    {selected.status === 'reading' ? t.booking.imageModal.extracting : q.status.queued}
+                    {selected.status !== 'reading' ? q.status.queued : selectedIsPdf ? q.status.reading : t.booking.imageModal.extracting}
                   </h5>
                   <p className="text-xs text-slate-400 mt-1">
-                    {selected.status === 'reading' ? 'Đang đọc thông tin chi tiết qua mô hình Google Gemini Vision...' : q.waitingHint}
+                    {selected.status !== 'reading' ? q.waitingHint : selectedIsPdf ? q.pdfReading : 'Đang đọc thông tin chi tiết qua mô hình Google Gemini Vision...'}
                   </p>
                 </div>
               </div>

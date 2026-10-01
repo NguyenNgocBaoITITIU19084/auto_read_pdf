@@ -6,9 +6,9 @@ import { useToastActions } from './ToastContext';
 import { useConfirm } from '../hooks/useConfirm';
 import { checkBookingDuplicatesApi, extractBookingImageDetailedApi, saveManualBookingApi } from '../services/api';
 import { tf } from '../services/i18nFormat';
-import { isImageFile } from '../components/booking/clipboard';
+import { isImageFile, isPdfFile } from '../components/booking/clipboard';
 import {
-  QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, dedupeIncoming, makeQueueItem, queueReducer, queueStats,
+  QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, dedupeIncoming, isPdfItem, makeQueueItem, queueReducer, queueStats,
 } from '../services/imageQueueLogic';
 
 export const MAX_QUEUE_ITEMS = 60;
@@ -155,8 +155,9 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [checkDbDuplicate]);
 
   useEffect(() => {
-    if (paused || processingRef.current) return;
-    const next = items.find((i) => i.status === 'queued');
+    if (processingRef.current) return;
+    // A pause is about Gemini (quota, key, overload) or the user's images: PDFs are read locally and keep going
+    const next = items.find((i) => i.status === 'queued' && (!paused || isPdfItem(i)));
     if (!next) return;
     processingRef.current = true; // ref guard: an effect re-run can never start the same image twice
     dispatch({ type: 'start', id: next.id });
@@ -175,9 +176,9 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       addToastRef.current(tRef.current.booking.paste.noCollection, 'error');
       return empty;
     }
-    const images = files.filter(isImageFile);
-    if (images.length < files.length) addToastRef.current(tt.onlyImages, 'info');
-    const { fresh, duplicates } = dedupeIncoming(itemsRef.current, images);
+    const readable = files.filter((f) => isImageFile(f) || isPdfFile(f));
+    if (readable.length < files.length) addToastRef.current(tt.onlyImages, 'info');
+    const { fresh, duplicates } = dedupeIncoming(itemsRef.current, readable);
     const room = Math.max(0, MAX_QUEUE_ITEMS - itemsRef.current.length);
     const accepted = fresh.slice(0, room);
     const rejected = fresh.length - accepted.length;

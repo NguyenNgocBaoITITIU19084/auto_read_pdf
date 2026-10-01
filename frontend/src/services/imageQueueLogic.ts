@@ -54,18 +54,28 @@ export const EMPTY_FIELDS: Partial<Booking> = {
 export const hasValue = (v: unknown): boolean =>
   v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim().toLowerCase() !== 'null';
 
+/** A PDF read counts as complete only with these: anything less is worth a look before saving. */
+export const PDF_REQUIRED_FIELDS = ['Booking No', 'Vessel', 'ETD'];
+
 /**
  * - failed:  none of the key fields were found
- * - success: read by Gemini, has a Booking No and no warnings
- * - review:  something was read, but by offline OCR, with warnings, or without a Booking No
+ * - success: read by Gemini with a Booking No, or from a PDF text layer with Booking No + Vessel + ETD; no warnings
+ * - review:  something was read, but by offline OCR, with warnings, or with fields missing
  */
 export function classifyResult(result: Pick<ImageExtractResult, 'data' | 'engine_used' | 'warnings'>): Outcome {
   const data = (result.data || {}) as Record<string, unknown>;
   if (!KEY_FIELDS.some((k) => hasValue(data[k]))) return 'failed';
   const warnings = (result.warnings || []).filter((w) => typeof w === 'string' && w.trim());
-  if (result.engine_used === 'gemini' && hasValue(data['Booking No']) && warnings.length === 0) return 'success';
+  if (warnings.length > 0) return 'review';
+  if (result.engine_used === 'gemini' && hasValue(data['Booking No'])) return 'success';
+  if (result.engine_used === 'pdf' && PDF_REQUIRED_FIELDS.every((k) => hasValue(data[k]))) return 'success';
   return 'review';
 }
+
+const PDF_NAME = /\.pdf$/i;
+/** Queue items are booking images or booking PDFs */
+export const isPdfItem = (item: Pick<QueueItem, 'file' | 'name'>): boolean =>
+  (item.file?.type || '').toLowerCase() === 'application/pdf' || PDF_NAME.test(item.name || '');
 
 export const bookingKey = (fields: Partial<Booking>): string =>
   hasValue(fields['Booking No']) ? String(fields['Booking No']).trim().toUpperCase().replace(/\s+/g, '') : '';
