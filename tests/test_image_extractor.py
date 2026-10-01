@@ -193,7 +193,8 @@ def test_detailed_gemini_success(monkeypatch, no_ocr):
     (400, {"error": {"message": "API key not valid. Please pass a valid API key."}}, "API key không hợp lệ"),
     (403, {"error": {"message": "Permission denied"}}, "API key không hợp lệ"),
     (429, {"error": {"message": "Resource has been exhausted (e.g. check quota)."}}, "hạn mức"),
-    (500, {"error": {"message": "Internal"}}, "Gemini trả về lỗi (500)"),
+    # 5xx is Google-side and temporary: reported as overload so the reading queue pauses and retries
+    (500, {"error": {"message": "Internal"}}, "Gemini đang quá tải"),
 ])
 def test_detailed_gemini_errors_then_no_ocr(monkeypatch, no_ocr, status, body, expected_fragment):
     monkeypatch.setattr(ie.requests, "post", lambda *a, **k: _resp(status, body))
