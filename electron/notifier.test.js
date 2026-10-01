@@ -33,7 +33,7 @@ test('claims from the backend and shows one popup for the batch', async () => {
   await notifier.poll();
   assert.deepEqual(calls.requests, ['POST /api/v1/notifications/claim-os']);
   assert.equal(FakeNotification.shown.length, 1);
-  assert.deepEqual(FakeNotification.shown[0].opts, { title: 'Cont EMCU1234567 đã OUTGATE', body: '26/09/2026 09:46', silent: false });
+  assert.deepEqual(FakeNotification.shown[0].opts, { title: 'Cont EMCU1234567 đã OUTGATE', body: '26/09/2026 09:46', silent: false, sound: 'Submarine' });
   assert.deepEqual(calls.sent, [['notifications-changed', undefined]]);
 });
 

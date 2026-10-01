@@ -18,7 +18,7 @@ function createNotifier({ backendRequest, Notification, showMainWindow, sendToRe
 
   function show(summary) {
     if (!Notification || (typeof Notification.isSupported === 'function' && !Notification.isSupported())) return false;
-    const popup = new Notification({ title: summary.title, body: summary.body, silent: false });
+    const popup = new Notification({ title: summary.title, body: summary.body, silent: false, sound: 'Submarine' });
     live.add(popup);
     const done = () => live.delete(popup);
     popup.on('click', () => {
