@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
-  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2
+  SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2,
+  ArchiveRestore
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -10,7 +11,7 @@ import { useImageQueue } from '../../context/ImageQueueContext';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
-  deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi
+  deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi, getBookingTrashCount
 } from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
@@ -36,6 +37,7 @@ import { ValueBadge } from '../common/ValueBadge';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
+import { BookingTrashModal, BOOKING_TRASH_KEEP_DAYS } from './BookingTrashModal';
 import { subscribeTourActions } from '../../services/tourEvents';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -276,6 +278,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const imageQueue = useImageQueue();
   const [quickVesselBooking, setQuickVesselBooking] = useState<Booking | null>(null);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
   const [isBulkVesselLookupOpen, setIsBulkVesselLookupOpen] = useState(false);
   const [bookingForm, setBookingForm] = useState<{ mode: 'create' | 'edit'; booking: Booking | null } | null>(null);
 
@@ -396,9 +400,23 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   });
   const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
 
-  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
-    await table.reload(mode);
+  const refreshTrashCount = useStableCallback(async () => {
+    if (!activeCollection) return setTrashCount(0);
+    try {
+      setTrashCount(await getBookingTrashCount(activeCollection.id));
+    } catch {
+      /* the badge is only a hint */
+    }
   });
+
+  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    await Promise.all([table.reload(mode), refreshTrashCount()]);
+  });
+
+  useEffect(() => {
+    void refreshTrashCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCollection?.id]);
 
   const selection = useRowSelection<Booking>(
     pageRows,
@@ -495,11 +513,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   };
 
   const handleDelete = useStableCallback(async (id: number) => {
-    const ok = await confirm({ message: t.common.deleteConfirm, danger: true });
+    const ok = await confirm({ message: tf(t.booking.trash.deleteConfirm, { days: BOOKING_TRASH_KEEP_DAYS }), danger: true });
     if (!ok) return;
     try {
       await deleteBooking(id);
-      addToast(t.common.success, 'success');
+      addToast(tf(t.booking.bulkActions.deleteSuccess, { count: 1 }), 'success');
       selection.selectIds([id], false);
       await loadData('refresh');
     } catch (e: any) {
@@ -509,11 +527,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
   const handleClearAll = async () => {
     if (!activeCollection) return;
-    const ok = await confirm({ message: t.common.clearConfirm, danger: true });
+    const ok = await confirm({ message: tf(t.booking.trash.clearConfirm, { days: BOOKING_TRASH_KEEP_DAYS }), danger: true });
     if (!ok) return;
     try {
-      await clearBookings(activeCollection.id);
-      addToast(t.common.success, 'success');
+      const cleared = await clearBookings(activeCollection.id);
+      addToast(tf(t.booking.bulkActions.deleteSuccess, { count: cleared }), 'success');
       selection.clear();
       await loadData('refresh');
     } catch (e: any) {
@@ -580,7 +598,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     const ids = selectedIdList;
     if (ids.length === 0) return;
     const ok = await confirm({
-      message: tf(t.bulk.deleteSelectedConfirm, { count: ids.length }),
+      message: tf(t.booking.trash.deleteSelectedConfirm, { count: ids.length, days: BOOKING_TRASH_KEEP_DAYS }),
       danger: true,
     });
     if (!ok) return;
@@ -925,7 +943,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           </Tooltip>
 
           {total > 0 && (
-            <Tooltip content="Xóa tất cả Booking trong bộ sưu tập này">
+            <Tooltip content={t.booking.trash.clearTooltip}>
               <button
                 onClick={handleClearAll}
                 className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 transition-colors"
@@ -934,6 +952,21 @@ export const BookingTab: React.FC<BookingTabProps> = ({
               </button>
             </Tooltip>
           )}
+
+          <Tooltip content={tf(t.booking.trash.tooltip, { days: BOOKING_TRASH_KEEP_DAYS })}>
+            <button
+              onClick={() => setIsTrashOpen(true)}
+              className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
+            >
+              <ArchiveRestore className="w-3.5 h-3.5" />
+              <span>{t.booking.trash.button}</span>
+              {trashCount > 0 && (
+                <span className="min-w-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[10px] leading-4 text-center">
+                  {trashCount > 999 ? '999+' : trashCount}
+                </span>
+              )}
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -1103,6 +1136,13 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           selection.clear();
           if (!result.copy) loadData('refresh');
         }}
+      />
+
+      <BookingTrashModal
+        isOpen={isTrashOpen}
+        onClose={() => setIsTrashOpen(false)}
+        collectionId={activeCollection?.id ?? null}
+        onChanged={() => loadData('refresh')}
       />
 
       <BulkVesselLookupModal

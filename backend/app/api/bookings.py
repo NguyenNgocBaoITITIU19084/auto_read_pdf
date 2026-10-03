@@ -10,6 +10,8 @@ from backend.app.core.database import (
     insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
     get_bookings_page, get_booking_ids, get_bookings_by_ids,
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
+    get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
+    BOOKING_TRASH_KEEP_DAYS,
 )
 from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
@@ -248,7 +250,32 @@ def save_manual_booking(req: SaveBookingRequest):
 @router.post("/batch-delete")
 def batch_delete_bookings(req: BatchDeleteRequest):
     deleted = delete_bookings_batch(list(req.ids or []))
-    logger.info(f"Deleted {deleted} booking(s)")
+    logger.info(f"Moved {deleted} booking(s) to the trash")
+    return {"status": "success", "deleted": deleted}
+
+@router.get("/trash")
+def list_booking_trash(collection_id: int = Query(...), limit: int = Query(50), offset: int = Query(0)):
+    """A page of the collection's deleted bookings, kept BOOKING_TRASH_KEEP_DAYS days before being purged."""
+    return {**get_booking_trash(collection_id, limit, offset), "keep_days": BOOKING_TRASH_KEEP_DAYS}
+
+@router.get("/trash/ids")
+def list_booking_trash_ids(collection_id: int = Query(...)):
+    return {"ids": get_booking_trash_ids(collection_id)}
+
+@router.get("/trash/count")
+def booking_trash_count(collection_id: int = Query(...)):
+    return {"count": count_booking_trash(collection_id)}
+
+@router.post("/trash/restore")
+def restore_trashed_bookings(req: BatchDeleteRequest):
+    restored = restore_bookings(list(req.ids or []))
+    logger.info(f"Restored {restored} booking(s) from the trash")
+    return {"status": "success", "restored": restored}
+
+@router.post("/trash/delete")
+def delete_trashed_bookings_now(req: BatchDeleteRequest):
+    deleted = delete_trashed_bookings(list(req.ids or []))
+    logger.info(f"Permanently deleted {deleted} booking(s) from the trash")
     return {"status": "success", "deleted": deleted}
 
 @router.put("/{booking_id}")
@@ -276,6 +303,6 @@ def remove_booking(booking_id: int):
 
 @router.delete("/clear/{collection_id}")
 def clear_all_bookings(collection_id: int):
-    clear_bookings(collection_id)
-    logger.info(f"Cleared bookings of collection {collection_id}")
-    return {"status": "success", "cleared_collection_id": collection_id}
+    deleted = clear_bookings(collection_id)
+    logger.info(f"Moved all {deleted} booking(s) of collection {collection_id} to the trash")
+    return {"status": "success", "cleared_collection_id": collection_id, "deleted": deleted}

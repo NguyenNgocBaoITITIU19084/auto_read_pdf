@@ -198,14 +198,32 @@ export const deleteBooking = async (id: number): Promise<void> => {
   await apiClient.delete(`/bookings/${id}`);
 };
 
-export const clearBookings = async (collectionId: number): Promise<void> => {
-  await apiClient.delete(`/bookings/clear/${collectionId}`);
-};
+export const clearBookings = async (collectionId: number): Promise<number> =>
+  (await apiClient.delete<{ deleted: number }>(`/bookings/clear/${collectionId}`)).data.deleted;
 
 export const deleteBookingsBatch = async (ids: number[]): Promise<{ status: string; deleted: number }> => {
   const res = await apiClient.post('/bookings/batch-delete', { ids });
   return res.data;
 };
+
+export type TrashedBooking = Booking & { deleted_at: string; purge_at: string; days_left: number };
+
+export const getBookingTrash = async (
+  collectionId: number, limit: number, offset: number,
+): Promise<PageResult<TrashedBooking> & { keep_days: number }> =>
+  (await apiClient.get('/bookings/trash', { params: { collection_id: collectionId, limit, offset } })).data;
+
+export const getBookingTrashIds = async (collectionId: number): Promise<number[]> =>
+  (await apiClient.get<{ ids: number[] }>('/bookings/trash/ids', { params: { collection_id: collectionId } })).data.ids || [];
+
+export const deleteTrashedBookingsApi = async (ids: number[]): Promise<number> =>
+  (await apiClient.post<{ status: string; deleted: number }>('/bookings/trash/delete', { ids })).data.deleted;
+
+export const getBookingTrashCount = async (collectionId: number): Promise<number> =>
+  (await apiClient.get<{ count: number }>('/bookings/trash/count', { params: { collection_id: collectionId } })).data.count;
+
+export const restoreBookingsApi = async (ids: number[]): Promise<number> =>
+  (await apiClient.post<{ status: string; restored: number }>('/bookings/trash/restore', { ids })).data.restored;
 
 // Vessels
 export const getVessels = async (collectionId: number, query?: string, field?: string): Promise<VesselSchedule[]> => {

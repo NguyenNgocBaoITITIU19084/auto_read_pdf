@@ -1,6 +1,7 @@
 import html
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -462,6 +463,18 @@ def init_db():
         # Indexes for common lookups (watchlists are covered by their UNIQUE autoindexes,
         # whose leading column is collection_id)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_bookings_collection ON bookings(collection_id);")
+        # Deleted bookings wait here (raw row as JSON, original id) for BOOKING_TRASH_KEEP_DAYS before being purged
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS booking_trash (
+                id INTEGER PRIMARY KEY,
+                collection_id INTEGER NOT NULL,
+                data TEXT NOT NULL,
+                deleted_at TEXT NOT NULL,
+                FOREIGN KEY (collection_id) REFERENCES collections (id) ON DELETE CASCADE
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_booking_trash_col_deleted ON booking_trash(collection_id, deleted_at);")
+        _purge_booking_trash(conn)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vessel_schedules_col_queried ON vessel_schedules(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_queried ON containers(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_event ON containers(collection_id, event_type);")
@@ -834,9 +847,43 @@ def get_bookings_by_ids(ids: list[int]) -> list[dict]:
     return [_booking_row_to_api(r) for r in rows]
 
 
+BOOKING_TRASH_KEEP_DAYS = 30
+
+
+def _trash_cutoff() -> str:
+    return (datetime.now(VN_TZ) - timedelta(days=BOOKING_TRASH_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _purge_booking_trash(conn: sqlite3.Connection) -> int:
+    cur = conn.execute("DELETE FROM booking_trash WHERE deleted_at < ?;", (_trash_cutoff(),))
+    return max(cur.rowcount, 0)
+
+
+def purge_expired_booking_trash() -> int:
+    """Permanently delete bookings that have been in the trash longer than BOOKING_TRASH_KEEP_DAYS."""
+    with get_connection() as conn:
+        removed = _purge_booking_trash(conn)
+    if removed:
+        logger.info(f"Purged {removed} booking(s) from the trash after {BOOKING_TRASH_KEEP_DAYS} days")
+    return removed
+
+
+def _trash_bookings(conn: sqlite3.Connection, where: str, params: tuple) -> int:
+    """Move the matching bookings into booking_trash (same transaction) instead of losing them."""
+    rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where};", params)
+    if not rows:
+        return 0
+    now = _now_str()
+    conn.executemany(
+        "INSERT OR REPLACE INTO booking_trash (id, collection_id, data, deleted_at) VALUES (?, ?, ?, ?);",
+        [(r["id"], r["collection_id"], json.dumps(r, ensure_ascii=False), now) for r in rows])
+    cur = conn.execute(f"DELETE FROM bookings WHERE {where};", params)
+    return max(cur.rowcount, 0)
+
+
 def delete_booking(booking_id: int):
     with get_connection() as conn:
-        conn.execute("DELETE FROM bookings WHERE id = ?;", (booking_id,))
+        _trash_bookings(conn, "id = ?", (booking_id,))
 
 
 def delete_bookings_batch(booking_ids: list[int]) -> int:
@@ -847,14 +894,99 @@ def delete_bookings_batch(booking_ids: list[int]) -> int:
     with get_connection() as conn:
         for chunk in _chunks(ids):
             placeholders = ",".join(["?"] * len(chunk))
-            cur = conn.execute(f"DELETE FROM bookings WHERE id IN ({placeholders});", tuple(chunk))
-            deleted += max(cur.rowcount, 0)
+            deleted += _trash_bookings(conn, f"id IN ({placeholders})", tuple(chunk))
     return deleted
 
 
-def clear_bookings(col_id: int):
+def clear_bookings(col_id: int) -> int:
     with get_connection() as conn:
-        conn.execute("DELETE FROM bookings WHERE collection_id = ?;", (col_id,))
+        return _trash_bookings(conn, "collection_id = ?", (col_id,))
+
+
+_TRASH_ORDER = "ORDER BY deleted_at DESC, id DESC"
+
+
+def get_booking_trash(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0) -> dict:
+    """One page of a collection's trashed bookings, most recently deleted first, with when they will be purged."""
+    limit, offset = _page_bounds(limit, offset)
+    with get_connection() as conn:
+        _purge_booking_trash(conn)
+        total = conn.execute("SELECT COUNT(*) FROM booking_trash WHERE collection_id = ?;", (col_id,)).fetchone()[0]
+        rows = _select_dicts(conn, f"SELECT id, data, deleted_at FROM booking_trash WHERE collection_id = ? "
+                                   f"{_TRASH_ORDER} LIMIT ? OFFSET ?;", (col_id, limit, offset))
+    now = datetime.now(VN_TZ)
+    items = []
+    for r in rows:
+        try:
+            item = _booking_row_to_api({**json.loads(r["data"]), "id": r["id"]})
+        except (ValueError, KeyError, TypeError):
+            logger.warning(f"Unreadable trashed booking id={r['id']}")
+            continue
+        try:
+            deleted = datetime.strptime(r["deleted_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=VN_TZ)
+            purge_at = deleted + timedelta(days=BOOKING_TRASH_KEEP_DAYS)
+            days_left = max(0, math.ceil((purge_at - now).total_seconds() / 86400))
+        except ValueError:
+            purge_at, days_left = None, BOOKING_TRASH_KEEP_DAYS
+        item["deleted_at"] = r["deleted_at"]
+        item["purge_at"] = purge_at.strftime("%Y-%m-%d %H:%M:%S") if purge_at else ""
+        item["days_left"] = days_left
+        items.append(item)
+    return {"items": items, "total": total}
+
+
+def get_booking_trash_ids(col_id: int) -> list[int]:
+    with get_connection() as conn:
+        _purge_booking_trash(conn)
+        return [r[0] for r in conn.execute(f"SELECT id FROM booking_trash WHERE collection_id = ? {_TRASH_ORDER};",
+                                           (col_id,)).fetchall()]
+
+
+def delete_trashed_bookings(booking_ids: list[int]) -> int:
+    """Permanently delete bookings from the trash without waiting for BOOKING_TRASH_KEEP_DAYS."""
+    return _delete_by_ids("booking_trash", booking_ids)
+
+
+def count_booking_trash(col_id: int) -> int:
+    with get_connection() as conn:
+        return conn.execute("SELECT COUNT(*) FROM booking_trash WHERE collection_id = ? AND deleted_at >= ?;",
+                            (col_id, _trash_cutoff())).fetchone()[0]
+
+
+def restore_bookings(booking_ids: list[int]) -> int:
+    """Put trashed bookings back where they were (same id, collection, added time, note)."""
+    ids = _clean_ids(booking_ids)
+    if not ids:
+        return 0
+    restored = 0
+    collections: set[int] = set()
+    with get_connection() as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(bookings);").fetchall()}
+        for chunk in _chunks(ids):
+            placeholders = ",".join(["?"] * len(chunk))
+            rows = _select_dicts(conn, f"SELECT id, collection_id, data FROM booking_trash WHERE id IN ({placeholders});",
+                                 tuple(chunk))
+            for r in rows:
+                try:
+                    data = json.loads(r["data"])
+                except ValueError:
+                    logger.warning(f"Unreadable trashed booking id={r['id']}, left in the trash")
+                    continue
+                data = {k: v for k, v in data.items() if k in columns}
+                data["collection_id"] = r["collection_id"]
+                data["id"] = r["id"]
+                if conn.execute("SELECT 1 FROM bookings WHERE id = ?;", (r["id"],)).fetchone():
+                    data.pop("id")  # ids are never reused, but never overwrite a live row either
+                cols = list(data)
+                conn.execute(f"INSERT INTO bookings ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))});",
+                             tuple(data[c] for c in cols))
+                conn.execute("DELETE FROM booking_trash WHERE id = ?;", (r["id"],))
+                collections.add(r["collection_id"])
+                restored += 1
+        for col_id in collections:
+            # the vessel may have been looked up while the booking was in the trash
+            _sync_booking_eport_cutoffs(conn, col_id)
+    return restored
 
 
 # ---------------------------------------------------------------------------
