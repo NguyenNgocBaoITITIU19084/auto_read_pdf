@@ -148,7 +148,7 @@ def test_search_vessels_client_success(mock_post):
         "content": "",
         "model": [
             {
-                "SITE_ID": "GML   ",
+                "SITE_ID": "GNL   ",
                 "AGENT": "EMC",
                 "VESSELNAME": "EVER MEMO                     ",
                 "IN_OUT_VOYAGE": "1461-012E",
@@ -167,7 +167,7 @@ def test_search_vessels_client_success(mock_post):
     assert len(results) == 1
     # Check that strings are stripped of whitespace
     assert results[0]["VESSELNAME"] == "EVER MEMO"
-    assert results[0]["SITE_ID"] == "GML"
+    assert results[0]["SITE_ID"] == "GNL"
     assert results[0]["AGENT"] == "EMC"
     assert results[0]["CLOSING_TIME"] == "22:00 25/06/2026"
     
