@@ -28,19 +28,21 @@ VESSEL_CLOSING_ICD = "vessel_closing_icd"
 VESSEL_OPEN_GATE = "vessel_open_gate"
 VESSEL_ETA = "vessel_eta"
 VESSEL_ETD = "vessel_etd"
+# One notification per vessel/voyage and lookup, listing every time that changed (detail["changes"])
+VESSEL_SCHEDULE = "vessel_schedule"
 
 ALL_KINDS = (
     CONTAINER_CUSTOMS, CONTAINER_INGATE, CONTAINER_OUTGATE,
     VESSEL_CLOSING, VESSEL_CLOSING_ICD, VESSEL_OPEN_GATE, VESSEL_ETA, VESSEL_ETD,
 )
 
-# vessel_schedules column -> kind, and the words used in the title
+# vessel_schedules column -> kind and its short label, in the order the changes are listed
 VESSEL_FIELDS = (
-    ("closing_time", VESSEL_CLOSING, "hạn đóng máng"),
-    ("closing_time_icd", VESSEL_CLOSING_ICD, "giờ đóng tại ICD"),
-    ("open_ts", VESSEL_OPEN_GATE, "giờ mở cổng hạ"),
-    ("actual_berth_time", VESSEL_ETA, "lịch cập bến (ETA)"),
-    ("actual_departure_time", VESSEL_ETD, "lịch rời bến (ETD)"),
+    ("actual_departure_time", VESSEL_ETD, "ETD"),
+    ("actual_berth_time", VESSEL_ETA, "ETA"),
+    ("closing_time", VESSEL_CLOSING, "Cut-off"),
+    ("closing_time_icd", VESSEL_CLOSING_ICD, "Cut-off ICD"),
+    ("open_ts", VESSEL_OPEN_GATE, "Mở cổng hạ"),
 )
 
 
@@ -73,6 +75,11 @@ def extract_datetime(value) -> datetime | None:
 
 def fmt(dt: datetime) -> str:
     return dt.strftime(DISPLAY_FMT)
+
+
+def change_lines(changes: list[dict]) -> str:
+    """"ETD 06/10/2026 23:00 → 07/10/2026 23:00", one line per changed time."""
+    return "\n".join(f"{c['label']} {c['old']} → {c['new']}" for c in changes)
 
 
 def vessel_time_changes(old: dict, new: dict, enabled) -> list[dict]:

@@ -48,6 +48,23 @@ describe('NotificationDetailModal', () => {
     expect(screen.getByText('2026-09-30 10:00:00')).toBeInTheDocument();
   });
 
+  it('lists every changed time of a grouped vessel notification', () => {
+    const grouped: AppNotification = {
+      ...vessel, id: 3, kind: 'vessel_schedule', old_value: '', new_value: 'x',
+      detail: {
+        vessel: 'DONGJIN CONFIDENT', voyage: '0152S-0152S', changes: [
+          { kind: 'vessel_etd', label: 'ETD', old: '06/10/2026 23:00', new: '07/10/2026 23:00' },
+          { kind: 'vessel_closing_icd', label: 'Cut-off ICD', old: '05/10/2026 15:00', new: '06/10/2026 15:00' },
+        ],
+      },
+    };
+    state = { items: [grouped], detailId: 3 };
+    render(<NotificationDetailModal onNavigateTab={vi.fn()} />);
+    expect(screen.getByText('DONGJIN CONFIDENT 0152S-0152S đã đổi')).toBeInTheDocument();
+    const rows = screen.getAllByRole('row').slice(1).map((r) => r.textContent);
+    expect(rows).toEqual(['ETD06/10/2026 23:0007/10/2026 23:00+1 ngày', 'Cut-off ICD05/10/2026 15:0006/10/2026 15:00+1 ngày']);
+  });
+
   it('shows a single value for an event (no before / after)', () => {
     state = { items: [container], detailId: 1 };
     render(<NotificationDetailModal onNavigateTab={vi.fn()} />);

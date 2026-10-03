@@ -6,7 +6,7 @@ import { getNotificationSettingsApi, saveNotificationSettingsApi, sendTestNotifi
 import { useNotifications } from '../../context/NotificationsContext';
 
 /** The kinds a user can switch on / off (the test sample is not one of them) */
-type SettingKind = Exclude<NotificationKind, 'test'>;
+type SettingKind = Exclude<NotificationKind, 'test' | 'vessel_schedule'>;
 
 const CONTAINER_KINDS: SettingKind[] = ['container_customs', 'container_ingate', 'container_outgate'];
 const VESSEL_KINDS: SettingKind[] = ['vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd'];

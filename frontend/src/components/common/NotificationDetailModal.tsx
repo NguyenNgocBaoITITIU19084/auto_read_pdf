@@ -1,8 +1,9 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../context/NotificationsContext';
-import { notificationChange, notificationTitle } from '../../utils/notifications';
+import { notificationChange, notificationChanges, notificationTitle } from '../../utils/notifications';
 import { Modal } from './Modal';
+import { VesselChangeList } from './VesselChangeList';
 import type { TabId } from './Tabs';
 
 interface Props {
@@ -18,6 +19,7 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   if (!item) return null;
 
   const info = item.detail || {};
+  const changes = notificationChanges(item, t);
   const rows: [string, string | undefined][] = [
     [d.vessel, info.vessel],
     [d.voyage, info.voyage],
@@ -34,11 +36,13 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   };
 
   return (
-    <Modal isOpen onClose={closeDetail} title={d.title} maxWidth="max-w-md">
+    <Modal isOpen onClose={closeDetail} title={d.title} maxWidth={changes.length > 0 ? "max-w-xl" : "max-w-md"}>
       <div className="space-y-4" data-testid="notification-detail">
         <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{notificationTitle(item, t)}</h4>
 
-        {item.old_value ? (
+        {changes.length > 0 ? (
+          <VesselChangeList item={item} variant="full" />
+        ) : item.old_value ? (
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-2.5">
               <div className="text-[10px] font-sans uppercase text-slate-400 mb-1">{d.before}</div>

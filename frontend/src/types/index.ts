@@ -494,8 +494,18 @@ export interface MobileSession {
 export type NotificationKind =
   | 'container_customs' | 'container_ingate' | 'container_outgate'
   | 'vessel_closing' | 'vessel_closing_icd' | 'vessel_open_gate' | 'vessel_eta' | 'vessel_etd'
+  /** every time of one vessel/voyage that changed in a lookup, listed in detail.changes */
+  | 'vessel_schedule'
   /** the sample sent by the "send a test" button */
   | 'test';
+
+/** One changed time inside a 'vessel_schedule' notification (old/new as dd/mm/yyyy HH:MM) */
+export interface VesselTimeChange {
+  kind: NotificationKind;
+  label: string;
+  old: string;
+  new: string;
+}
 
 export interface AppNotification {
   id: number;
@@ -505,7 +515,10 @@ export interface AppNotification {
   title: string;
   old_value: string;
   new_value: string;
-  detail: { site_id?: string; vessel?: string; voyage?: string; container?: string; event_type?: string; bookings?: string[] };
+  detail: {
+    site_id?: string; vessel?: string; voyage?: string; container?: string; event_type?: string; bookings?: string[];
+    changes?: VesselTimeChange[];
+  };
   nav_tab: 'vessel' | 'container' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';

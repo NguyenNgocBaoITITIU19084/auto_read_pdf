@@ -54,13 +54,13 @@ def test_changed_cutoff_of_a_watched_vessel_notifies_with_old_and_new(col):
     db.insert_vessel_schedules(col, [sched()], "manual")
     db.insert_vessel_schedules(col, [sched(closing="2026-09-24 09:30:00")], "auto_sync")
     (n,) = notes()
-    assert n["kind"] == cd.VESSEL_CLOSING
-    assert (n["old_value"], n["new_value"]) == ("23/09/2026 11:00", "24/09/2026 09:30")
-    assert "HMM HOPE" in n["title"] and "hạn đóng máng" in n["title"]
+    assert n["kind"] == cd.VESSEL_SCHEDULE and n["title"] == "HMM HOPE 062E-062E đã đổi"
+    assert n["detail"]["changes"] == [{"kind": cd.VESSEL_CLOSING, "label": "Cut-off", "old": "23/09/2026 11:00", "new": "24/09/2026 09:30"}]
+    assert (n["old_value"], n["new_value"]) == ("", "Cut-off 23/09/2026 11:00 → 24/09/2026 09:30")
     assert (n["source"], n["nav_tab"], n["nav_query"], n["read"]) == ("auto_sync", "vessel", "HMM HOPE", False)
 
 
-def test_open_gate_icd_eta_and_etd_changes_are_reported_separately(col):
+def test_every_time_changed_in_one_lookup_is_grouped_into_one_notification(col):
     db.add_to_watchlist(col, "CTL", "HMM HOPE", "")
     first = sched(OPEN_TS="00:00 09/09/2026", CLOSING_TIME_ICD="11:00 23/09/2026",
                   ACTUAL_BERTH_TIME="EST (dự kiến): 22:59 24/09/2026", ACTUAL_DEPATURE_TIME="EST (dự kiến): 16:59 25/09/2026")
@@ -68,7 +68,32 @@ def test_open_gate_icd_eta_and_etd_changes_are_reported_separately(col):
     db.insert_vessel_schedules(col, [sched(OPEN_TS="00:00 10/09/2026", CLOSING_TIME_ICD="08:00 23/09/2026",
                                            ACTUAL_BERTH_TIME="EST (dự kiến): 05:00 25/09/2026",
                                            ACTUAL_DEPATURE_TIME="EST (dự kiến): 16:59 25/09/2026")])
-    assert sorted(n["kind"] for n in notes()) == sorted([cd.VESSEL_OPEN_GATE, cd.VESSEL_CLOSING_ICD, cd.VESSEL_ETA])
+    (n,) = notes()
+    assert [c["kind"] for c in n["detail"]["changes"]] == [cd.VESSEL_ETA, cd.VESSEL_CLOSING_ICD, cd.VESSEL_OPEN_GATE]
+    assert n["new_value"] == ("ETA 24/09/2026 22:59 → 25/09/2026 05:00\n"
+                              "Cut-off ICD 23/09/2026 11:00 → 23/09/2026 08:00\n"
+                              "Mở cổng hạ 09/09/2026 00:00 → 10/09/2026 00:00")
+
+
+def test_a_grouped_notification_leaves_out_times_already_reported(col):
+    db.add_to_watchlist(col, "CTL", "HMM HOPE", "062E")
+    db.insert_vessel_schedules(col, [sched(ACTUAL_DEPATURE_TIME="23:00 06/10/2026")])
+    db.insert_vessel_schedules(col, [sched(closing="2026-09-24 09:30:00", ACTUAL_DEPATURE_TIME="23:00 06/10/2026")])
+    # ePort flips the cut-off back and forth while the ETD really moves: only the ETD is news
+    db.insert_vessel_schedules(col, [sched(ACTUAL_DEPATURE_TIME="23:00 06/10/2026")])
+    db.insert_vessel_schedules(col, [sched(closing="2026-09-24 09:30:00", ACTUAL_DEPATURE_TIME="23:00 07/10/2026")])
+    assert [[c["kind"] for c in n["detail"]["changes"]] for n in reversed(notes())] == [
+        [cd.VESSEL_CLOSING], [cd.VESSEL_CLOSING], [cd.VESSEL_ETD]]
+
+
+def test_one_row_per_change_notifications_from_before_still_count_as_reported(col):
+    db.add_to_watchlist(col, "CTL", "HMM HOPE", "062E")
+    db.insert_vessel_schedules(col, [sched()])
+    with db.get_connection() as conn:
+        db._record_notifications(conn, col, [{"kind": cd.VESSEL_CLOSING, "entity_key": "CTL|HMM HOPE|062E-062E",
+                                              "old": "23/09/2026 11:00", "new": "24/09/2026 09:30", "title": "t"}], "manual")
+    db.insert_vessel_schedules(col, [sched(closing="2026-09-24 09:30:00")])
+    assert len(notes()) == 1
 
 
 def test_a_pure_format_difference_is_silent(col):
@@ -137,7 +162,7 @@ def test_a_flip_flop_does_not_repeat_the_same_alert_within_a_day(col):
     db.insert_vessel_schedules(col, [sched(closing="2026-09-23 11:00:00")])
     for value in ("2026-09-24 09:30:00", "2026-09-23 11:00:00", "2026-09-24 09:30:00"):
         db.insert_vessel_schedules(col, [sched(closing=value)])
-    assert [n["new_value"] for n in reversed(notes())] == ["24/09/2026 09:30", "23/09/2026 11:00"]
+    assert [n["detail"]["changes"][0]["new"] for n in reversed(notes())] == ["24/09/2026 09:30", "23/09/2026 11:00"]
 
 
 def test_restore_and_move_do_not_notify(col):
@@ -276,7 +301,7 @@ def test_claim_os_hands_out_each_background_change_once(client, col):
     db.insert_vessel_schedules(col, [sched(closing="2026-09-28 09:30:00")], "manual")     # manual: never a popup
     claim = client.post(f"{API}/notifications/claim-os").json()
     assert [i["source"] for i in claim["items"]] == ["auto_sync", "auto_sync"]
-    assert claim["summary"]["count"] == 2 and "2 thay đổi" in claim["summary"]["title"] and "tàu đổi hạn đóng máng" in claim["summary"]["body"]
+    assert claim["summary"]["count"] == 2 and "2 thay đổi" in claim["summary"]["title"] and "2 tàu đổi lịch" in claim["summary"]["body"]
     assert client.post(f"{API}/notifications/claim-os").json() == {"items": [], "summary": None}      # atomic: nothing twice
 
 
@@ -360,7 +385,7 @@ def test_claim_os_does_not_popup_old_changes_found_while_the_app_was_closed(col)
         conn.execute("UPDATE notifications SET created_at = ? WHERE id = (SELECT MIN(id) FROM notifications);",
                      ((datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M:%S"),))
     claim = db.claim_os_notifications()
-    assert [i["new_value"] for i in claim["items"]] == ["25/09/2026 09:30"]
+    assert [i["detail"]["changes"][0]["new"] for i in claim["items"]] == ["25/09/2026 09:30"]
     assert claim["summary"]["count"] == 1
     assert db.claim_os_notifications() == {"items": [], "summary": None}  # and the stale one is not replayed later
     assert len(notes()) == 2                                             # yet both are still in the bell

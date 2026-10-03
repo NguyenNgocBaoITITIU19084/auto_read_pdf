@@ -5,6 +5,7 @@ import { useNotifications } from '../../context/NotificationsContext';
 import { AppNotification, NotificationKind } from '../../types';
 import { formatTimeAgo } from '../../utils/formatters';
 import { notificationChange, notificationTitle } from '../../utils/notifications';
+import { VesselChangeList } from './VesselChangeList';
 import { tf } from '../../services/i18nFormat';
 import { Tooltip } from './Tooltip';
 
@@ -17,6 +18,7 @@ const KIND_ICON: Record<NotificationKind, React.ReactNode> = {
   vessel_open_gate: <Ship className="w-4 h-4" />,
   vessel_eta: <Clock className="w-4 h-4" />,
   vessel_etd: <Clock className="w-4 h-4" />,
+  vessel_schedule: <Ship className="w-4 h-4" />,
   test: <Bell className="w-4 h-4" />,
 };
 
@@ -81,7 +83,7 @@ export const NotificationBell: React.FC = () => {
         <div
           role="dialog"
           aria-label={n.title}
-          className="absolute right-0 top-full mt-2 w-[22rem] max-w-[calc(100vw-1.5rem)] z-50 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-900/20 overflow-hidden"
+          className="absolute right-0 top-full mt-2 w-[30rem] max-w-[calc(100vw-1.5rem)] z-50 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl shadow-slate-900/20 overflow-hidden"
         >
           <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-800">
             <div className="text-xs font-bold text-slate-800 dark:text-slate-100">
@@ -112,7 +114,7 @@ export const NotificationBell: React.FC = () => {
             </div>
           </div>
 
-          <div className="max-h-[26rem] overflow-y-auto">
+          <div className="max-h-[min(36rem,75vh)] overflow-y-auto">
             {items.length === 0 ? (
               <div className="px-4 py-8 text-center text-slate-400 dark:text-slate-500">
                 <BellOff className="w-7 h-7 mx-auto mb-2 opacity-50" />
@@ -148,7 +150,11 @@ export const NotificationBell: React.FC = () => {
                             </span>
                             {!item.read && <span aria-label="unread" className="mt-1 w-2 h-2 rounded-full bg-primary-500 shrink-0" />}
                           </span>
-                          <span className="block text-[11px] font-mono text-slate-600 dark:text-slate-300 mt-0.5">{notificationChange(item)}</span>
+                          {item.detail?.changes?.length ? (
+                            <VesselChangeList item={item} variant="compact" />
+                          ) : (
+                            <span className="block text-[11px] font-mono text-slate-600 dark:text-slate-300 mt-0.5">{notificationChange(item)}</span>
+                          )}
                           {bookings.length > 0 && (
                             <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">{tf(n.bookings, { list: bookings.join(', ') })}</span>
                           )}

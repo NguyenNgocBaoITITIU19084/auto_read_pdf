@@ -166,7 +166,16 @@ export const translations = {
         vessel_open_gate: "Tàu {name}: đổi giờ mở cổng hạ",
         vessel_eta: "Tàu {name}: đổi lịch cập bến (ETA)",
         vessel_etd: "Tàu {name}: đổi lịch rời bến (ETD)",
+        vessel_schedule: "{name} đã đổi",
       },
+      changeLabels: {
+        vessel_etd: "ETD",
+        vessel_eta: "ETA",
+        vessel_closing: "Cut-off",
+        vessel_closing_icd: "Cut-off ICD",
+        vessel_open_gate: "Mở cổng hạ",
+      },
+      shift: { day: "ngày", hour: "giờ", minute: "phút", later: "Lùi trễ hơn", earlier: "Kéo sớm hơn" },
       settings: {
         title: "Thông báo thay đổi",
         desc: "Chọn những thay đổi bạn muốn được báo.",
@@ -1268,7 +1277,16 @@ export const translations = {
         vessel_open_gate: "Vessel {name}: gate-open time changed",
         vessel_eta: "Vessel {name}: ETA changed",
         vessel_etd: "Vessel {name}: ETD changed",
+        vessel_schedule: "{name} changed",
       },
+      changeLabels: {
+        vessel_etd: "ETD",
+        vessel_eta: "ETA",
+        vessel_closing: "Cut-off",
+        vessel_closing_icd: "Cut-off ICD",
+        vessel_open_gate: "Gate open",
+      },
+      shift: { day: "d", hour: "h", minute: "m", later: "Moved later", earlier: "Moved earlier" },
       settings: {
         title: "Change notifications",
         desc: "Choose which changes you want to be told about.",

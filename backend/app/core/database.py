@@ -1754,17 +1754,33 @@ def _detect_vessel_changes(conn: sqlite3.Connection, col_id: int, schedules: lis
         affected = [b[0] for b in bookings if text_matches_schedule(b[1], new)]
         if not watched and not affected:
             continue  # neither on the watchlist nor used by any booking
-        entity = f"{new['site_id']}|{new['vessel_name']}|{new['in_out_voyage']}"
         label = f"{new['vessel_name']} {new['in_out_voyage']}".strip()
-        for ch in changes:
-            out.append({
-                "kind": ch["kind"], "entity_key": entity, "old": ch["old"], "new": ch["new"],
-                "title": f"Tàu {label}: đổi {ch['label']}",
-                "nav_tab": "vessel", "nav_query": new["vessel_name"],
-                "detail": {"site_id": new["site_id"], "vessel": new["vessel_name"], "voyage": new["in_out_voyage"],
-                           "bookings": affected[:8]},
-            })
+        # one notification for the vessel, listing every time that changed in this lookup
+        out.append({
+            "kind": cd.VESSEL_SCHEDULE, "entity_key": f"{new['site_id']}|{new['vessel_name']}|{new['in_out_voyage']}",
+            "changes": changes, "title": f"{label} đã đổi",
+            "nav_tab": "vessel", "nav_query": new["vessel_name"],
+            "detail": {"site_id": new["site_id"], "vessel": new["vessel_name"], "voyage": new["in_out_voyage"],
+                       "bookings": affected[:8]},
+        })
     return out
+
+
+def _recent_vessel_changes(conn: sqlite3.Connection, col_id, entity_key: str, since: str) -> set[tuple[str, str]]:
+    """(kind, new value) of the vessel times already reported for this vessel since `since`,
+    from grouped notifications and from the one-row-per-change ones written before them."""
+    seen = set()
+    for kind, new_value, detail in conn.execute(
+            "SELECT kind, new_value, detail FROM notifications WHERE collection_id IS ? AND entity_key = ? AND created_at >= ?;",
+            (col_id, entity_key, since)).fetchall():
+        if kind == cd.VESSEL_SCHEDULE:
+            try:
+                seen.update((c["kind"], c["new"]) for c in json.loads(detail or "{}").get("changes") or [])
+            except (TypeError, ValueError, KeyError, AttributeError):
+                continue
+        elif kind in _VESSEL_KINDS:
+            seen.add((kind, new_value))
+    return seen
 
 
 def _detect_container_changes(conn: sqlite3.Connection, col_id: int, containers: list[dict], enabled) -> list[dict]:
@@ -1820,6 +1836,15 @@ def _detect_container_changes(conn: sqlite3.Connection, col_id: int, containers:
     return out
 
 
+def _insert_notification(conn: sqlite3.Connection, col_id, ch: dict, source: str, stamp: str) -> None:
+    conn.execute(
+        "INSERT INTO notifications (collection_id, kind, entity_key, title, old_value, new_value, detail, nav_tab, nav_query, "
+        "source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        (col_id, ch["kind"], ch["entity_key"], ch["title"], ch.get("old", ""), ch["new"],
+         json.dumps(ch.get("detail") or {}, ensure_ascii=False), ch.get("nav_tab"), ch.get("nav_query"),
+         source if source in (NOTIFY_SOURCE_AUTO, NOTIFY_SOURCE_MANUAL) else NOTIFY_SOURCE_MANUAL, stamp))
+
+
 def _record_notifications(conn: sqlite3.Connection, col_id: int, changes: list[dict], source: str, now: datetime | None = None) -> int:
     """Stores the detected changes. An identical change (same collection, kind, entity and new value) seen again within
     NOTIFY_DEDUPE_HOURS is dropped, so ePort flip-flopping or repeated lookups don't repeat the alert."""
@@ -1830,6 +1855,18 @@ def _record_notifications(conn: sqlite3.Connection, col_id: int, changes: list[d
     since = (now - timedelta(hours=NOTIFY_DEDUPE_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
     added, seen = 0, set()
     for ch in changes:
+        if ch["kind"] == cd.VESSEL_SCHEDULE:
+            # drop the times already reported for this vessel (flip-flops, repeated lookups); keep the rest together
+            reported = _recent_vessel_changes(conn, col_id, ch["entity_key"], since)
+            fresh = [c for c in ch["changes"] if (c["kind"], c["new"]) not in reported
+                     and (c["kind"], ch["entity_key"], c["new"]) not in seen]
+            if not fresh:
+                continue
+            seen.update((c["kind"], ch["entity_key"], c["new"]) for c in fresh)
+            ch = {**ch, "old": "", "new": cd.change_lines(fresh), "detail": {**(ch.get("detail") or {}), "changes": fresh}}
+            _insert_notification(conn, col_id, ch, source, stamp)
+            added += 1
+            continue
         ident = (ch["kind"], ch["entity_key"], ch["new"])
         if ident in seen:
             continue
@@ -1837,12 +1874,7 @@ def _record_notifications(conn: sqlite3.Connection, col_id: int, changes: list[d
         if conn.execute("SELECT 1 FROM notifications WHERE collection_id = ? AND kind = ? AND entity_key = ? AND new_value = ? "
                         "AND created_at >= ? LIMIT 1;", (col_id, ch["kind"], ch["entity_key"], ch["new"], since)).fetchone():
             continue
-        conn.execute(
-            "INSERT INTO notifications (collection_id, kind, entity_key, title, old_value, new_value, detail, nav_tab, nav_query, "
-            "source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-            (col_id, ch["kind"], ch["entity_key"], ch["title"], ch.get("old", ""), ch["new"],
-             json.dumps(ch.get("detail") or {}, ensure_ascii=False), ch.get("nav_tab"), ch.get("nav_query"),
-             source if source in (NOTIFY_SOURCE_AUTO, NOTIFY_SOURCE_MANUAL) else NOTIFY_SOURCE_MANUAL, stamp))
+        _insert_notification(conn, col_id, ch, source, stamp)
         added += 1
     if added:
         old = (now - timedelta(days=NOTIFY_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
@@ -1928,8 +1960,9 @@ def _summarize_for_os(rows: list[dict]) -> dict:
         cd.CONTAINER_CUSTOMS: "cont thông quan", cd.CONTAINER_INGATE: "cont INGATE", cd.CONTAINER_OUTGATE: "cont OUTGATE",
         cd.VESSEL_CLOSING: "tàu đổi hạn đóng máng", cd.VESSEL_CLOSING_ICD: "tàu đổi giờ đóng ICD",
         cd.VESSEL_OPEN_GATE: "tàu đổi giờ mở cổng hạ", cd.VESSEL_ETA: "tàu đổi ETA", cd.VESSEL_ETD: "tàu đổi ETD",
+        cd.VESSEL_SCHEDULE: "tàu đổi lịch",
     }
-    body = " · ".join(f"{counts[k]} {words[k]}" for k in cd.ALL_KINDS if k in counts)
+    body = " · ".join(f"{counts[k]} {words[k]}" for k in (cd.VESSEL_SCHEDULE, *cd.ALL_KINDS) if k in counts)
     first = rows[0]
     return {"title": f"{len(rows)} thay đổi mới", "body": body, "count": len(rows),
             "nav_tab": first["nav_tab"], "nav_query": first["nav_query"], "notification_id": first["id"]}
