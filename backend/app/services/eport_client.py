@@ -91,6 +91,9 @@ def is_vessel_name_match(query_vessel: str, model_vessel: str) -> bool:
     m_norm = normalize_string(m_clean)
     return q_norm == m_norm or q_norm in m_norm or m_norm in q_norm
 
+# ePort sites that /ships/Searcher accepts as siteId (mirrors frontend/src/utils/ports.ts).
+EPORT_VESSEL_SITES = {"CTL", "GNL", "THP", "CMS", "IST", "TNT"}
+
 def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[dict]:
     """
     Call the internal Saigon Newport ePort API to search for vessel schedule.
@@ -180,8 +183,9 @@ def search_vessels_detailed(site_id: str, vessel_name: str, voyage: str = None) 
                         cleaned_item[k] = v.strip()
                     else:
                         cleaned_item[k] = v
-                # Ensure SITE_ID is stored with ePort site or fallback to query site
-                if not cleaned_item.get("SITE_ID"):
+                # Store a site that can be queried again: ePort may answer a GNL search with SITE_ID 'TCI',
+                # which it cannot look up -> watchlist auto-sync / resync of that row would silently fail.
+                if (cleaned_item.get("SITE_ID") or "").upper() not in EPORT_VESSEL_SITES:
                     cleaned_item["SITE_ID"] = site_id_query
                 cleaned_models.append(cleaned_item)
                 
