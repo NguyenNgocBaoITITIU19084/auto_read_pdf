@@ -4,8 +4,9 @@
     python scripts/bump_version.py 2.1.0
 
 Updates package.json ("version"), backend/app/core/version.py (APP_VERSION) and prints
-the git commands for tagging — the CI workflow only publishes a release for a v* tag,
-and electron-updater compares the released version against package.json.
+the git commands to publish — CI releases v<version> automatically when a push to main
+carries a version that has no GitHub release yet, and electron-updater compares the
+released version against package.json.
 """
 import json
 import re
@@ -39,7 +40,7 @@ def main() -> int:
     print(f"Version {old} -> {version}")
     print("Next:")
     print(f'  git commit -am "chore(release): v{version}"')
-    print(f"  git tag v{version} && git push github main --tags")
+    print("  git push github main   # CI creates tag + release v" + version)
     return 0
 
 
