@@ -17,7 +17,7 @@ _RE_DMONY = re.compile(r"^(\d{1,2})[\s-]*([A-Za-z]{3})[\s-]*(\d{4}|\d{2})(?:\s*(
 _RE_MONDY = re.compile(r"^([A-Za-z]{3})[\s-]+(\d{1,2})[\s,-]+(\d{4})(?:\s+(\d{1,2}:\d{2}))?$")
 # Trailing time-zone tag printed by CargoSmart-style bookings, e.g. '01 Oct 2026 23:59(ICT)'
 _RE_TZ_SUFFIX = re.compile(r"\s*\([A-Z]{2,5}\)$")
-_RE_ISO = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
+_RE_ISO = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
 _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 
 # Finds a date-shaped token anywhere in a string (not anchored like the formats above), used to
@@ -59,6 +59,7 @@ def parse_date_str(date_str: str) -> str:
     - '02-Oct-2026 15:00'       -> '02/10/2026 15:00'
     - '01 Oct 2026 23:59(ICT)'  -> '01/10/2026 23:59'
     - 'Oct-04-2026 23:00'       -> '04/10/2026 23:00'
+    - '2026.10.08 00:00'        -> '08/10/2026 00:00'
     Unrecognized strings (including 'null') are returned unchanged (stripped).
     """
     if not date_str:
@@ -153,6 +154,7 @@ CARRIERS: List[CarrierEntry] = [
     ("TS LINES", _rx(r"\bTS\s?LINES\b", r"\bTSL\b"), (), []),
     ("RCL", _rx(r"\bREGIONAL\s+CONTAINER\s+LINES?\b", r"\bRCL\b"), (), []),
     ("OOCL", _rx(r"\bOOCL\b"), ("OOLU",), []),
+    ("KMTC", _rx(r"\bKMTC\b", r"\bKOREA\s+MARINE\s+TRANSPORT\b"), (), _rx(r"^KMTC\s")),
 ]
 
 UNKNOWN_CARRIER = "Khác"
@@ -347,7 +349,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

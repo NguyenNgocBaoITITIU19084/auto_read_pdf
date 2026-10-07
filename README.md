@@ -1,7 +1,7 @@
 # Auto Read PDF Pro v2.0 🚀
 
 Ứng dụng Desktop hiện đại chuyên dụng cho Logistics & Xuất nhập khẩu:
-- **Trích xuất thông tin Booking PDF đa hãng tàu** (Dongjin, PIL, CUL, ONE, SITC, COSCO, OOCL, Hapag-Lloyd,...) với độ chính xác tuyệt đối.
+- **Trích xuất thông tin Booking PDF đa hãng tàu** (Dongjin, PIL, CUL, ONE, SITC, COSCO, OOCL, Hapag-Lloyd, KMTC,...) với độ chính xác tuyệt đối.
 - **Tra cứu Lịch tàu ePort Saigon Newport** (Cát Lái `CTL`, Giang Nam `GNL`, Tân Cảng Hiệp Phước `THP`, CMS ICD Nhơn Trạch `CMS`, ICD Tân Cảng Sóng Thần `IST`, ICD Tân Cảng Nhơn Trạch `TNT`), quản lý danh sách theo dõi (Watchlist) và tự động đồng bộ (Auto Sync).
 - **Tra cứu thông tin bãi & trạng thái hải quan (HQGS, Phí hạ tầng) của Container**.
 - **Quản lý phân vùng dữ liệu theo Bộ sưu tập (Collections)**.
@@ -104,4 +104,5 @@ Không cần cài app trên điện thoại — chụp ảnh booking trực ti�
 - **Hãng PIL**: Nhận diện chuyến Non-direct, bóc tách `Pre Carrier`, cảng chuyển tải `T/S Port: SINGAPORE`, bãi cấp rỗng đa dòng (`TAN CANG HIEP LUC...`), nơi hạ `CATLAI TERMINAL`, chuẩn hóa ngày dạng `14Jul26` $\rightarrow$ `14/07/2026`.
 - **Hãng COSCO / OOCL** (mẫu CargoSmart): `BOOKING NUMBER`, tàu `INTENDED VESSEL/VOYAGE` + ETD, cảng chuyển tải `TRANSHIPMENT PORT`, cảng đích (bỏ tên terminal), `BLOCK NUMBER`, `INTENDED (FCL) CY CUT-OFF`, bãi cấp rỗng / hạ bãi (OOCL in 2 cột song song → tách theo toạ độ chữ). Nhận diện hãng theo dòng `FROM:` nên OOCL chở tàu COSCO vẫn ra OOCL.
 - **Hãng Hapag-Lloyd**: số booking = `Our Reference`, loại cont từ `Summary: 1x45GP`, bảng lộ trình đọc theo toạ độ: bỏ chặng Inland Waterway/Barge/Truck, tàu + ETD lấy chặng tàu đầu tiên, cảng chuyển tải = điểm đến chặng tàu đầu, cảng đích = điểm đến chặng tàu cuối; Hapag không có CY cut-off.
+- **Hãng KMTC** (mẫu "Lệnh cấp container", nhãn song ngữ Việt/Anh): số booking = `BOOKING NOTE NO`, tàu/chuyến + `Ngày tàu chạy (ETD)`, `Cảng đích (POD)` / `(DLY)`, `Cảng chuyển tải (T/S Port)` (nếu có), quy cách cont `40 HC X 1` → `40 HC` + Qty `1` (nhiều loại thì cộng tổng), bãi cấp rỗng `Pick-up Place`, nơi hạ bãi `Drop-off Place` (bỏ đuôi `(HCM)`), CY cut-off = `Closing time tại cảng xuất` dạng `2026.10.08 00:00` → `08/10/2026 00:00`. KMTC không có block code.
 - **Các hãng khác**: ONE, SITC,... tự động fallback và nhận diện thông minh.

@@ -25,14 +25,14 @@ FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"
 GEMINI_TIMEOUT_S = 40
 OCR_TIMEOUT_S = 15
 
-SYSTEM_PROMPT = """You are an expert shipping & logistics document parser specialized in Shipping Orders, Booking Confirmations, and Booking Receipts from carriers like Dongjin, PIL, CULINES (China United Lines / CUL), ONE (Ocean Network Express), SITC, Cosco, Maersk, Evergreen, CMA CGM, Hapag-Lloyd, Yang Ming, OOCL, RCL, TS Lines, Sinokor, Heung-A, Samudera, etc.
+SYSTEM_PROMPT = """You are an expert shipping & logistics document parser specialized in Shipping Orders, Booking Confirmations, and Booking Receipts from carriers like Dongjin, PIL, CULINES (China United Lines / CUL), ONE (Ocean Network Express), SITC, Cosco, Maersk, Evergreen, CMA CGM, Hapag-Lloyd, Yang Ming, OOCL, RCL, TS Lines, Sinokor, Heung-A, Samudera, KMTC, etc.
 
 Analyze the image (which may be a photo, scan, or screenshot of a booking confirmation document) and extract the booking details.
 
 Return ONLY a valid JSON object with the following exact keys:
 {
   "Booking No": "string or 'null'",
-  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR | HEUNG-A | SAMUDERA | TS LINES | RCL | OOCL | Khác",
+  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR | HEUNG-A | SAMUDERA | TS LINES | RCL | OOCL | KMTC | Khác",
   "Port of Discharging": "string or 'null'",
   "Place of Delivery": "string or 'null'",
   "Block": "string or 'null'",
