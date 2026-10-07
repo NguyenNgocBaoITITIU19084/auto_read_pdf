@@ -73,7 +73,7 @@ Chạy bộ kiểm thử tự động toàn diện (PDF parser các hãng tàu, 
 ```bash
 npm run test:py
 # hoặc
-.venv/bin/pytest backend/tests/
+.venv/bin/pytest tests/
 ```
 
 ---
