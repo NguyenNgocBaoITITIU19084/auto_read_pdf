@@ -1,4 +1,4 @@
-# Auto Read PDF Pro v2.0 🚀
+# Auto Read PDF Pro v2.4 🚀
 
 Ứng dụng Desktop hiện đại chuyên dụng cho Logistics & Xuất nhập khẩu:
 - **Trích xuất thông tin Booking PDF đa hãng tàu** (Dongjin, PIL, CUL, ONE, SITC, COSCO, OOCL, Hapag-Lloyd, KMTC,...) với độ chính xác tuyệt đối.
@@ -6,6 +6,29 @@
 - **Tra cứu thông tin bãi & trạng thái hải quan (HQGS, Phí hạ tầng) của Container**.
 - **Quản lý phân vùng dữ liệu theo Bộ sưu tập (Collections)**.
 - **Xuất dữ liệu ra file Excel chuyên nghiệp (Style chuẩn giao diện bảng biểu)** & Sao lưu/Khôi phục toàn bộ dữ liệu dưới dạng JSON.
+
+### ✨ Tính năng mới
+
+**Booking**
+- **Đọc thêm mẫu booking PDF**: COSCO, OOCL, Hapag-Lloyd và KMTC (Lệnh cấp container). Chi tiết ở mục [Các hãng tàu và mẫu trích xuất PDF hỗ trợ](#-các-hãng-tàu-và-mẫu-trích-xuất-pdf-hỗ-trợ).
+- **Xem PDF song song trước khi lưu**: mở bản PDF gốc bên cạnh form để đối chiếu và sửa từng trường.
+- **Hàng đợi đọc ảnh hàng loạt**: thả nhiều ảnh booking cùng lúc, mỗi ảnh có trạng thái riêng, kết quả AI được xem lại trước khi lưu. Booking đã lưu tự rời khỏi hàng đợi.
+- **Thùng rác**: booking bị xoá được chuyển vào thùng rác, có thể khôi phục hoặc xoá vĩnh viễn.
+- **Ghi chú cho từng booking** (hiện khi rê chuột), cột thời gian thêm, màu theo hãng tàu.
+- **Cảnh báo cut-off theo closing time của ePort**.
+
+**Container**
+- **Đọc ảnh container**: lấy số container, số seal, tare, max gross từ ảnh rồi tra cứu luôn vào bảng.
+
+**Thông báo**
+- **Báo khi giờ tàu hoặc sự kiện container thay đổi**: mỗi tàu một thông báo, liệt kê đủ các mốc giờ đã đổi. Có popup trên desktop kèm âm báo, chuông rung khi còn thông báo chưa đọc, bấm vào để xem chi tiết.
+
+**Thao tác & giao diện**
+- **Menu chuột phải** trên từng dòng ở các tab Booking, Lịch tàu, Container; thanh thao tác hàng loạt hiện khi chọn từ 2 dòng.
+- **Chọn nhiều trường để copy cùng lúc** trong màn hình chi tiết, kể cả copy một phần nội dung của trường.
+- **Dashboard tổng quan** kèm theo dõi CPU/RAM, giải phóng bộ nhớ và khởi động lại backend.
+- **Tab Logs** xem nhật ký hệ thống (tự xoá log cũ hơn 3 ngày).
+- **Nút cập nhật** trên header hiển thị phiên bản thật đang chạy.
 
 ---
 
@@ -45,12 +68,12 @@ Lệnh này sẽ tự động khởi chạy đồng thời:
 
 ## 🧪 Kiểm thử (Testing)
 
-Chạy bộ kiểm thử tự động toàn diện (PDF parser tests cho Dongjin, PIL, ePort mock, Excel export, REST API endpoints):
+Chạy bộ kiểm thử tự động toàn diện (PDF parser các hãng tàu, ePort mock, Excel export, REST API endpoints):
 
 ```bash
 npm run test:py
 # hoặc
-.venv/bin/pytest tests/
+.venv/bin/pytest backend/tests/
 ```
 
 ---
