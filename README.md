@@ -1,4 +1,4 @@
-# Auto Read PDF Pro v2.5 🚀
+# Auto Read PDF Pro v2.6 🚀
 
 Ứng dụng Desktop hiện đại chuyên dụng cho Logistics & Xuất nhập khẩu:
 - **Trích xuất thông tin Booking PDF đa hãng tàu** (Dongjin, PIL, CUL, ONE, SITC, COSCO, OOCL, Hapag-Lloyd, KMTC,...) với độ chính xác tuyệt đối.
