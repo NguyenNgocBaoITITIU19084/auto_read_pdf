@@ -24,6 +24,7 @@ a = Analysis(
     binaries=[],
     datas=extra_datas,
     hiddenimports=[
+        'zxingcpp',
         'uvicorn.logging',
         'uvicorn.loops',
         'uvicorn.loops.auto',
