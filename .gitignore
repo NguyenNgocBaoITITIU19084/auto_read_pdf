@@ -87,3 +87,6 @@ backend/booking_data.db
 
 # graphify knowledge graph output
 graphify-out/
+
+# project uses npm (package-lock.json)
+yarn.lock
