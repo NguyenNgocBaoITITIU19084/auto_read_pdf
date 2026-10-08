@@ -1,6 +1,7 @@
 import io
 import json
 import pytest
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 from PIL import Image
 
@@ -201,7 +202,7 @@ def test_detailed_gemini_errors_then_no_ocr(monkeypatch, no_ocr, status, body, e
     out = ie.extract_booking_from_image_detailed(create_sample_image_bytes(), "a.jpg", api_key="k", model="gemini-2.5-flash")
     assert out["engine_used"] == "none"
     assert any(expected_fragment in w for w in out["warnings"]), out["warnings"]
-    assert ie.W_NO_OCR in out["warnings"]
+    assert ie.no_ocr_warning() in out["warnings"]
     assert out["data"]["Booking No"] == "null"
 
 
@@ -286,6 +287,52 @@ def test_available_ocr_engines_requires_swift_on_path(monkeypatch):
     monkeypatch.setattr(ie.sys, "platform", "win32")
     monkeypatch.setattr(ie.shutil, "which", lambda name: "/usr/bin/" + name)
     assert "swift" not in ie.available_ocr_engines()
+
+
+def _on_windows(monkeypatch, major=10):
+    monkeypatch.setattr(ie.sys, "platform", "win32")
+    monkeypatch.setattr(ie.sys, "getwindowsversion", lambda: SimpleNamespace(major=major), raising=False)
+    monkeypatch.setattr(ie, "_windows_powershell", lambda: r"C:\\Windows\\powershell.exe")
+
+
+def test_available_ocr_engines_uses_the_built_in_windows_ocr(monkeypatch):
+    _on_windows(monkeypatch)
+    assert "windows" in ie.available_ocr_engines()
+    _on_windows(monkeypatch, major=6)   # Windows 7/8 have no Windows.Media.Ocr
+    assert "windows" not in ie.available_ocr_engines()
+
+
+def test_windows_ocr_passes_the_image_through_env_and_hides_the_console(monkeypatch):
+    _on_windows(monkeypatch)
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        path = kwargs["env"]["AUTO_READ_OCR_IMAGE"]
+        seen.update(cmd=cmd, size=Image.open(path).size, mode=Image.open(path).mode, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout="\ufeffHPCU 533004 2\r\nTARE 3700 KG\r\n".encode("utf-8"), stderr=b"")
+
+    monkeypatch.setattr(ie.subprocess, "run", fake_run)
+    big = io.BytesIO()
+    Image.new("RGB", (5200, 1000), "white").save(big, format="PNG")
+    text = ie._ocr_windows(big.getvalue(), 10)
+    assert text == "HPCU 533004 2\r\nTARE 3700 KG"
+    assert "-EncodedCommand" in seen["cmd"] and "-NoProfile" in seen["cmd"]
+    assert seen["size"] == (2600, 500) and seen["mode"] == "L"
+    assert "creationflags" in seen["kwargs"]
+
+
+def test_windows_without_an_ocr_language_reports_no_engine_with_the_fix(monkeypatch):
+    _on_windows(monkeypatch)
+    monkeypatch.setattr(ie, "available_ocr_engines", lambda: ["windows"])
+    monkeypatch.setattr(ie.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=3, stdout=b"", stderr=b"NO_OCR_LANGUAGE"))
+    assert ie.run_local_ocr(create_sample_image_bytes()) == ("", [])
+    assert "English" in ie.no_ocr_warning()
+
+
+def test_windows_ocr_failure_returns_no_text(monkeypatch):
+    _on_windows(monkeypatch)
+    monkeypatch.setattr(ie.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout=b"", stderr=b"boom"))
+    assert ie._ocr_windows(create_sample_image_bytes(), 10) == ""
 
 
 def test_run_local_ocr_no_engines(monkeypatch, no_ocr):
@@ -406,3 +453,99 @@ def test_detailed_model_404_cascades_through_multiple_stale_live_candidates(monk
     assert out["engine_used"] == "gemini"
     assert len(calls) == 4  # gemini-2.0-flash, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-9-working
     assert "gemini-9-working" in calls[-1]
+
+
+@pytest.mark.skipif(ie.sys.platform != "win32", reason="runs the real Windows.Media.Ocr (Windows CI job)")
+def test_real_windows_ocr_reads_a_container_number():
+    from PIL import ImageDraw, ImageFont
+    image = Image.new("RGB", (1400, 260), "white")
+    font = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 120)
+    ImageDraw.Draw(image).text((40, 60), "HPCU 533004 2", fill="black", font=font)
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG")
+    try:
+        text = ie._ocr_windows(buf.getvalue(), 60)
+    except ie.OcrLanguageMissing:
+        pytest.skip("this Windows image has no OCR recognizer language installed")
+    assert "533004" in text.replace(" ", ""), text
+
+
+LIVE = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.5-flash-lite",
+        "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.1-flash-image"]
+
+
+def test_busy_fallbacks_prefer_newest_stable_flash_then_lite():
+    assert ie.busy_fallback_models(LIVE, ["gemini-3.8-flash"]) == [
+        "gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+
+
+def _runner(monkeypatch, behaviour):
+    """behaviour: model -> exception to raise, or a value to return. Records (model, timeout) calls."""
+    monkeypatch.setattr(ie, "list_gemini_models", lambda key, timeout=10: (LIVE, True))
+    calls = []
+
+    def call(model, timeout):
+        calls.append((model, timeout))
+        result = behaviour.get(model, "ok:" + model)
+        if isinstance(result, Exception):
+            raise result
+        return result
+    return calls, call
+
+
+def test_overloaded_model_falls_back_and_says_so(monkeypatch):
+    calls, call = _runner(monkeypatch, {"gemini-3.8-flash": ie.GeminiError("unavailable", "high demand", 503)})
+    out = ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    assert out["data"] == "ok:gemini-3.6-flash" and out["model_used"] == "gemini-3.6-flash" and out["error_kind"] is None
+    assert out["warnings"] == [ie.W_MODEL_BUSY_REPLACED.format(model="gemini-3.8-flash", fallback="gemini-3.6-flash")]
+    assert [m for m, _ in calls] == ["gemini-3.8-flash", "gemini-3.6-flash"]
+
+
+def test_a_hung_model_counts_as_overloaded_and_each_call_is_capped(monkeypatch):
+    calls, call = _runner(monkeypatch, {"gemini-3.8-flash": ie.GeminiError("network", "Read timed out. (read timeout=25)")})
+    out = ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    assert out["model_used"] == "gemini-3.6-flash"
+    assert all(timeout <= ie.GEMINI_ATTEMPT_TIMEOUT_S for _, timeout in calls)
+
+
+def test_an_overloaded_model_is_skipped_for_the_next_images(monkeypatch):
+    calls, call = _runner(monkeypatch, {"gemini-3.8-flash": ie.GeminiError("unavailable", "high demand", 503)})
+    ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    calls.clear()
+    out = ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    assert [m for m, _ in calls] == ["gemini-3.6-flash"] and "quá tải" in out["warnings"][0]
+
+
+def test_every_model_overloaded_still_pauses_with_the_overload_kind(monkeypatch):
+    busy = ie.GeminiError("unavailable", "high demand", 503)
+    calls, call = _runner(monkeypatch, {m: busy for m in LIVE})
+    out = ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    assert out["data"] is None and out["error_kind"] == "unavailable" and ie.W_UNAVAILABLE in out["warnings"]
+    assert len(calls) == 1 + ie.MAX_BUSY_FALLBACKS
+
+
+@pytest.mark.parametrize("kind", ["invalid_key", "quota"])
+def test_key_problems_do_not_try_other_models(monkeypatch, kind):
+    calls, call = _runner(monkeypatch, {"gemini-3.8-flash": ie.GeminiError(kind, "x", 400)})
+    out = ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    assert len(calls) == 1 and out["error_kind"] == kind
+
+
+def test_a_real_network_outage_does_not_try_other_models(monkeypatch):
+    calls, call = _runner(monkeypatch, {"gemini-3.8-flash": ie.GeminiError("network", "Failed to resolve host")})
+    out = ie.run_gemini_with_fallback("k", "gemini-3.8-flash", call)
+    assert len(calls) == 1 and out["error_kind"] == "network"
+
+
+def test_booking_reader_uses_the_busy_fallback(monkeypatch, no_ocr):
+    monkeypatch.setattr(ie, "list_gemini_models", lambda key, timeout=10: (LIVE, True))
+
+    def fake_post(url, **kwargs):
+        if "gemini-3.8-flash" in url:
+            return _resp(503, {"error": {"message": "This model is currently experiencing high demand."}})
+        return _resp(200, GOOD_AI_BODY)
+
+    monkeypatch.setattr(ie.requests, "post", fake_post)
+    out = ie.extract_booking_from_image_detailed(create_sample_image_bytes(), "a.jpg", api_key="k", model="gemini-3.8-flash")
+    assert out["engine_used"] == "gemini" and out["model_used"] == "gemini-3.6-flash" and out["gemini_error_kind"] is None
+    assert any("quá tải" in w for w in out["warnings"])

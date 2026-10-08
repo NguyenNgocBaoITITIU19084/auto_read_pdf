@@ -258,4 +258,6 @@ async def extract_container_image(file: UploadFile = File(...), api_key: Optiona
     except Exception as e:
         logger.exception("Container image extraction failed")
         raise HTTPException(status_code=500, detail=f"Không đọc được ảnh: {e}")
+    logger.info(f"Container image extract engine={result['engine_used']} model={result['model_used']} "
+                f"gemini_error={result['gemini_error_kind']} warnings={result['warnings']}")
     return {"status": "success", **result}

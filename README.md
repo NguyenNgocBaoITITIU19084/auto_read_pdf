@@ -1,4 +1,4 @@
-# Auto Read PDF Pro v2.5 🚀
+# Auto Read PDF Pro v2.6 🚀
 
 Ứng dụng Desktop hiện đại chuyên dụng cho Logistics & Xuất nhập khẩu:
 - **Trích xuất thông tin Booking PDF đa hãng tàu** (Dongjin, PIL, CUL, ONE, SITC, COSCO, OOCL, Hapag-Lloyd, KMTC,...) với độ chính xác tuyệt đối.
@@ -19,6 +19,8 @@
 
 **Container**
 - **Đọc ảnh container**: lấy số container, số seal, tare, max gross từ ảnh rồi tra cứu luôn vào bảng.
+- **Quét mã vạch seal / container** ngay trên máy (không cần mạng): số đọc từ mã vạch được ưu tiên hơn số đọc từ chữ, lệch nhau thì có cảnh báo.
+- **OCR offline trên Windows** dùng bộ nhận dạng chữ có sẵn của Windows 10/11 khi không có Gemini; số cont đọc nhầm (O/0, I/1, S/5…) được tự sửa nhờ chữ số kiểm tra.
 
 **Thông báo**
 - **Báo khi giờ tàu hoặc sự kiện container thay đổi**: mỗi tàu một thông báo, liệt kê đủ các mốc giờ đã đổi. Có popup trên desktop kèm âm báo, chuông rung khi còn thông báo chưa đọc, bấm vào để xem chi tiết.

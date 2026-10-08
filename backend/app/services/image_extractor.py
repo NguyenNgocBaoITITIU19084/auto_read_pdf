@@ -4,6 +4,7 @@ import re
 import sys
 import json
 import time
+import logging
 import base64
 import shutil
 import subprocess
@@ -24,6 +25,16 @@ FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"
 
 GEMINI_TIMEOUT_S = 40
 OCR_TIMEOUT_S = 15
+# One image may try several models (deprecated / overloaded): each call is capped so a hung model leaves time for
+# the next one, and the whole Gemini step stays under the total budget.
+GEMINI_TOTAL_BUDGET_S = 60
+GEMINI_ATTEMPT_TIMEOUT_S = 25
+MODEL_BUSY_COOLDOWN_S = 300
+MAX_LIVE_FALLBACKS = 4
+MAX_BUSY_FALLBACKS = 2
+LIVE_MODELS_CACHE_S = 600
+
+logger = logging.getLogger("backend.services.gemini")
 
 SYSTEM_PROMPT = """You are an expert shipping & logistics document parser specialized in Shipping Orders, Booking Confirmations, and Booking Receipts from carriers like Dongjin, PIL, CULINES (China United Lines / CUL), ONE (Ocean Network Express), SITC, Cosco, Maersk, Evergreen, CMA CGM, Hapag-Lloyd, Yang Ming, OOCL, RCL, TS Lines, Sinokor, Heung-A, Samudera, KMTC, etc.
 
@@ -64,12 +75,15 @@ W_NO_KEY = "Chưa cấu hình Gemini API key — đang dùng OCR offline (độ 
 W_INVALID_KEY = "Gemini API key không hợp lệ hoặc không có quyền truy cập. Vui lòng kiểm tra lại key trong Cài đặt."
 W_MODEL_NOT_FOUND = "Model Gemini \"{model}\" không khả dụng (có thể đã ngừng hỗ trợ). Vui lòng chọn model khác trong Cài đặt."
 W_MODEL_REPLACED = "Model Gemini \"{model}\" không khả dụng, đã tự động dùng \"{fallback}\". Nên cập nhật model trong Cài đặt."
+W_MODEL_BUSY_REPLACED = "Model Gemini \"{model}\" đang quá tải, đã tự động dùng \"{fallback}\"."
 W_UNAVAILABLE = "Gemini đang quá tải (lỗi tạm thời từ phía Google). Hãy thử lại sau ít phút."
 W_QUOTA = "Đã vượt hạn mức (quota) của Gemini API. Vui lòng thử lại sau hoặc dùng API key khác."
 W_NETWORK = "Không kết nối được tới Gemini (lỗi mạng hoặc quá thời gian chờ)."
 W_GEMINI_OTHER = "Gemini trả về lỗi ({status}): {message}"
 W_GEMINI_BAD_RESPONSE = "Không đọc được kết quả trả về từ Gemini."
 W_NO_OCR = "Không có công cụ OCR offline trên máy này — cần Gemini API key hợp lệ để đọc ảnh."
+W_NO_OCR_WINDOWS = ("Không chạy được OCR có sẵn của Windows — vào Settings > Time & Language > Language & region, "
+                    "thêm ngôn ngữ English (United States) rồi mở lại app; hoặc cấu hình Gemini API key.")
 W_OCR_NO_TEXT = "OCR không nhận dạng được chữ nào trong ảnh."
 W_NO_FIELDS = "Không tìm thấy thông tin booking trong ảnh. Vui lòng kiểm tra lại ảnh hoặc nhập tay."
 
@@ -292,11 +306,73 @@ try? requestHandler.perform([request])
 '''
 
 
+# Windows 10/11 ship their own OCR (Windows.Media.Ocr). Windows PowerShell 5.1 can reach it through WinRT, so
+# Windows machines get offline OCR without installing anything. The image path comes in through an env var
+# (never spliced into the script) because %TEMP% can contain a Vietnamese user name.
+_WINDOWS_OCR_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+$null = [Windows.Foundation.IAsyncOperation`1, Windows.Foundation, ContentType = WindowsRuntime]
+$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]
+$null = [Windows.Storage.Streams.RandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime]
+$awaiter = [WindowsRuntimeSystemExtensions].GetMember('GetAwaiter').Where({ $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }, 'First')[0]
+function Await($op, [Type]$type) { $awaiter.MakeGenericMethod($type).Invoke($null, @($op)).GetResult() }
+
+# Container text is Latin: prefer an English recognizer, then the user's languages, then anything installed
+$langs = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages
+$engine = $null
+$en = $langs | Where-Object { $_.LanguageTag -like 'en*' } | Select-Object -First 1
+if ($en) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($en) }
+if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }
+$any = $langs | Select-Object -First 1
+if (-not $engine -and $any) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($any) }
+if (-not $engine) { [Console]::Error.WriteLine('NO_OCR_LANGUAGE'); exit 3 }
+
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($env:AUTO_READ_OCR_IMAGE)) ([Windows.Storage.StorageFile])
+$stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+$decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$stream.Dispose()
+foreach ($line in $result.Lines) { [Console]::Out.WriteLine($line.Text) }
+'''
+
+_WINDOWS_OCR_NO_LANGUAGE_EXIT = 3
+# Windows.Media.Ocr rejects images larger than OcrEngine.MaxImageDimension (2600 px on current Windows builds)
+_WINDOWS_OCR_MAX_SIDE = 2600
+
+
+class OcrLanguageMissing(Exception):
+    """Windows has no OCR recognizer language installed, so its built-in OCR cannot run."""
+
+
+def _windows_powershell() -> Optional[str]:
+    """Windows PowerShell 5.1 (PowerShell 7 / pwsh cannot load WinRT types)."""
+    path = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    if os.path.isfile(path):
+        return path
+    return shutil.which("powershell.exe") or shutil.which("powershell")
+
+
+def _windows_version_major() -> int:
+    get_version = getattr(sys, "getwindowsversion", None)
+    return get_version().major if get_version else 0
+
+
+def no_ocr_warning() -> str:
+    return W_NO_OCR_WINDOWS if sys.platform == "win32" else W_NO_OCR
+
+
 def available_ocr_engines() -> List[str]:
     """Lists local OCR engines usable on this machine (cheap checks, no OCR run)."""
     engines = []
     if sys.platform == "darwin" and shutil.which("swift"):
         engines.append("swift")
+    if sys.platform == "win32" and _windows_version_major() >= 10 and _windows_powershell():
+        engines.append("windows")
     try:
         import pytesseract  # noqa: F401
         cmd = getattr(getattr(pytesseract, "pytesseract", None), "tesseract_cmd", "tesseract") or "tesseract"
@@ -337,6 +413,57 @@ def _ocr_swift(image_bytes: bytes, timeout: float) -> str:
                 pass
 
 
+def _prepare_windows_ocr_image(image_bytes: bytes) -> bytes:
+    """Upright (phone EXIF rotation), grayscale PNG that fits Windows OCR's size limit."""
+    from PIL import Image, ImageOps  # lazy import
+
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("L")
+    if max(image.size) > _WINDOWS_OCR_MAX_SIDE:
+        image.thumbnail((_WINDOWS_OCR_MAX_SIDE, _WINDOWS_OCR_MAX_SIDE))
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+def _ocr_windows(image_bytes: bytes, timeout: float) -> str:
+    """Windows.Media.Ocr through Windows PowerShell. Raises OcrLanguageMissing when no recognizer is installed."""
+    powershell = _windows_powershell()
+    if not powershell:
+        return ""
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+            tmp_path = tmp_img.name
+            tmp_img.write(_prepare_windows_ocr_image(image_bytes))
+        encoded = base64.b64encode(_WINDOWS_OCR_SCRIPT.encode("utf-16-le")).decode("ascii")
+        res = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+            stdin=subprocess.DEVNULL,   # never wait on the backend's own stdin pipe from Electron
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={**os.environ, "AUTO_READ_OCR_IMAGE": tmp_path},
+            timeout=max(1.0, timeout),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # no console flashing up from the packaged app
+        )
+        if res.returncode == _WINDOWS_OCR_NO_LANGUAGE_EXIT:
+            raise OcrLanguageMissing()
+        if res.returncode != 0:
+            print(f"Windows OCR failed ({res.returncode}): {res.stderr.decode('utf-8', 'replace')[:500]}")
+            return ""
+        return res.stdout.decode("utf-8", "replace").lstrip("\ufeff").strip()
+    except OcrLanguageMissing:
+        raise
+    except Exception as e:
+        print(f"Windows OCR failed: {e}")
+        return ""
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 def _ocr_tesseract(image_bytes: bytes, timeout: float) -> str:
     try:
         import pytesseract
@@ -365,6 +492,12 @@ def run_local_ocr(image_bytes: bytes, total_timeout: float = OCR_TIMEOUT_S) -> T
         tried.append(engine)
         if engine == "swift":
             text = _ocr_swift(image_bytes, remaining)
+        elif engine == "windows":
+            try:
+                text = _ocr_windows(image_bytes, remaining)
+            except OcrLanguageMissing:
+                tried.remove(engine)  # reported to the caller as "no OCR engine", with the fix in no_ocr_warning()
+                text = ""
         elif engine == "tesseract":
             text = _ocr_tesseract(image_bytes, remaining)
         if text:
@@ -375,6 +508,95 @@ def run_local_ocr(image_bytes: bytes, total_timeout: float = OCR_TIMEOUT_S) -> T
 def extract_text_local_ocr(image_bytes: bytes) -> str:
     """Backward compatible wrapper: returns OCR text ('' when unavailable/failed)."""
     return run_local_ocr(image_bytes)[0]
+
+
+_busy_until: Dict[str, float] = {}
+_live_models_cache: Dict[str, Any] = {"at": 0.0, "key": "", "models": []}
+
+
+def _live_models(api_key: str) -> List[str]:
+    """Models currently listed for this key ([] when the list call fails), cached for a few minutes."""
+    now = time.monotonic()
+    cache = _live_models_cache
+    if cache["key"] == api_key and now - cache["at"] < LIVE_MODELS_CACHE_S:
+        return list(cache["models"])
+    models, from_api = list_gemini_models(api_key)
+    models = models if from_api else []
+    if from_api:
+        cache.update(at=now, key=api_key, models=list(models))
+    return models
+
+
+def busy_fallback_models(live: List[str], exclude: List[str]) -> List[str]:
+    """Stable flash models for when the chosen one is overloaded: newest version first, lite versions after."""
+    def version(name: str):
+        m = re.match(r"gemini-([\d.]+)-", name)
+        return tuple(-int(x) for x in m.group(1).split(".") if x) if m else ()
+    stable = [m for m in live if re.fullmatch(r"gemini-[\d.]+-flash(-lite)?", m) and m not in exclude]
+    return sorted(stable, key=lambda m: (m.endswith("-lite"), version(m)))
+
+
+def _is_busy_error(err: "GeminiError") -> bool:
+    """503 / high demand, or a call that hung until the timeout (what an overloaded model does)."""
+    return err.kind == "unavailable" or (err.kind == "network" and bool(re.search(r"timed? ?out", str(err), re.I)))
+
+
+def is_model_busy(model: str) -> bool:
+    return _busy_until.get(model, 0) > time.monotonic()
+
+
+def run_gemini_with_fallback(api_key: str, chosen: str, call) -> Dict[str, Any]:
+    """Runs `call(model, timeout)` on the chosen model, moving on to other models when it is deprecated (404) or
+    overloaded (503 / timeout). An overloaded model is skipped for a few minutes, so a batch does not wait on it
+    for every image. Returns {"data" (None on failure), "model_used", "warnings", "error_kind"}."""
+    started = time.monotonic()
+    warnings: List[str] = []
+    models = [chosen]
+    looked_up_not_found = looked_up_busy = False
+    if is_model_busy(chosen):
+        looked_up_busy = True
+        fallbacks = busy_fallback_models(_live_models(api_key), [chosen])[:MAX_BUSY_FALLBACKS]
+        models = fallbacks + [chosen]
+    last_error = None
+    i = 0
+    while i < len(models):
+        m = models[i]
+        remaining = GEMINI_TOTAL_BUDGET_S - (time.monotonic() - started)
+        if remaining <= 2:
+            break
+        try:
+            data = call(m, min(remaining, GEMINI_ATTEMPT_TIMEOUT_S))
+            if m != chosen:
+                template = W_MODEL_BUSY_REPLACED if is_model_busy(chosen) else W_MODEL_REPLACED
+                warnings.append(template.format(model=chosen, fallback=m))
+            return {"data": data, "model_used": m, "warnings": warnings, "error_kind": None}
+        except GeminiError as err:
+            last_error = (err, m)
+            logger.warning("Gemini model %s failed (%s, HTTP %s): %s", m, err.kind, err.status, str(err)[:300])
+            if err.kind == "model_not_found":
+                if not looked_up_not_found:
+                    # Google's catalog moves fast enough that any hardcoded name can be deprecated (and models.list()
+                    # can still list names that 404), so queue several currently listed models.
+                    looked_up_not_found = True
+                    models.extend([mm for mm in _live_models(api_key) if mm not in models][:MAX_LIVE_FALLBACKS])
+            elif _is_busy_error(err):
+                _busy_until[m] = time.monotonic() + MODEL_BUSY_COOLDOWN_S
+                if not looked_up_busy:
+                    looked_up_busy = True
+                    models.extend(busy_fallback_models(_live_models(api_key), models)[:MAX_BUSY_FALLBACKS])
+            else:
+                break
+            i += 1
+        except Exception as err:  # never fail silently
+            logger.exception("Gemini call with model %s failed unexpectedly", m)
+            warnings.append(W_GEMINI_OTHER.format(status="?", message=str(err)[:200]))
+            return {"data": None, "model_used": None, "warnings": warnings, "error_kind": "unknown"}
+    if last_error is None:
+        warnings.append(W_NETWORK)
+        return {"data": None, "model_used": None, "warnings": warnings, "error_kind": "network"}
+    err, m = last_error
+    warnings.append(gemini_error_warning(err, m))
+    return {"data": None, "model_used": None, "warnings": warnings, "error_kind": err.kind}
 
 
 def extract_booking_from_image_detailed(
@@ -401,53 +623,17 @@ def extract_booking_from_image_detailed(
     api_key = (api_key or "").strip()
     chosen_model = (model or get_system_setting("gemini_model", DEFAULT_MODEL) or DEFAULT_MODEL).strip()
 
-    MAX_LIVE_FALLBACKS = 4
-
     if api_key:
-        started = time.monotonic()
-        models_to_try = [chosen_model]
-        looked_up_live_fallback = False
-        i = 0
-        while i < len(models_to_try):
-            m = models_to_try[i]
-            remaining = GEMINI_TIMEOUT_S - (time.monotonic() - started)
-            if remaining <= 2:
-                warnings.append(W_NETWORK)
-                gemini_error_kind = "network"
-                break
-            try:
-                data = extract_booking_from_image_ai(image_bytes, filename, api_key, m, timeout=remaining)
-                if i > 0:
-                    warnings.append(W_MODEL_REPLACED.format(model=chosen_model, fallback=m))
-                if not has_booking_fields(data):
-                    warnings.append(W_NO_FIELDS)
-                return {"data": data, "engine_used": "gemini", "warnings": warnings,
-                        "model_used": m, "gemini_error_kind": None}
-            except GeminiError as err:
-                print(f"AI Vision extraction error with model {m} ({err.kind}: {err}), falling back...")
-                if err.kind == "model_not_found":
-                    if not looked_up_live_fallback:
-                        # Google's model catalog moves fast enough that a hardcoded
-                        # DEFAULT_MODEL can itself be deprecated (and models.list() can still
-                        # list names that 404 on generateContent). Queue several currently
-                        # listed models instead of retrying one fixed, possibly-stale name,
-                        # so a second deprecated pick doesn't burn the whole attempt.
-                        looked_up_live_fallback = True
-                        live_models, from_api = list_gemini_models(api_key)
-                        if from_api:
-                            candidates = [mm for mm in live_models if mm not in models_to_try]
-                            models_to_try.extend(candidates[:MAX_LIVE_FALLBACKS])
-                    if i + 1 < len(models_to_try):
-                        i += 1
-                        continue
-                warnings.append(gemini_error_warning(err, m))
-                gemini_error_kind = err.kind
-                break
-            except Exception as err:  # defensive: never fail silently
-                print(f"AI Vision extraction unexpected error ({err}), falling back to Local OCR...")
-                warnings.append(W_GEMINI_OTHER.format(status="?", message=str(err)[:200]))
-                gemini_error_kind = "unknown"
-                break
+        outcome = run_gemini_with_fallback(
+            api_key, chosen_model, lambda m, timeout: extract_booking_from_image_ai(image_bytes, filename, api_key, m, timeout=timeout))
+        warnings.extend(outcome["warnings"])
+        if outcome["data"] is not None:
+            data = outcome["data"]
+            if not has_booking_fields(data):
+                warnings.append(W_NO_FIELDS)
+            return {"data": data, "engine_used": "gemini", "warnings": warnings,
+                    "model_used": outcome["model_used"], "gemini_error_kind": None}
+        gemini_error_kind = outcome["error_kind"]
     else:
         warnings.append(W_NO_KEY)
         gemini_error_kind = "no_key"
@@ -456,7 +642,7 @@ def extract_booking_from_image_detailed(
     ocr_text, tried = run_local_ocr(image_bytes)
     data = extract_booking_from_text(ocr_text, filename)
     if not tried:
-        warnings.append(W_NO_OCR)
+        warnings.append(no_ocr_warning())
         return {"data": data, "engine_used": "none", "warnings": warnings,
                 "model_used": None, "gemini_error_kind": gemini_error_kind}
     if not ocr_text.strip():
