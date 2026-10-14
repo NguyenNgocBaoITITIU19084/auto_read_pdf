@@ -9,12 +9,6 @@ const SELECTABLE_CLASS = 'cursor-pointer select-text hover:border-primary-300 da
 const PART_CLASS =
   "after:content-[attr(data-part)] after:mt-1 after:self-start after:px-1.5 after:py-0.5 after:rounded-md after:text-[10px] after:font-bold after:bg-amber-100 after:text-amber-800 dark:after:bg-amber-950/60 dark:after:text-amber-300";
 
-/**
- * A single click ticks the card only once it is clear it was not the start of a double / triple click,
- * which selects a word / the whole value to copy part of it (e.g. "NORFOLK" out of "NORFOLK, VA").
- */
-export const CLICK_TOGGLE_DELAY_MS = 250;
-
 /** Text highlighted inside one field card: can be picked as that field's value. */
 export interface PendingPart {
   key: string;
@@ -41,19 +35,22 @@ export function useFieldSelection(resetKey: unknown) {
   /** Ticked fields that copy only the part the user highlighted */
   const [parts, setParts] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [pendingPart, setPendingPart] = useState<PendingPart | null>(null);
-  const pendingClickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelPendingClick = useCallback(() => {
-    if (pendingClickRef.current) clearTimeout(pendingClickRef.current);
-    pendingClickRef.current = null;
-  }, []);
-  useEffect(() => cancelPendingClick, [cancelPendingClick]);
+  /**
+   * State before the last click's tick. A click ticks its card at once; when it turns out to be the start
+   * of a double / triple click (which selects a word / the value to copy part of it, e.g. "NORFOLK" out of
+   * "NORFOLK, VA"), the next click puts this back. Waiting out the double-click window instead made every
+   * tick feel slow.
+   */
+  const undoRef = useRef<{ key: string; selected: ReadonlySet<string>; parts: ReadonlyMap<string, string> } | null>(null);
 
   useEffect(() => {
     setSelected((prev) => (prev.size === 0 ? prev : new Set()));
     setParts((prev) => (prev.size === 0 ? prev : new Map()));
   }, [resetKey]);
 
-  // Follow the text selection: highlighting part of a card offers "pick this part" in the copy bar
+  // Follow the text selection live: highlighting part of a card offers "pick this part" in the copy bar,
+  // updated as the highlight grows. The bar keeps one line (see FieldCopyBar), so the offer never moves
+  // the cards — and the text being highlighted — under the mouse.
   useEffect(() => {
     const onChange = () => {
       const next = readPendingPart();
@@ -111,14 +108,20 @@ export function useFieldSelection(resetKey: unknown) {
         ...(part !== undefined ? { 'data-part': `${t.common.fieldCopy.partOnly} ${part}` } : {}),
         onClick: (e: React.MouseEvent) => {
           if ((e.target as HTMLElement).closest('button, a')) return;
-          cancelPendingClick();
-          // 2nd / 3rd click of a word / line selection: the first click must not tick the card either
-          if (e.detail > 1) return;
-          if (window.getSelection()?.toString()) return;
-          pendingClickRef.current = setTimeout(() => {
-            pendingClickRef.current = null;
-            if (!window.getSelection()?.toString()) toggle(key);
-          }, CLICK_TOGGLE_DELAY_MS);
+          if (e.detail > 1) {
+            // 2nd / 3rd click of a word / line selection: take back the first click's tick
+            const undo = undoRef.current;
+            undoRef.current = null;
+            if (undo?.key === key) {
+              setSelected(undo.selected);
+              setParts(undo.parts);
+            }
+            return;
+          }
+          undoRef.current = null;
+          if (window.getSelection()?.toString()) return; // the end of a drag that selected text
+          undoRef.current = { key, selected, parts };
+          toggle(key);
         },
         onKeyDown: (e: React.KeyboardEvent) => {
           if (e.target !== e.currentTarget) return;
@@ -129,7 +132,7 @@ export function useFieldSelection(resetKey: unknown) {
         },
       };
     },
-    [selected, parts, t, toggle, cancelPendingClick]
+    [selected, parts, t, toggle]
   );
   /** Extra classes for a field card: pointer cursor, plus a highlight while selected. */
   const cardClass = useCallback(
