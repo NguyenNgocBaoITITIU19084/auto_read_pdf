@@ -19,13 +19,16 @@ the field itself (first occurrence) wins.
 
 Offline OCR prints many labels with their ': value' on the next line (joined back before reading),
 the booking number away from its label (the 'Booking Reference No.' line repeats it), the
-equipment type / size / qty as separate columns, and may read 'Full Return' as 'Full Retum'.
+equipment type / size / qty as separate columns (a size may sit on the line below its label, without
+a colon), drops the slash of 'Vessel/Voyage', reads 'Full Return' as 'Full Retum', and can stack a
+neighbouring value before a CY ('Full Retum CY : Unknown : ICD PHUOC LONG 3': the CY is the last).
 """
 import re
 from typing import Dict, List, Optional, Sequence
 
 ISSUER = re.compile(r"\bHMM\b|\bHYUNDAI\s+MERCHANT\b", re.IGNORECASE)
-FIRST_VESSEL = re.compile(r"1st\s+Vessel\s*/\s*Voyage\s*:", re.IGNORECASE)
+# OCR may drop the slash: '1st VesselVoyage :'
+FIRST_VESSEL = re.compile(r"1st\s+Vessel\s*/?\s*Voyage\s*:", re.IGNORECASE)
 
 # Labels printed after a value on the same line (an empty value leaves the next label at the start)
 _NEXT_LABEL = (r"(?:^|\s+)(?:T/S\s+Port|Call\s+Sign|TML|ETA|ETD|Facility\s+Code|Trans\s+Mode|Stop\s+Off|"
@@ -62,15 +65,20 @@ def _join_value_lines(text: str) -> str:
     return re.sub(r"\n[ \t]*(?=:)", " ", text)
 
 
+def _cy(text: str, label: str) -> str:
+    """CY name; OCR can stack a neighbouring ': value' before it, the CY's own value comes last."""
+    return re.split(r"\s+:\s+", _value(text, label))[-1].strip()
+
+
 def _equipment(text: str):
     """
     'Equipment Type : Dry Container Equipment Size : 4H Equipment Qty : 1' -> ("40'HC", '1').
     The three columns are zipped in order, so OCR printing them on separate lines reads the same.
     """
     kinds = [re.split(r"\s+Equipment\s+Size", v, flags=re.IGNORECASE)[0].strip()
-             for v in re.findall(r"Equipment\s+Type\s*:[ \t]*(.*)$", text, re.IGNORECASE | re.MULTILINE)]
-    sizes = re.findall(r"Equipment\s+Size\s*:[ \t]*(\d[0-9A-Z]?\b)?", text, re.IGNORECASE)
-    qtys = re.findall(r"Equipment\s+Qty\s*:[ \t]*(\d*)", text, re.IGNORECASE)
+             for v in re.findall(r"Equipment\s+Type\s*:?[ \t]*(.*)$", text, re.IGNORECASE | re.MULTILINE)]
+    sizes = re.findall(r"Equipment\s+Size\s*:?\s*(\d[0-9A-Z]?\b)?", text, re.IGNORECASE)
+    qtys = re.findall(r"Equipment\s+Qty\s*:?[ \t]*(\d*)", text, re.IGNORECASE)
     items = []
     for kind, size, qty in zip(kinds, sizes, qtys):
         if not size or not qty:
@@ -101,8 +109,8 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
 
     out["Booking No"] = _value(text, r"Booking\s+Number") or _value(text, r"Booking\s+Reference\s+No\.?")
 
-    first = _vessel(_value(text, r"1st\s+Vessel\s*/\s*Voyage"))
-    second = _vessel(_value(text, r"2nd\s+Vessel\s*/\s*Voyage"))
+    first = _vessel(_value(text, r"1st\s+Vessel\s*/?\s*Voyage"))
+    second = _vessel(_value(text, r"2nd\s+Vessel\s*/?\s*Voyage"))
     etd = _value(text, r"ETD")
     out["Vessel"], out["ETD"] = first, etd
     out["T/S Port"] = _value(text, r"T/S\s+Port", r"\s*1st\s+Vessel")
@@ -118,8 +126,8 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
 
     out["Equipment Type"], out["Q'ty"] = _equipment(text)
 
-    out["Empty Pick Up CY"] = _value(text, r"Empty\s+Pick-\s?up\s+CY")
-    out["Full return CY"] = _value(text, r"Full\s+Retu(?:rn|m)\s+CY")
+    out["Empty Pick Up CY"] = _cy(text, r"Empty\s+Pick-\s?up\s+CY")
+    out["Full return CY"] = _cy(text, r"Full\s+Retu(?:rn|m)\s+CY")
     out["Port Cargo Cut-off"] = _cut_off(text)
 
     return {k: v for k, v in out.items() if v}

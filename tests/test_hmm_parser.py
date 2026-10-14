@@ -225,3 +225,193 @@ def test_hmm_second_vessel_transshipment_and_mixed_equipment():
     assert r["Trunk Vessel"] == "HMM ALGECIRAS 0012E"
     assert r["Equipment Type"] == "1 X 40'HC + 2 X 20'RF"
     assert r["Q'ty"] == "3"
+
+
+# Second HMM booking (ONE vessel, empty depot not yet confirmed, no block)
+HMM_ONE_TEXT = """Booking Notice < Booking Status : Firm >
+Thank you for booking with HMM, please review the booking details below and advise us of any discrepancies and/or changes, if required.
+Booking Date : 2026/09/29 16:08 VGM PIN : 8566 Attn : JANIE
+Tel No. : 84-8-39146971 Fax No. : 84-08-39146973 E-mail : export@preford.vn
+Booking Information
+Booking Number : SGNE66597300
+Booking Office : SGNBR Tel No. : +84-28-38233798 Fax No. :
+Booking Staff BOMSC / Pratham Wagh Tel No. : +91--- E-mail : inprw@hmm21.com
+HMM Sales Person : SGNBR / Nguyen Yen Nhi Tel No. : +84-28-3823-3798 E-mail : vnnyn@hmm21.com
+B/L Issue Office :
+Customer Information
+Shipper : CONG TY TNHH PREFORD LOGISTICS Forwarder :
+Customer's Ref.No : Contract : CDE2100434 N/Cust :
+Shipping Information
+1st Vessel/Voyage : MOL CELEBRATION 108W(FE1/ONE) T/S Port : Call Sign : C6WW7
+2nd Vessel/Voyage : T/S Port : Call Sign :
+3rd Vessel/Voyage : Call Sign :
+Place of Receipt : HOCHIMINH, VIETNAM Trans Mode : Barge (Origin)
+Port of Loading : BA RIA VUNG TAU, TML : TANCANG-CAIMEP INTERNATIONAL Facility Code : VNQOECIT
+ETB : 2026/10/14 18:00 ETD : 2026/10/16 00:00
+Port of Discharging : HAMBURG, GERMANY(DEHAM) TML : HHLA CONTAINER TERMINAL ALTENWERDER ETA : 2026/11/19 22:30
+Place of Delivery : HAMBURG, GERMANY TML : HHLA CONTAINER TERMINAL ALTENWERDER ETA : 2026/11/19 22:30
+Rec./Del. Term : CY / CY Block : Stop Off : N Rating Date : 2026/10/14 (not fixed)
+Cargo Information ** Equipment subject to Availability **
+Equipment Type : Dry Container Equipment Size : 4H Equipment Qty : 3 SOC Qty : 0
+Equipment Type : Equipment Size : Equipment Qty : SOC Qty :
+Equipment Type : Equipment Size : Equipment Qty : SOC Qty :
+Commodity Code : 4412399000 Commodity Desc. : BOTH OUTER PLIES OF CONIFEROUS WOOD Flex EQ : No
+PKG-Count : 0 Gross WGT : 84,000.000 KGS Measurement : 0
+Special Cargo Information
+RF : No DG : No Oversize/Bulk : No / No Licensed Auto / Flexi-Bag : No / No Rev.Empty : No Hide : No
+Pick- up/Return Location ** Pick-up CY subject to Availability **
+Empty Pick-up CY : Depot not yet confirmed Estimated Empty Pick-up Date (for shipper's own reference) : 2026/10/08 21:00
+(Business Hours) : Type/Size / QTY :
+Address : Unknown Tel No. : 999-999-9999 Fax No. :
+Full Return CY : ICD PHUOC LONG 3
+(Business Hours) :
+Address : ICD PHUOC LONG 03 - KM NO 07, HA NOI HIGH Tel No. : +84902390622 Fax No. : +8428 37311258
+Estimated Cut- off Information (If the Documentation cut- off falls on the weekend, documents are due the Friday before).
+Cargo Cut-off (Terminal Facility) (DC) 2026/10/13 06:00 Cargo Cut-off (Return Facility) (DC) 2026/10/13 06:00
+SI General Cut-off 2026/10/12 18:00 VGM Cut-off 2026/10/13 14:00
+"""
+
+# Its offline OCR: slash dropped from 'Vessel/Voyage', size below its label, values stacked before the CY
+HMM_ONE_OCR = """HMM
+Booking Notice
+< Booking Status: Firm >
+Thank you for booking with HMM, please review the booking details below and advise us of any discrepancies and/or changes, if required.
+Booking Date
+Tel No.
+2026/09/29 16:08
+84-8-39146971
+Booking Information
+Booking Number
+Booking Office
+Booking Staff
+HMM Sales Person
+:SGNE66597300
+: SGNBR
+BOMSC / Pratham Wagh
+: SGNBR / Nguyen Yen Nhi
+B/L Issue Office
+Customer Information
+Shipper
+: CONG TY TNHH PREFORD LOGISTICS
+Customer's Ref.No
+Shipping Information
+1st VesselVoyage : MOL CELEBRATION 108W(FE1/ONE)
+2nd VesselVoyage :
+3гd Vessel/Voyage :
+Place of Receipt
+Port of Loading
+: HOCHIMINH, VIETNAM
+: BA RIA VUNG TAU,
+VGM PIN : 8566
+Fax No. : 84-08-39146973
+Atin : JANIE
+E-mail : export@preford.vn
+Tel No. : +84-28-38233798
+Tel No. : +91---
+Tel No. : +84-28-3823-3798
+Fax No.
+E-mail: :inprw@hmm21.com
+E-mail : unnyn@hmm21.com
+Forwarder:
+Contract : CDE2100434
+N/Cust :
+T/S Port :
+T/S Port :
+Call Sign : C6WW7
+Call Sign :
+Call Sign :
+Trans Mode : Barge (Origin)
+TML : TANCANG-CAIMEP INTERNATIONAL Facility Code : VNQOECIT
+ETB : 2026/10/14 18:00
+Port of Discharging : HAMBURG, GERMANY(DEHAM)
+TML : HHLA CONTAINER TERMINAL ALTENWERDER
+Place of Delivery
+: HAMBURG, GERMANY
+TML : HHLA CONTAINER TERMINAL ALTENWERDER
+Rec./Del. Term
+: CY / CY
+Block :
+Stop Off: N
+Cargo Information ** Equipment subject to Availability **
+Equipment Type
+: Dry Container
+Equipment Size
+4H
+Equipment Type
+Equipment Size
+Equipment Type
+Equipment Size :
+Equipment Qty : 3
+Equipment Qty :
+Equipment Qty
+ETD : 2026/10/16 00:00
+ETA : 2026/11/19 22:30
+ETA : 2026/11/19 22:30
+Rating Date : 2026/10/14 (not fixed)
+SOC Qty: 0
+SOC Qty :
+SOC Qty :
+Commodity Code
+: 4412399000
+PKG-Count : 0
+Commodity Desc. : BOTH OUTER PLIES OF CONIFEROUS WOOD
+Gross WGT : 84,000.000 KGS
+Flex EQ : No
+Measurement : 0
+Special Cargo Information
+RF: No DG : No
+Oversize/Bulk : No / No Licensed Auto / Flexi-Bag: No / No Rev.Empty: No
+Hide : No
+Pick- up/Return Location ** Pick-up CY subject to Availability **
+Empty Pick-up CY
+: Depot not yet confirmed
+(Business Hours)
+Address
+Estimated Empty Pick-up Date (for shipper's own reference) : 2026/10/08 21:00
+Type/Size / QTY
+Fax No.
+Full Retum CY
+: Unknown
+: ICD PHUOC LONG 3
+Tel No. : 999-999-9999
+(Business Hours)
+Address
+: ICD PHUOC LONG 03 - KM NO 07, HA NOI HIGH
+Tel No. +84902390622
+Fax No.: +8428 37311258
+Estimated Cut-off Information (If the Documentation cut-off falls on the weekend, documents are due the Friday before).
+Cargo Cut-off (Terminal Facility) (DC)
+2026/10/13 06:00
+Cargo Cut-off (Retum Facility) (DC)
+SI General Cut-off
+2026/10/12 18:00
+VGM Cut-off
+2026/10/13 06:00
+2026/10/13 14:00
+Booking Reference No. : SGNE66597300
+"""
+
+
+def _assert_one_booking(r):
+    assert r["Booking No"] == "SGNE66597300"
+    assert r["Carrier"] == "HMM"
+    assert r["Vessel"] == r["Trunk Vessel"] == "MOL CELEBRATION 108W"
+    assert r["ETD"] == r["ETD_Trunk"] == "16/10/2026 00:00"
+    assert r["T/S Port"] == "null"
+    assert r["Port of Discharging"] == "HAMBURG, GERMANY(DEHAM)"
+    assert r["Place of Delivery"] == "HAMBURG, GERMANY"
+    assert r["Block"] == "null"
+    assert r["Equipment Type"] == "40'HC"
+    assert r["Q'ty"] == "3"
+    assert r["Empty Pick Up CY"] == "DEPOT NOT YET CONFIRMED"
+    assert r["Full return CY"] == "ICD PHUOC LONG 3"
+    assert r["Port Cargo Cut-off"] == "13/10/2026 06:00"
+
+
+def test_hmm_booking_with_unconfirmed_depot():
+    _assert_one_booking(extract_booking_from_text(HMM_ONE_TEXT, "SGNE66597300.pdf"))
+
+
+def test_hmm_offline_ocr_without_vessel_slash():
+    assert find_parser(HMM_ONE_OCR) is hmm
+    _assert_one_booking(extract_booking_from_text(HMM_ONE_OCR, "hmm.jpg"))
