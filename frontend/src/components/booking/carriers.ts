@@ -76,6 +76,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bKMTC\b/, /\bKOREA MARINE TRANSPORT\b/],
   },
   {
+    key: 'NAMSUNG LINE',
+    patterns: [/\bNAM\s?SUNG\b/],
+  },
+  {
     key: 'TS LINES',
     patterns: [/\bTS\s?LINES?\b/, /\bT\.S\. LINES?\b/],
   },

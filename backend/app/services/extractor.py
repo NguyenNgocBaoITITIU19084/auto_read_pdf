@@ -155,6 +155,7 @@ CARRIERS: List[CarrierEntry] = [
     ("RCL", _rx(r"\bREGIONAL\s+CONTAINER\s+LINES?\b", r"\bRCL\b"), (), []),
     ("OOCL", _rx(r"\bOOCL\b"), ("OOLU",), []),
     ("KMTC", _rx(r"\bKMTC\b", r"\bKOREA\s+MARINE\s+TRANSPORT\b"), (), _rx(r"^KMTC\s")),
+    ("NAMSUNG LINE", _rx(r"\bNAM\s?SUNG\b"), (), []),
 ]
 
 UNKNOWN_CARRIER = "Khác"
@@ -349,7 +350,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

@@ -15,8 +15,9 @@ from typing import Optional, Dict, Any, List, Tuple
 from backend.app.core.database import get_system_setting
 from backend.app.services.extractor import (
     extract_booking_from_text, parse_date_str, parse_etd, detect_carrier, has_booking_fields,
-    normalize_field_case
+    normalize_field_case, UNKNOWN_CARRIER
 )
+from backend.app.services.carrier_parsers import namsung
 
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -36,14 +37,14 @@ LIVE_MODELS_CACHE_S = 600
 
 logger = logging.getLogger("backend.services.gemini")
 
-SYSTEM_PROMPT = """You are an expert shipping & logistics document parser specialized in Shipping Orders, Booking Confirmations, and Booking Receipts from carriers like Dongjin, PIL, CULINES (China United Lines / CUL), ONE (Ocean Network Express), SITC, Cosco, Maersk, Evergreen, CMA CGM, Hapag-Lloyd, Yang Ming, OOCL, RCL, TS Lines, Sinokor, Heung-A, Samudera, KMTC, etc.
+SYSTEM_PROMPT = """You are an expert shipping & logistics document parser specialized in Shipping Orders, Booking Confirmations, and Booking Receipts from carriers like Dongjin, PIL, CULINES (China United Lines / CUL), ONE (Ocean Network Express), SITC, Cosco, Maersk, Evergreen, CMA CGM, Hapag-Lloyd, Yang Ming, OOCL, RCL, TS Lines, Sinokor, Heung-A, Samudera, KMTC, Namsung Line (NSS), etc.
 
 Analyze the image (which may be a photo, scan, or screenshot of a booking confirmation document) and extract the booking details.
 
 Return ONLY a valid JSON object with the following exact keys:
 {
   "Booking No": "string or 'null'",
-  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR | HEUNG-A | SAMUDERA | TS LINES | RCL | OOCL | KMTC | Khác",
+  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR | HEUNG-A | SAMUDERA | TS LINES | RCL | OOCL | KMTC | NAMSUNG LINE | Khác",
   "Port of Discharging": "string or 'null'",
   "Place of Delivery": "string or 'null'",
   "Block": "string or 'null'",
@@ -65,7 +66,8 @@ Rules:
 1. Normalize all dates to DD/MM/YYYY or DD/MM/YYYY HH:MM format (e.g. '13Jul26 02:00' -> '13/07/2026 02:00', '2026-05-04' -> '04/05/2026').
 2. If equipment format is '40HC-2' or '40'DRY HQ.-2' or '20'DRY ST.-1', split into Equipment Type (e.g. '40'HC' / '20'DRY ST') and Q'ty (e.g. '2' / '1').
 3. If a field cannot be found or is empty, use 'null'.
-4. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
+4. Namsung Line (NSS) 'BOOKING RECEIPT NOTICE': Carrier is 'NAMSUNG LINE'; CNTR TYPE codes are size digit + optional H (high cube) + type, e.g. '4HDC x 1' -> Equipment Type '40'HC', Q'ty '1' ('2DC' = 20'GP, '4DC' = 40'GP, '4HRF' = 40'RH); Port Cargo Cut-off is CARGO CLOSING (not DOCUMENT CLOSING); Empty Pick Up CY is PICK UP PLACE ('null' when blank); Full return CY is FULL RETURN PLACE. If '2ND VESSEL VOYAGE (IF ANY)' has a vessel, VESSEL VOYAGE is the Pre Carrier, the 2nd vessel is the Trunk Vessel and the T/S Port is written in REMARK.
+5. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
 """
 
 # ---------------------------------------------------------------------------
@@ -264,6 +266,13 @@ def extract_booking_from_image_ai(
         elif result["Trunk Vessel"] != "null" and result["Trunk Vessel"]:
             result["Vessel"] = result["Trunk Vessel"]
             result["ETD"] = result["ETD_Trunk"]
+
+    # Gemini may answer a carrier name variant ('NAMSUNG', 'NAMSUNG SHIPPING'): keep the canonical one
+    known = detect_carrier(result["Carrier"]) if result["Carrier"] not in ("null", "") else UNKNOWN_CARRIER
+    if known != UNKNOWN_CARRIER:
+        result["Carrier"] = known
+    if result["Carrier"] == "NAMSUNG LINE":
+        result["Equipment Type"] = namsung.equipment_name(result["Equipment Type"])
 
     # Fallback carrier detection if needed
     if result["Carrier"] in ("null", "", "Khác"):
