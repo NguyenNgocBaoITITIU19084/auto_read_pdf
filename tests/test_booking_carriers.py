@@ -264,3 +264,54 @@ def test_parse_date_new_formats(raw, expected):
 def test_generic_booking_no_fallback_requires_digit():
     res = extract_booking_from_text("Booking Confirmation\nPort of Discharging : JEDDAH\n", "x.pdf")
     assert res["Booking No"] == "null"
+
+
+# OOCL App confirmation spelling the label 'TRANSSHIPMENT PORT' (2339911210)
+OOCL_TSS_TEXT = """By OOCL App
+FROM: OOCL (Vietnam) Co., Ltd
+CONTACT NUMBER: 84 -28 -39116006
+BOOKING ACKNOWLEDGEMENT REMARK
+- REFRESH CY closing time at Cat Lai Terminal: 08:00, 17 OCT 2026
+- Standby
+BOOKING NUMBER: 2339911210
+BOOKING STATUS: Confirmed
+RATE AGREEMENT NUMBER: FW190687 - (SERVICE CONTRACT)
+EXTERNAL REFERENCE INFORMATION
+CS Reference Number: CSO6248532255
+PARTIES INFORMATION
+BOOKING PARTY: Yusen Logistics (Vietnam) Co Ltd- Ho Chi Minh Branch
+FORWARDER: Yusen Logistics (Vietnam) Co Ltd- Ho Chi Minh Branch
+SHIPPER: Yusen Logistics (Vietnam) Co Ltd- Ho Chi Minh Branch
+ROUTE INFORMATION
+TOTAL CO2e EMISSION: 4181.31 KG (Tank-to-Wake); 5068.30 KG (Well-to-Wake)
+TOTAL BOOKING CONTAINER QTY 3 X 40HQ
+SIZE/TYPE:
+PLACE OF RECEIPT: Ho Chi Minh,Vietnam
+PORT OF LOADING: Ho Chi Minh (Cat Lai) / Cat Lai Terminal ETA: 17 Oct 2026
+INTENDED VESSEL/VOYAGE: INCEDA 056S ETD: 18 Oct 2026
+SERVICE CODE: VTS VESSEL FLAG: Marshall Islands
+TRANSSHIPMENT PORT: Singapore / PSA Corporation Limited ETA: 23 Oct 2026
+T/S INTENDED VESSEL/VOYAGE: OOCL SWEDEN 009W ETD: 24 Oct 2026
+PORT OF DISCHARGE: Hamburg / TCT Tollerort Container Terminal ETA: 24 Nov 2026
+FINAL DESTINATION: Hamburg,Hamburg, Germany ETA: 24 Nov 2026
+BLOCK NUMBER:
+ESTIMATED CARGO AVAILABILITY AT DESTINATION HUB: 27 Nov 2026 10:00
+INTENDED CY CUT-OFF: 17 Oct 2026 08:00
+INTENDED SI/eSI CUT-OFF: 15 Oct 2026 10:00
+INTENDED VGM CUT-OFF: 17 Oct 2026 04:00
+LATE AND/OR INCOMPLETE SHIPPING INSTRUCTION SUBMISSION MAY RESULT IN CONTAINER(S) SHORT SHIPMENT AND
+LATE SI SUBMISSION CHARGES
+CARGO INFORMATION
+BOOKING QTY SIZE/TYPE: 3 X 40' Hi-Cube Container
+"""
+
+
+def test_oocl_transshipment_port_spelled_with_double_s():
+    r = extract_booking_from_text(OOCL_TSS_TEXT, "6. 2339911210.pdf")
+    assert r["Carrier"] == "OOCL"
+    assert r["T/S Port"] == "SINGAPORE"
+    assert r["Vessel"] == r["Pre Carrier"] == "INCEDA 056S"
+    assert r["ETD_Pre"] == "18/10/2026"
+    assert r["Trunk Vessel"] == "OOCL SWEDEN 009W"
+    assert r["ETD_Trunk"] == "24/10/2026"
+    assert r["Port of Discharging"] == "HAMBURG"

@@ -3,7 +3,7 @@ COSCO / OOCL booking confirmations (CargoSmart/IRIS layout, shared labels):
 
     BOOKING NUMBER: 6469390440
     INTENDED VESSEL/VOYAGE: COSCO SHIPPING ALPS 049W ETD: 03 Oct 2026 14:00(ICT)
-    TRANSHIPMENT PORT: Singapore / Pasir Panjang Terminal ETA: ...
+    TRANSHIPMENT PORT: Singapore / Pasir Panjang Terminal ETA: ...     (or 'TRANSSHIPMENT PORT:')
     T/S INTENDED VESSEL VOYAGE: CSCL VENUS 090W ETD: 13 Oct 2026 22:00(SGT)
     PORT OF DISCHARGE: Istanbul / Kumport Liman ETA: ...
     FINAL DESTINATION: Kumport,Istanbul, Turkey ETA: ...
@@ -105,7 +105,8 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
 
     vessel, etd = _vessel_etd(text, "INTENDED VESSEL/VOYAGE:")
     ts_vessel, ts_etd = _vessel_etd(text, r"T/S INTENDED VESSEL\s*/?\s*VOYAGE:")
-    out["T/S Port"] = _port_name(_line_value(text, "TRANSHIPMENT PORT:"))
+    # Spelled 'TRANSHIPMENT' on some confirmations, 'TRANSSHIPMENT' on others (OOCL App)
+    out["T/S Port"] = _port_name(_line_value(text, "TRANS{1,2}HIPMENT PORT:"))
     out["Vessel"], out["ETD"] = vessel, etd
     if out["T/S Port"] and ts_vessel:
         out["Pre Carrier"], out["ETD_Pre"] = vessel, etd
