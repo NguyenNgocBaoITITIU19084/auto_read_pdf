@@ -167,6 +167,8 @@ CARRIERS: List[CarrierEntry] = [
     ("MATSON", _rx(r"\bMATSON\b"), ("MATS",), []),
     ("LEGEND SHIPPING", _rx(r"\bLEGEND\s+SHIPPING\b"), ("LGVN",), []),
     ("SWIRE SHIPPING", _rx(r"\bSWIRE\s+SHIPPING\b", r"\bSWIRE\b"), (), []),
+    # Before MSC: ZIM's terms cite IMO circular 'MSC.1/CIRC.1474'
+    ("ZIM", _rx(r"\bZIM\s+INTEGRATED\b", r"\bZIM\b"), ("ZIMU",), []),
     ("MSC", _rx(r"\bMEDITERRANEAN\s+SHIPPING\b", r"\bMSC\b"), ("MEDU",), _rx(r"^MSC\s")),
 ]
 
@@ -362,7 +364,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC, ZIM) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

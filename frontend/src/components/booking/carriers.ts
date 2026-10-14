@@ -138,6 +138,7 @@ export function matchCarrier(text?: string | null): CarrierDef | null {
 const BOOKING_PREFIXES: [RegExp, string][] = [
   [/^DJL/, 'DJ SHIPPING'],
   [/^LGVN/, 'LEGEND SHIPPING'],
+  [/^ZIMU/, 'ZIM'],
   [/^DJ/, 'DONGJIN'],
   [/^CUL/, 'CULINES'],
   [/^SGN6/, 'PIL'],
