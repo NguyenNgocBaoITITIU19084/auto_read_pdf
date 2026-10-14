@@ -233,6 +233,11 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "booking", "column_key": "Carrier", "match_value": "KMTC", "match_type": "contains", "preset_id": "green", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "TS LINES", "match_type": "contains", "preset_id": "purple", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "ZIM", "match_type": "exact", "preset_id": "stone", "is_enabled": 1},
+    # 'contains' also colours bookings saved under the earlier names (SINOKOR, HEUNG-A)
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "NAMSUNG", "match_type": "contains", "preset_id": "navy", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "SINOKOR", "match_type": "contains", "preset_id": "maroon", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "HEUNG", "match_type": "contains", "preset_id": "forest", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "INTERASIA", "match_type": "contains", "preset_id": "brown", "is_enabled": 1},
 ]
 
 COLOR_RULES_UNIQUE_INDEX = "ux_color_rules_rule"
