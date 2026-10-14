@@ -366,6 +366,19 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#c2410c',
     badgeClass: 'bg-orange-700 text-orange-50 border-orange-800 dark:bg-orange-600 dark:text-orange-50 dark:border-orange-400',
   },
+  {
+    id: 'olive',
+    name: 'Olive (Solid)',
+    nameVi: 'Xanh ô liu (đậm)',
+    bgClass: 'bg-lime-800',
+    darkBgClass: 'dark:bg-lime-700',
+    borderClass: 'border-lime-900',
+    darkBorderClass: 'dark:border-lime-500',
+    textClass: 'text-lime-50',
+    darkTextClass: 'dark:text-lime-50',
+    hexPreview: '#3f6212',
+    badgeClass: 'bg-lime-800 text-lime-50 border-lime-900 dark:bg-lime-700 dark:text-lime-50 dark:border-lime-500',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));

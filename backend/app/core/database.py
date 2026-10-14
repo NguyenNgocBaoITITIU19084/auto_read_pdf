@@ -243,6 +243,7 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "booking", "column_key": "Carrier", "match_value": "SWIRE", "match_type": "contains", "preset_id": "plum", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "MATSON", "match_type": "contains", "preset_id": "magenta", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "DJ SHIPPING", "match_type": "contains", "preset_id": "rust", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "LEGEND", "match_type": "contains", "preset_id": "olive", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "SAMUDERA", "match_type": "contains", "preset_id": "ocean", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "RCL", "match_type": "exact", "preset_id": "charcoal", "is_enabled": 1},
 ]

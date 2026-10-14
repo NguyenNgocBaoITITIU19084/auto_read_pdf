@@ -56,6 +56,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bINTER\s?ASIA\b/],
   },
   {
+    key: 'LEGEND SHIPPING',
+    patterns: [/\bLEGEND\s+SHIPPING\b/],
+  },
+  {
     key: 'MATSON',
     patterns: [/\bMATSON\b/],
   },
@@ -133,6 +137,7 @@ export function matchCarrier(text?: string | null): CarrierDef | null {
 /** Booking number prefixes used when the Carrier field is empty. */
 const BOOKING_PREFIXES: [RegExp, string][] = [
   [/^DJL/, 'DJ SHIPPING'],
+  [/^LGVN/, 'LEGEND SHIPPING'],
   [/^DJ/, 'DONGJIN'],
   [/^CUL/, 'CULINES'],
   [/^SGN6/, 'PIL'],
