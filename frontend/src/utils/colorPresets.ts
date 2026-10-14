@@ -327,6 +327,32 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#be185d',
     badgeClass: 'bg-pink-700 text-pink-50 border-pink-800 dark:bg-pink-600 dark:text-pink-50 dark:border-pink-400',
   },
+  {
+    id: 'ocean',
+    name: 'Ocean (Solid)',
+    nameVi: 'Xanh biển (đậm)',
+    bgClass: 'bg-cyan-700',
+    darkBgClass: 'dark:bg-cyan-600',
+    borderClass: 'border-cyan-800',
+    darkBorderClass: 'dark:border-cyan-400',
+    textClass: 'text-cyan-50',
+    darkTextClass: 'dark:text-cyan-50',
+    hexPreview: '#0e7490',
+    badgeClass: 'bg-cyan-700 text-cyan-50 border-cyan-800 dark:bg-cyan-600 dark:text-cyan-50 dark:border-cyan-400',
+  },
+  {
+    id: 'charcoal',
+    name: 'Charcoal (Solid)',
+    nameVi: 'Xám than (đậm)',
+    bgClass: 'bg-gray-700',
+    darkBgClass: 'dark:bg-gray-600',
+    borderClass: 'border-gray-800',
+    darkBorderClass: 'dark:border-gray-400',
+    textClass: 'text-gray-50',
+    darkTextClass: 'dark:text-gray-50',
+    hexPreview: '#374151',
+    badgeClass: 'bg-gray-700 text-gray-50 border-gray-800 dark:bg-gray-600 dark:text-gray-50 dark:border-gray-400',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));

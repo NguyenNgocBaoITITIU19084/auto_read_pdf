@@ -104,6 +104,14 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bTS\s?LINES?\b/, /\bT\.S\. LINES?\b/],
   },
   {
+    key: 'SAMUDERA',
+    patterns: [/\bSAMUDERA\b/],
+  },
+  {
+    key: 'RCL',
+    patterns: [/\bRCL\b/, /\bREGIONAL CONTAINER LINES?\b/],
+  },
+  {
     key: 'ZIM',
     patterns: [/\bZIM\b/],
   },

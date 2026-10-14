@@ -240,6 +240,8 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "booking", "column_key": "Carrier", "match_value": "INTERASIA", "match_type": "contains", "preset_id": "brown", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "SWIRE", "match_type": "contains", "preset_id": "plum", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "MATSON", "match_type": "contains", "preset_id": "magenta", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "SAMUDERA", "match_type": "contains", "preset_id": "ocean", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "RCL", "match_type": "exact", "preset_id": "charcoal", "is_enabled": 1},
 ]
 
 COLOR_RULES_UNIQUE_INDEX = "ux_color_rules_rule"
