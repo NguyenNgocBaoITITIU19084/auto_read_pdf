@@ -152,7 +152,7 @@ CARRIERS: List[CarrierEntry] = [
     ("YANG MING", _rx(r"\bYANG\s?MING\b", r"\bYML\b"), ("YMLU",), []),
     ("HMM", _rx(r"\bHYUNDAI\s+MERCHANT\b", r"\bHMM\b"), ("HDMU",), []),
     ("SINOKOR LINE", _rx(r"\bSINOKOR\b"), ("SKLU",), []),
-    ("HEUNG-A", _rx(r"\bHEUNG[-\s]?A\b"), (), []),
+    ("HEUNG A LINE", _rx(r"\bHEUNG[-\s]?A\b"), (), []),
     ("SAMUDERA", _rx(r"\bSAMUDERA\b"), (), []),
     ("TS LINES", _rx(r"\bTS\s?LINES\b", r"\bTSL\b"), (), []),
     ("RCL", _rx(r"\bREGIONAL\s+CONTAINER\s+LINES?\b", r"\bRCL\b"), (), []),
@@ -353,7 +353,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor, Wan Hai) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

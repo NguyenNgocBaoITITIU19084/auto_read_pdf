@@ -1,4 +1,4 @@
-from backend.app.services.carrier_parsers import find_parser, sinokor
+from backend.app.services.carrier_parsers import booking_notice, find_parser
 from backend.app.services.extractor import extract_booking_from_text
 
 # Text layer of 'BOOKING SNKO101261000599 5X40'HQ.pdf' (contacts and footer trimmed)
@@ -95,8 +95,8 @@ def _assert_notice(r):
 
 
 def test_sinokor_layout_is_detected():
-    assert find_parser(SINOKOR_TEXT) is sinokor
-    assert find_parser(SINOKOR_OCR) is sinokor
+    assert find_parser(SINOKOR_TEXT) is booking_notice
+    assert find_parser(SINOKOR_OCR) is booking_notice
 
 
 def test_sinokor_booking_notice_fields():
@@ -120,3 +120,98 @@ def test_sinokor_direct_route_pick_up_area_and_mixed_equipment():
     assert r["Empty Pick Up CY"] == "TAN CANG HIEP PHUOC"
     assert r["Equipment Type"] == "2 X 40'HC + 1 X 20'GP"
     assert r["Q'ty"] == "3"
+
+
+# Heung A Line prints the same 'Booking Notice' (direct route, pick-up area filled)
+HEUNG_A_TEXT = """HEUNG A LINE CO., LTD.
+Saigon Riverside Office Center Bdlg, Room.501 &5022A-4A Ton Duc Thang, Saigon Ward, HCMCVIETNAM
+Booking Notice Date : 2026-09-25
+Time : 18:26:12
+BOOKING NO. HASLS21260902143
+Shipper : CARGOES LINKS TRANSPORTATION CO LTPD.I.C : ELLA
+Forwarder : Booking Date : 26/09/25
+Schedule & Cargo Information
+VSL / VYG : SHANGHAI VOYAGER // 2608N
+Loading : HOCHIMINH, VIETNAM Discharging : SHANGHAI, CHINA
+L-Terminal : CAT LAI D-Terminal : SHANGHAI PUDONG INTL CONTAINER TERMINAL (WGQ1)
+E.T.D : 2026-10-12 E.T.A : 2026-10-18
+Delivery : SHANGHAI, CHINA Delivery Type :
+D.O.C Cut-off : 2026-10-10 12:00 CY Cut-off : 2026-10-11 00:00
+Commodity : FREEZE DRIED INSTANT COFFEE
+CNTR Q'ty : 40Hx1 WGT / MSR : 25,000.00KGS 0.00CBM
+Pickup Area : TAN CANG MY THUY 2
+Pickup Date : 2026-09-25 Factory : WH
+P.I.C Information
+"""
+
+# Offline OCR (Apple Vision) of the same notice
+HEUNG_A_OCR = """HEUNG A LINE CO., LTD.
+Booking Notice
+BOOKING NO.
+Shipper
+Forwarder
+HASLS21260902143
+: CARGOES LINKS TRANSPORTATION CO P.I.C
+: ELLA
+Booking Date : 26/09/25
+Schedule & Cargo Information
+VSL / VYG
+: SHANGHAI VOYAGER // 2608N
+Loading
+: HOCHIMINH, VIETNAM
+Discharging : SHANGHAI, CHINA
+L-Terminal
+: CAT LAI
+D-Terminal
+SHANGHAI PUDONG INTL CONTAINER *
+E.T.D
+: 2026-10-12
+E.T.A
+: 2026-10-18
+Delivery
+: SHANGHAI, CHINA
+Delivery Type :
+D.O.C Cut-off : 2026-10-10 12:00
+CY Cut-off
+: 2026-10-11 00:00
+Commodity
+: FREEZE DRIED INSTANT COFFEE
+CNTR Q'ty
+: 40Hx1
+WGT / MSR :
+25,000.00 KGS
+0.00 CBM
+Pickup Area
+: TAN CANG MY THUY 2
+Pickup Date
+: 2026-09-25
+Factory
+: WH
+P.I.C Information
+"""
+
+
+def _assert_heung_a(r):
+    assert r["Booking No"] == "HASLS21260902143"
+    assert r["Carrier"] == "HEUNG A LINE"
+    assert r["Vessel"] == r["Trunk Vessel"] == "SHANGHAI VOYAGER 2608N"
+    assert r["ETD"] == r["ETD_Trunk"] == "12/10/2026"
+    assert r["Pre Carrier"] == "null"
+    assert r["T/S Port"] == "null"
+    assert r["Port of Discharging"] == "SHANGHAI, CHINA"
+    assert r["Place of Delivery"] == "SHANGHAI, CHINA"
+    assert r["Block"] == "null"
+    assert r["Equipment Type"] == "40'HC"
+    assert r["Q'ty"] == "1"
+    assert r["Empty Pick Up CY"] == "TAN CANG MY THUY 2"
+    assert r["Full return CY"] == "CAT LAI"
+    assert r["Port Cargo Cut-off"] == "11/10/2026 00:00"
+
+
+def test_heung_a_booking_notice_fields():
+    assert find_parser(HEUNG_A_TEXT) is booking_notice
+    _assert_heung_a(extract_booking_from_text(HEUNG_A_TEXT, "HASLS21260902143 - BOOKING.pdf"))
+
+
+def test_heung_a_offline_ocr_lines():
+    _assert_heung_a(extract_booking_from_text(HEUNG_A_OCR, "heunga.jpg"))

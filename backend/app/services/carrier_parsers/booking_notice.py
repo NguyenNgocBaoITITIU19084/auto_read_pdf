@@ -1,5 +1,6 @@
 """
-Sinokor 'Booking Notice', 'Label : value' pairs, up to two per line:
+'Booking Notice' printed by Sinokor and Heung A Line (same Korean booking system),
+'Label : value' pairs, up to two per line:
 
     BOOKING NO. SNKO101261000599
     VSL / VYG : PANCON CHAMPION // 2610N
@@ -24,7 +25,9 @@ lines below its label; ': value' lines are joined back onto their label before r
 import re
 from typing import Dict, List, Optional, Sequence
 
-SINOKOR = re.compile(r"\bSINOKOR\b", re.IGNORECASE)
+# Issuer -> canonical carrier
+ISSUERS = ((re.compile(r"\bSINOKOR\b", re.IGNORECASE), "SINOKOR LINE"),
+           (re.compile(r"\bHEUNG[-\s]?A\b", re.IGNORECASE), "HEUNG A LINE"))
 BOOKING_LABEL = re.compile(r"BOOKING\s+NO\b", re.IGNORECASE)
 # 'SNKO101261000599': letters then digits; OCR may print it a few lines below the label
 BOOKING_CODE = re.compile(r"\b([A-Z]{2,5}\d{8,})\b")
@@ -41,7 +44,11 @@ _EQ_KIND = {"G": "GP", "GP": "GP", "D": "GP", "DV": "GP", "DC": "GP", "H": "HC",
 
 
 def matches(text: str) -> bool:
-    return bool(SINOKOR.search(text) and BOOKING_LABEL.search(text) and VSL_VYG.search(text))
+    return bool(_issuer(text) and BOOKING_LABEL.search(text) and VSL_VYG.search(text))
+
+
+def _issuer(text: str) -> str:
+    return next((name for rx, name in ISSUERS if rx.search(text)), "")
 
 
 def _join_value_lines(text: str) -> str:
@@ -84,7 +91,7 @@ def _equipment(value: str):
 
 
 def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict[str, str]:
-    out: Dict[str, str] = {"Carrier": "SINOKOR LINE"}
+    out: Dict[str, str] = {"Carrier": _issuer(text)}
     text = _join_value_lines(text)
 
     label = BOOKING_LABEL.search(text)

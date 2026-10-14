@@ -80,6 +80,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bSINOKOR\b/],
   },
   {
+    key: 'HEUNG A LINE',
+    patterns: [/\bHEUNG[-\s]?A\b/],
+  },
+  {
     key: 'NAMSUNG LINE',
     patterns: [/\bNAM\s?SUNG\b/],
   },
