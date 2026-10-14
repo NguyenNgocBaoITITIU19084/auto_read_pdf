@@ -44,7 +44,7 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
 import { tf } from '../../services/i18nFormat';
 import type { TabId } from '../common/Tabs';
-import { isEditableTarget, isImageFile, isPdfFile } from './clipboard';
+import { identifyBookingFile, isEditableTarget } from './clipboard';
 
 /** Files pasted anywhere in the app (routed here by App's global paste handler). */
 export interface BookingPasteRequest {
@@ -473,10 +473,12 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const handleFilesUpload = async (files: FileList | File[]) => {
     if (!activeCollection || files.length === 0) return;
 
-    const fileArray = Array.from(files).filter((f) => isPdfFile(f) || isImageFile(f));
+    // by content, not by name: a photo saved as .pdf or without an extension is still read with OCR
+    const identified = await Promise.all(Array.from(files).map(identifyBookingFile));
+    const fileArray = identified.filter((f): f is File => f !== null);
 
     if (fileArray.length === 0) {
-      addToast('Vui lòng chọn file định dạng PDF hoặc hình ảnh (.png, .jpg, .jpeg, .webp, .bmp)', 'error');
+      addToast('Vui lòng chọn file định dạng PDF hoặc hình ảnh (.png, .jpg, .jpeg, .webp, .bmp, .gif, .tif)', 'error');
       return;
     }
 
@@ -798,7 +800,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp"
+          accept=".pdf,.png,.jpg,.jpeg,.jfif,.webp,.bmp,.gif,.tif,.tiff,image/*"
           className="hidden"
           onChange={(e) => {
             const files = e.target.files ? Array.from(e.target.files) : [];

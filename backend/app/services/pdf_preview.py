@@ -24,3 +24,26 @@ def render_pdf_pages(pdf_bytes: bytes, max_pages: int = MAX_PAGES, resolution: i
             image.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
             pages.append("data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"))
     return {"pages": pages, "page_count": page_count, "truncated": page_count > max_pages}
+
+
+OCR_MAX_PAGES = 2
+OCR_RESOLUTION = 200  # dpi: small print on booking confirmations stays legible for OCR
+
+
+def render_pdf_for_ocr(pdf_bytes: bytes, max_pages: int = OCR_MAX_PAGES, resolution: int = OCR_RESOLUTION) -> bytes:
+    """The first pages of a scanned PDF stacked into one JPEG, so one OCR / Gemini call reads them together."""
+    import pdfplumber
+    from PIL import Image
+
+    with _RENDER_LOCK, pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        images = [page.to_image(resolution=resolution).original.convert("RGB") for page in pdf.pages[:max_pages]]
+    if not images:
+        raise ValueError("PDF has no pages")
+    sheet = Image.new("RGB", (max(i.width for i in images), sum(i.height for i in images)), "white")
+    y = 0
+    for img in images:
+        sheet.paste(img, (0, y))
+        y += img.height
+    buf = io.BytesIO()
+    sheet.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
