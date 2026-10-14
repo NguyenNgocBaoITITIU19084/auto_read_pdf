@@ -301,6 +301,19 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#92400e',
     badgeClass: 'bg-amber-800 text-amber-50 border-amber-900 dark:bg-amber-700 dark:text-amber-50 dark:border-amber-500',
   },
+  {
+    id: 'plum',
+    name: 'Plum (Solid)',
+    nameVi: 'Tím mận (đậm)',
+    bgClass: 'bg-purple-800',
+    darkBgClass: 'dark:bg-purple-700',
+    borderClass: 'border-purple-900',
+    darkBorderClass: 'dark:border-purple-500',
+    textClass: 'text-purple-50',
+    darkTextClass: 'dark:text-purple-50',
+    hexPreview: '#6b21a8',
+    badgeClass: 'bg-purple-800 text-purple-50 border-purple-900 dark:bg-purple-700 dark:text-purple-50 dark:border-purple-500',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));

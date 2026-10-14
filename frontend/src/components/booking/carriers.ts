@@ -52,6 +52,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bINTER\s?ASIA\b/],
   },
   {
+    key: 'SWIRE SHIPPING',
+    patterns: [/\bSWIRE\b/],
+  },
+  {
     key: 'WAN HAI',
     patterns: [/\bWAN\s?HAI\b/, /\bWHL\b/],
   },
