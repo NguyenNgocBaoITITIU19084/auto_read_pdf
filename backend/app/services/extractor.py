@@ -138,6 +138,8 @@ def _rx(*patterns: str) -> List[Pattern]:
 
 
 CARRIERS: List[CarrierEntry] = [
+    # Before DONGJIN: its 'DJ' booking prefix would claim DJ Shipping's 'DJL...' numbers
+    ("DJ SHIPPING", _rx(r"\bDJ\s+SHIPPING\b"), ("DJL",), []),
     ("DONGJIN", _rx(r"\bDONG\s?JIN\b", r"\bDJSC\b"), ("DJSC", "DJ"), []),
     ("PIL", _rx(r"\bPACIFIC\s+INTERNATIONAL\s+LINES?\b", r"\bPIL\b", r"\bPILSHIP\b"), ("SGN6",), _rx(r"^KOTA\b")),
     ("CULINES", _rx(r"\bCU\s?LINES\b", r"\bCHINA\s+UNITED\s+LINES?\b", r"\bCUL\b"), ("CUL",), []),
@@ -359,7 +361,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

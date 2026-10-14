@@ -353,6 +353,19 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#374151',
     badgeClass: 'bg-gray-700 text-gray-50 border-gray-800 dark:bg-gray-600 dark:text-gray-50 dark:border-gray-400',
   },
+  {
+    id: 'rust',
+    name: 'Rust (Solid)',
+    nameVi: 'Cam gạch (đậm)',
+    bgClass: 'bg-orange-700',
+    darkBgClass: 'dark:bg-orange-600',
+    borderClass: 'border-orange-800',
+    darkBorderClass: 'dark:border-orange-400',
+    textClass: 'text-orange-50',
+    darkTextClass: 'dark:text-orange-50',
+    hexPreview: '#c2410c',
+    badgeClass: 'bg-orange-700 text-orange-50 border-orange-800 dark:bg-orange-600 dark:text-orange-50 dark:border-orange-400',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));

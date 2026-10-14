@@ -12,6 +12,10 @@ export interface CarrierDef {
 
 export const CARRIERS: CarrierDef[] = [
   {
+    key: 'DJ SHIPPING',
+    patterns: [/\bDJ\s+SHIPPING\b/],
+  },
+  {
     key: 'DONGJIN',
     patterns: [/\bDONG\s?JIN\b/, /\bDJSC\b/],
   },
@@ -128,6 +132,7 @@ export function matchCarrier(text?: string | null): CarrierDef | null {
 
 /** Booking number prefixes used when the Carrier field is empty. */
 const BOOKING_PREFIXES: [RegExp, string][] = [
+  [/^DJL/, 'DJ SHIPPING'],
   [/^DJ/, 'DONGJIN'],
   [/^CUL/, 'CULINES'],
   [/^SGN6/, 'PIL'],
