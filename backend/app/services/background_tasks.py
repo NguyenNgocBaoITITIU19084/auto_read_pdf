@@ -16,7 +16,7 @@ from backend.app.core.database import (
     get_all_watchlists, get_all_container_watchlists,
     insert_vessel_schedules, insert_containers,
     get_system_setting, set_system_setting, get_notification_settings,
-    purge_expired_booking_trash,
+    purge_expired_trash,
 )
 from backend.app.services.change_detection import extra_gate_rows
 from backend.app.services.eport_client import search_vessels_detailed, search_containers
@@ -422,9 +422,9 @@ async def _run_log_retention():
     except Exception:
         logger.exception("Log retention job failed")
     try:
-        await asyncio.to_thread(purge_expired_booking_trash)
+        await asyncio.to_thread(purge_expired_trash)
     except Exception:
-        logger.exception("Booking trash purge failed")
+        logger.exception("Trash purge failed")
 
 
 def register_log_retention_job(startup_delay_seconds: float = LOG_RETENTION_STARTUP_DELAY_SECONDS):

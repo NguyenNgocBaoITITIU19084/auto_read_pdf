@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Box, Search, RefreshCw, Trash2, FileSpreadsheet, Eye, Copy, BookmarkCheck,
-  SlidersHorizontal, BookmarkPlus, BookmarkMinus, Filter, ClipboardCopy, FolderInput, RotateCw, ScanLine
+  SlidersHorizontal, BookmarkPlus, BookmarkMinus, Filter, ClipboardCopy, FolderInput, RotateCw, ArchiveRestore, ScanLine
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -12,6 +12,7 @@ import {
   getContainers, getContainersPage, getContainerIds, getContainersByIds, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
   addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist,
   addContainerWatchlistBatch, removeContainerWatchlistBatch, resyncContainersApi,
+  containerTrashApi,
 } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import { ExportModal } from '../common/ExportModal';
@@ -19,6 +20,8 @@ import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
+import { TRASH_KEEP_DAYS } from '../common/TrashModal';
+import { ContainerTrashModal } from './ContainerTrashModal';
 import { ContainerDetailModal } from './ContainerDetailModal';
 import { ContainerImageModal, ContainerLookupResult } from './ContainerImageModal';
 import { useContainerImageQueue } from '../../context/ContainerImageQueueContext';
@@ -109,6 +112,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
   const [exportRows, setExportRows] = useState<ContainerInfo[]>([]);
   const [isMoveOpen, setIsMoveOpen] = useState(false);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
 
   // Listen to interactive tour triggers (open/close Container Watchlist modal)
@@ -273,9 +278,23 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   });
 
   /** 'loading' | 'refresh' | 'silent' — reloads the current page and the watchlist together. */
-  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
-    await Promise.all([table.reload(mode), loadWatchlist()]);
+  const refreshTrashCount = useStableCallback(async () => {
+    if (!activeCollection) return setTrashCount(0);
+    try {
+      setTrashCount(await containerTrashApi.count(activeCollection.id));
+    } catch {
+      /* the badge is only a hint */
+    }
   });
+
+  const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    await Promise.all([table.reload(mode), loadWatchlist(), refreshTrashCount()]);
+  });
+
+  useEffect(() => {
+    void refreshTrashCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCollection?.id]);
 
   useEffect(() => {
     loadWatchlist();
@@ -465,11 +484,11 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   });
 
   const handleDelete = useStableCallback(async (id: number) => {
-    const ok = await confirm({ title: t.container.deleteOneTitle, message: t.common.deleteConfirm, danger: true });
+    const ok = await confirm({ title: t.container.deleteOneTitle, message: tf(t.container.trash.deleteConfirm, { days: TRASH_KEEP_DAYS }), danger: true });
     if (!ok) return;
     try {
       await deleteContainer(id);
-      addToast(t.common.success, 'success');
+      addToast(tf(t.container.trash.deleteSuccess, { count: 1 }), 'success');
       selection.selectIds([id], false);
       await loadData('refresh');
     } catch (e: any) {
@@ -479,11 +498,11 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
   const handleClearAll = async () => {
     if (!activeCollection) return;
-    const ok = await confirm({ title: t.container.clearAllTitle, message: t.common.clearConfirm, danger: true });
+    const ok = await confirm({ title: t.container.clearAllTitle, message: tf(t.container.trash.clearConfirm, { days: TRASH_KEEP_DAYS }), danger: true });
     if (!ok) return;
     try {
-      await clearContainers(activeCollection.id);
-      addToast(t.common.success, 'success');
+      const cleared = await clearContainers(activeCollection.id);
+      addToast(tf(t.container.trash.deleteSuccess, { count: cleared }), 'success');
       selection.clear();
       await loadData('refresh');
     } catch (e: any) {
@@ -511,13 +530,13 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     if (ids.length === 0) return;
     const ok = await confirm({
       title: t.container.deleteSelectedTitle,
-      message: tf(t.bulk.deleteSelectedConfirm, { count: ids.length }),
+      message: tf(t.container.trash.deleteSelectedConfirm, { count: ids.length, days: TRASH_KEEP_DAYS }),
       danger: true,
     });
     if (!ok) return;
     await runBulk('delete', async () => {
-      await deleteContainersBatch(ids);
-      addToast(tf(t.container.deleteSelectedSuccess, { count: ids.length }), 'success');
+      const deleted = await deleteContainersBatch(ids);
+      addToast(tf(t.container.trash.deleteSuccess, { count: deleted }), 'success');
       selection.selectIds(ids, false);
       await loadData('refresh');
     });
@@ -892,7 +911,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           </Tooltip>
 
           {total > 0 && (
-            <Tooltip content="Xóa tất cả Container trong bộ sưu tập này">
+            <Tooltip content={t.container.trash.clearTooltip}>
               <button
                 onClick={handleClearAll}
                 className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 transition-colors"
@@ -901,6 +920,21 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               </button>
             </Tooltip>
           )}
+
+          <Tooltip content={tf(t.container.trash.tooltip, { days: TRASH_KEEP_DAYS })}>
+            <button
+              onClick={() => setIsTrashOpen(true)}
+              className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
+            >
+              <ArchiveRestore className="w-3.5 h-3.5" />
+              <span>{t.container.trash.button}</span>
+              {trashCount > 0 && (
+                <span className="min-w-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[10px] leading-4 text-center">
+                  {trashCount > 999 ? '999+' : trashCount}
+                </span>
+              )}
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -1127,6 +1161,13 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           selection.clear();
           if (!result.copy) loadData('refresh');
         }}
+      />
+
+      <ContainerTrashModal
+        isOpen={isTrashOpen}
+        onClose={() => setIsTrashOpen(false)}
+        collectionId={activeCollection?.id ?? null}
+        onChanged={() => loadData('refresh')}
       />
 
       <ColumnConfigModal

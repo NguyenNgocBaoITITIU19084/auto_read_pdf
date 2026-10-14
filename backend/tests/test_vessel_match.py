@@ -79,3 +79,11 @@ def test_parse_closing_time(raw, expected):
 def test_matches_vessel_rows_stored_in_the_old_display_format():
     idx = build_schedule_index([sched("HMM HOPE", "062E-062E", "11:00 23/09/2026")])
     assert find_eport_cutoff("HMM HOPE 062E(EC2)", idx) == "23/09/2026 11:00"
+
+
+def test_dashed_voyage_is_not_matched_by_its_number_half():
+    idx = build_schedule_index([sched("EVER MAGIC", "1468-009W-1477-010E", "2026-10-15 10:00:00")])
+    assert find_eport_cutoff("EVER MAGIC 1477-010E", idx) == "15/10/2026 10:00"
+    assert find_eport_cutoff("EVER MAGIC 1468-009W", idx) == "15/10/2026 10:00"
+    assert find_eport_cutoff("EVER MAGIC 1477-011E", idx) is None
+    assert find_eport_cutoff("EVER CONSIST 0556-071S", INDEX) is None

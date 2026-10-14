@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Ship, Search, RefreshCw, Trash2, FileSpreadsheet, Eye, Copy, BookmarkCheck,
-  SlidersHorizontal, BookmarkPlus, BookmarkMinus, ClipboardCopy, FolderInput, RotateCw
+  SlidersHorizontal, BookmarkPlus, BookmarkMinus, ClipboardCopy, FolderInput, RotateCw, ArchiveRestore
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -12,6 +12,7 @@ import {
   getVessels, getVesselsPage, getVesselIds, getVesselsByIds, searchVesselsApi, deleteVessel, deleteVesselsBatch, clearVessels,
   addVesselWatchlist, getVesselWatchlist, deleteVesselWatchlist,
   addVesselWatchlistBatch, removeVesselWatchlistBatch, resyncVesselsApi,
+  vesselTrashApi,
 } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import { ExportModal } from '../common/ExportModal';
@@ -19,6 +20,8 @@ import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
 import { MoveToCollectionModal } from '../common/MoveToCollectionModal';
+import { TRASH_KEEP_DAYS } from '../common/TrashModal';
+import { VesselTrashModal } from './VesselTrashModal';
 import { VesselDetailModal } from './VesselDetailModal';
 import { VesselWatchlistModal } from './VesselWatchlistModal';
 import { VesselRow } from './VesselRow';
@@ -75,6 +78,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
   const [isMoveOpen, setIsMoveOpen] = useState(false);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
 
   // Listen to interactive tour triggers (open/close Vessel Watchlist modal)
@@ -185,10 +190,24 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     }
   });
 
+  const refreshTrashCount = useStableCallback(async () => {
+    if (!activeCollection) return setTrashCount(0);
+    try {
+      setTrashCount(await vesselTrashApi.count(activeCollection.id));
+    } catch {
+      /* the badge is only a hint */
+    }
+  });
+
   /** 'loading' | 'refresh' | 'silent' — reloads the current page and the watchlist together. */
   const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
-    await Promise.all([table.reload(mode), loadWatchlist()]);
+    await Promise.all([table.reload(mode), loadWatchlist(), refreshTrashCount()]);
   });
+
+  useEffect(() => {
+    void refreshTrashCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCollection?.id]);
 
   useEffect(() => {
     loadWatchlist();
@@ -309,11 +328,11 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   });
 
   const handleDelete = useStableCallback(async (id: number) => {
-    const ok = await confirm({ title: t.vessel.deleteOneTitle, message: t.common.deleteConfirm, danger: true });
+    const ok = await confirm({ title: t.vessel.deleteOneTitle, message: tf(t.vessel.trash.deleteConfirm, { days: TRASH_KEEP_DAYS }), danger: true });
     if (!ok) return;
     try {
       await deleteVessel(id);
-      addToast(t.common.success, 'success');
+      addToast(tf(t.vessel.trash.deleteSuccess, { count: 1 }), 'success');
       selection.selectIds([id], false);
       await loadData('refresh');
     } catch (e: any) {
@@ -323,11 +342,11 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
   const handleClearAll = async () => {
     if (!activeCollection) return;
-    const ok = await confirm({ title: t.vessel.clearAllTitle, message: t.common.clearConfirm, danger: true });
+    const ok = await confirm({ title: t.vessel.clearAllTitle, message: tf(t.vessel.trash.clearConfirm, { days: TRASH_KEEP_DAYS }), danger: true });
     if (!ok) return;
     try {
-      await clearVessels(activeCollection.id);
-      addToast(t.common.success, 'success');
+      const cleared = await clearVessels(activeCollection.id);
+      addToast(tf(t.vessel.trash.deleteSuccess, { count: cleared }), 'success');
       selection.clear();
       await loadData('refresh');
     } catch (e: any) {
@@ -364,13 +383,13 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     if (ids.length === 0) return;
     const ok = await confirm({
       title: t.vessel.deleteSelectedTitle,
-      message: tf(t.bulk.deleteSelectedConfirm, { count: ids.length }),
+      message: tf(t.vessel.trash.deleteSelectedConfirm, { count: ids.length, days: TRASH_KEEP_DAYS }),
       danger: true,
     });
     if (!ok) return;
     await runBulk('delete', async () => {
-      await deleteVesselsBatch(ids);
-      addToast(tf(t.vessel.deleteSelectedSuccess, { count: ids.length }), 'success');
+      const deleted = await deleteVesselsBatch(ids);
+      addToast(tf(t.vessel.trash.deleteSuccess, { count: deleted }), 'success');
       selection.selectIds(ids, false);
       await loadData('refresh');
     });
@@ -671,7 +690,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
           </Tooltip>
 
           {total > 0 && (
-            <Tooltip content="Xóa tất cả Lịch tàu trong bộ sưu tập này">
+            <Tooltip content={t.vessel.trash.clearTooltip}>
               <button
                 onClick={handleClearAll}
                 className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 transition-colors"
@@ -680,6 +699,21 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
               </button>
             </Tooltip>
           )}
+
+          <Tooltip content={tf(t.vessel.trash.tooltip, { days: TRASH_KEEP_DAYS })}>
+            <button
+              onClick={() => setIsTrashOpen(true)}
+              className="relative flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-colors"
+            >
+              <ArchiveRestore className="w-3.5 h-3.5" />
+              <span>{t.vessel.trash.button}</span>
+              {trashCount > 0 && (
+                <span className="min-w-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[10px] leading-4 text-center">
+                  {trashCount > 999 ? '999+' : trashCount}
+                </span>
+              )}
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -838,6 +872,13 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
           selection.clear();
           if (!result.copy) loadData('refresh');
         }}
+      />
+
+      <VesselTrashModal
+        isOpen={isTrashOpen}
+        onClose={() => setIsTrashOpen(false)}
+        collectionId={activeCollection?.id ?? null}
+        onChanged={() => loadData('refresh')}
       />
 
       <ColumnConfigModal

@@ -38,12 +38,18 @@ export const FieldCopyBar: React.FC<FieldCopyBarProps> = ({ entries, selected, o
   const pendingShort = pendingPart && pendingPart.text.length > 24 ? `${pendingPart.text.slice(0, 24)}…` : pendingPart?.text;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 px-2.5 py-1.5">
-      <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-        <ListChecks className="w-3.5 h-3.5" />
-        {count > 0 ? <strong className="text-slate-700 dark:text-slate-200">{tf(f.selected, { count })}</strong> : f.hint}
+    // One line whatever is offered: a bar growing a second line would push the cards (and the text being
+    // highlighted) down under the mouse
+    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 px-2.5 py-1.5">
+      <span className="min-w-0 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+        <ListChecks className="w-3.5 h-3.5 shrink-0" />
+        {count > 0 ? (
+          <strong className="truncate text-slate-700 dark:text-slate-200">{tf(f.selected, { count })}</strong>
+        ) : (
+          <span className="truncate" title={f.hint}>{f.hint}</span>
+        )}
       </span>
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5">
         {pendingEntry && pendingPart && (
           <button
             type="button"
@@ -51,10 +57,10 @@ export const FieldCopyBar: React.FC<FieldCopyBarProps> = ({ entries, selected, o
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onPickPart?.(pendingPart)}
             title={tf(f.pickPartTitle, { text: pendingPart.text, label: pendingEntry.label })}
-            className={`${btn} border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50`}
+            className={`${btn} max-w-[12rem] border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50`}
           >
-            <TextSelect className="w-3.5 h-3.5" />
-            {tf(f.pickPart, { text: pendingShort || '' })}
+            <TextSelect className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{tf(f.pickPart, { text: pendingShort || '' })}</span>
           </button>
         )}
         {count < available.length && (

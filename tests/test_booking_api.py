@@ -259,3 +259,70 @@ def test_ai_test_endpoint_reports_error_type(monkeypatch):
     res = client.post("/api/v1/settings/ai/test", json={"gemini_api_key": "k", "gemini_model": "gemini-2.0-flash"})
     assert res.json()["error_type"] == "model_not_found"
     assert "gemini-2.0-flash" in res.json()["message"]
+
+
+def _image_bytes(fmt: str) -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 20), "white").save(buf, format=fmt)
+    return buf.getvalue()
+
+
+def _fake_ocr(seen: list):
+    def fake(image_bytes, filename="", api_key=None, model=None, return_details=False):
+        seen.append(image_bytes)
+        return {"data": dict(SAMPLE), "engine_used": "ocr", "warnings": []}
+    return fake
+
+
+def test_file_kind_is_told_from_content():
+    from backend.app.services.file_kind import IMAGE, PDF, detect_file_kind
+
+    assert detect_file_kind(_blank_pdf(1), "scan.png") == PDF
+    assert detect_file_kind(_image_bytes("PNG"), "booking.pdf") == IMAGE
+    assert detect_file_kind(_image_bytes("GIF"), "") == IMAGE
+    assert detect_file_kind(_image_bytes("TIFF"), "x.tif") == IMAGE
+    assert detect_file_kind(b"hello", "notes.txt") is None
+
+
+@pytest.mark.parametrize("name,fmt,mime", [
+    ("booking.pdf", "PNG", "application/pdf"),   # a photo saved under a .pdf name
+    ("chup-man-hinh", "JPEG", "application/octet-stream"),  # no extension
+    ("anim.gif", "GIF", "image/gif"),
+    ("fax.tiff", "TIFF", "image/tiff"),
+])
+def test_dropped_images_are_read_with_ocr_whatever_their_name(monkeypatch, name, fmt, mime):
+    seen = []
+    monkeypatch.setattr(bookings_api, "extract_booking_from_image", _fake_ocr(seen))
+    res = client.post("/api/v1/bookings/extract-image", files={"file": (name, io.BytesIO(_image_bytes(fmt)), mime)})
+    assert res.status_code == 200
+    assert res.json()["engine_used"] == "ocr" and res.json()["data"]["Booking No"] == SAMPLE["Booking No"]
+    assert seen and seen[0][:4] in (b"\x89PNG", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xdb")  # GIF / TIFF sent as PNG
+
+
+def test_scanned_pdf_is_read_with_ocr(monkeypatch):
+    monkeypatch.setattr("backend.app.services.extractor.read_pdf_text", lambda p: "")
+    seen = []
+    monkeypatch.setattr(bookings_api, "extract_booking_from_image", _fake_ocr(seen))
+    files = {"file": ("scan.pdf", io.BytesIO(_blank_pdf(3)), "application/pdf")}
+    body = client.post("/api/v1/bookings/extract-image", files=files).json()
+    assert body["engine_used"] == "ocr"
+    assert body["warnings"] == [bookings_api.W_PDF_SCANNED]
+    assert body["data"]["Vessel"] == "KOTA NEKAD 0272S" and body["data"]["Tên file PDF"] == "scan.pdf"
+    assert len(seen) == 1 and seen[0].startswith(b"\xff\xd8\xff")  # the first pages, in one OCR call
+
+
+def test_upload_reads_misnamed_images(monkeypatch, col_id):
+    monkeypatch.setattr(bookings_api, "extract_booking_from_image", _fake_ocr([]))
+    files = [("files", ("photo.pdf", _image_bytes("PNG"), "application/pdf")),
+             ("files", ("notes.txt", b"hello", "text/plain"))]
+    body = client.post("/api/v1/bookings/upload", data={"collection_id": str(col_id)}, files=files).json()
+    assert body["count"] == 1
+    assert [b["Booking No"] for b in get_bookings(col_id)] == [SAMPLE["Booking No"]]
+
+
+def test_pdf_preview_shows_a_misnamed_photo():
+    files = {"file": ("photo.pdf", io.BytesIO(_image_bytes("PNG")), "application/pdf")}
+    body = client.post("/api/v1/bookings/pdf-preview", files=files).json()
+    assert body["page_count"] == 1 and body["pages"][0].startswith("data:image/png;base64,")

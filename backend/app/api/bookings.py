@@ -1,8 +1,8 @@
+import base64
 import os
 import asyncio
 import logging
 import tempfile
-import shutil
 from typing import List, Optional, Dict, Any, Tuple
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
@@ -17,17 +17,16 @@ from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
 from backend.app.services.image_extractor import extract_booking_from_image
 from backend.app.services.booking_validation import normalize_manual_booking
-from backend.app.services.pdf_preview import render_pdf_pages
+from backend.app.services.pdf_preview import render_pdf_pages, render_pdf_for_ocr
+from backend.app.services.file_kind import IMAGE, PDF, detect_file_kind, to_ocr_image
 
 logger = logging.getLogger("backend.api.bookings")
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-PDF_EXTENSIONS = {".pdf"}
-ALLOWED_EXTENSIONS = PDF_EXTENSIONS.union(IMAGE_EXTENSIONS)
-
 W_PDF_NO_TEXT = "Không tìm thấy thông tin booking trong PDF (có thể là bản scan không có lớp chữ). Vui lòng thử dán ảnh hoặc nhập tay."
+W_PDF_SCANNED = "PDF không có lớp chữ (bản scan) nên đã được đọc như ảnh bằng OCR. Vui lòng kiểm tra lại."
+W_UNSUPPORTED = "Unsupported file format. Please upload an image (PNG, JPG, WEBP, BMP, GIF, TIFF) or PDF."
 
 class SaveBookingRequest(BaseModel):
     collection_id: int
@@ -58,10 +57,6 @@ def _resolve_vessel_etd(data: dict) -> None:
         data["Vessel"] = vessel
         data["ETD"] = etd
 
-def _safe_basename(filename: str) -> str:
-    name = os.path.basename((filename or "").replace("\\", "/"))
-    return name or "uploaded_file"
-
 def _extract_pdf_bytes(file_bytes: bytes) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
         tmp_pdf.write(file_bytes)
@@ -75,31 +70,21 @@ def _extract_pdf_bytes(file_bytes: bytes) -> dict:
 def _process_uploads(collection_id: int, uploads: List[Tuple[str, bytes]]) -> List[dict]:
     """Blocking work (pdfplumber / Gemini / OCR / sqlite) — run in a worker thread."""
     extracted_results = []
-    temp_dir = tempfile.mkdtemp(prefix="booking_upload_")
-    try:
-        for filename, file_bytes in uploads:
-            file_ext = os.path.splitext(filename)[1].lower()
-            try:
-                if file_ext == ".pdf":
-                    temp_path = os.path.join(temp_dir, _safe_basename(filename))
-                    with open(temp_path, "wb") as buffer:
-                        buffer.write(file_bytes)
-                    data = extract_booking_data(temp_path)
-                else:
-                    data = extract_booking_from_image(file_bytes, filename=filename)
+    for filename, file_bytes in uploads:
+        try:
+            kind = detect_file_kind(file_bytes, filename)
+            if kind is None:
+                logger.warning(f"Skipped {filename}: neither a PDF nor an image")
+                continue
+            data = _extract_preview(file_bytes, filename, kind, None)["data"]
+            if not has_booking_fields(data):
+                logger.warning(f"No booking fields extracted from {filename} (carrier={data.get('Carrier')}); saved as empty row")
 
-                data["Tên file PDF"] = filename
-                _resolve_vessel_etd(data)
-                if not has_booking_fields(data):
-                    logger.warning(f"No booking fields extracted from {filename} (carrier={data.get('Carrier')}); saved as empty row")
-
-                row_id = insert_booking(collection_id, data)
-                data["id"] = row_id
-                extracted_results.append(data)
-            except Exception as e:
-                logger.exception(f"Error parsing {filename}: {e}")
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+            row_id = insert_booking(collection_id, data)
+            data["id"] = row_id
+            extracted_results.append(data)
+        except Exception as e:
+            logger.exception(f"Error parsing {filename}: {e}")
     return extracted_results
 
 @router.get("")
@@ -143,39 +128,46 @@ async def upload_bookings(
     uploads: List[Tuple[str, bytes]] = []
     for file in files:
         filename = file.filename or "uploaded_file"
-        file_ext = os.path.splitext(filename)[1].lower()
-        if file_ext not in ALLOWED_EXTENSIONS:
-            continue
         uploads.append((filename, await file.read()))
 
     extracted_results = await asyncio.to_thread(_process_uploads, collection_id, uploads)
     logger.info(f"Upload {len(uploads)} file(s) to collection {collection_id} -> {len(extracted_results)} booking(s)")
     return {"count": len(extracted_results), "items": extracted_results}
 
-def _extract_preview(file_bytes: bytes, filename: str, file_ext: str, api_key: Optional[str]) -> dict:
+def _read_image(image_bytes: bytes, filename: str, api_key: Optional[str]) -> dict:
+    result = extract_booking_from_image(to_ocr_image(image_bytes), filename=filename, api_key=api_key, return_details=True)
+    if isinstance(result, dict) and "data" in result and "engine_used" in result:
+        return result
+    return {"data": result, "engine_used": "none", "warnings": []}
+
+def _extract_preview(file_bytes: bytes, filename: str, kind: str, api_key: Optional[str]) -> dict:
+    """Reads a booking from a PDF's text layer, or with Gemini / OCR from a photo or a scanned PDF."""
     engine_used = "none"
     warnings: List[str] = []
     model_used: Optional[str] = None
     gemini_error_kind: Optional[str] = None
-    if file_ext == ".pdf":
+    result = None
+    if kind == PDF:
         data = _extract_pdf_bytes(file_bytes)
         # Read from the PDF text layer (no AI / OCR)
         if has_booking_fields(data):
             engine_used = "pdf"
         else:
-            warnings.append(W_PDF_NO_TEXT)
+            # no text layer (a scan / photo saved as PDF): read the page images like a dropped photo
+            try:
+                result = _read_image(render_pdf_for_ocr(file_bytes), filename, api_key)
+                warnings.append(W_PDF_SCANNED)
+            except Exception as e:
+                logger.warning(f"Could not OCR the pages of {filename}: {e}")
+                warnings.append(W_PDF_NO_TEXT)
     else:
-        result = extract_booking_from_image(
-            file_bytes, filename=filename, api_key=api_key, return_details=True
-        )
-        if isinstance(result, dict) and "data" in result and "engine_used" in result:
-            data = result["data"]
-            engine_used = result.get("engine_used") or "none"
-            warnings = list(result.get("warnings") or [])
-            model_used = result.get("model_used")
-            gemini_error_kind = result.get("gemini_error_kind")
-        else:
-            data = result
+        result = _read_image(file_bytes, filename, api_key)
+    if result is not None:
+        data = result["data"]
+        engine_used = result.get("engine_used") or "none"
+        warnings.extend(result.get("warnings") or [])
+        model_used = result.get("model_used")
+        gemini_error_kind = result.get("gemini_error_kind")
 
     data["Tên file PDF"] = filename
     _resolve_vessel_etd(data)
@@ -192,34 +184,38 @@ async def extract_image_preview(
     Returns {status, data, engine_used, warnings} for preview/editing.
     """
     filename = file.filename or "booking_photo.jpg"
-    file_ext = os.path.splitext(filename)[1].lower()
-    if file_ext not in IMAGE_EXTENSIONS and file_ext not in PDF_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported file format. Please upload an image (PNG, JPG, WEBP, BMP) or PDF."
-        )
-
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
+    # by content, not by name: a photo saved as .pdf (or with no extension) is still read with OCR
+    kind = await asyncio.to_thread(detect_file_kind, file_bytes, filename)
+    if kind is None:
+        raise HTTPException(status_code=400, detail=W_UNSUPPORTED)
 
     try:
-        result = await asyncio.to_thread(_extract_preview, file_bytes, filename, file_ext, api_key)
+        result = await asyncio.to_thread(_extract_preview, file_bytes, filename, kind, api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to extract image: {e}")
-    logger.info(f"Image extract engine={result['engine_used']} warnings={len(result['warnings'])}")
+    logger.info(f"Image extract kind={kind} engine={result['engine_used']} warnings={len(result['warnings'])}")
     return result
 
 @router.post("/pdf-preview")
 def pdf_preview(file: UploadFile = File(...)):
     """Page images of a PDF (JPEG data URLs) for the review window; nothing is saved."""
     filename = file.filename or "booking.pdf"
-    if os.path.splitext(filename)[1].lower() not in PDF_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Only PDF files can be previewed")
     file_bytes = file.file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
+    kind = detect_file_kind(file_bytes, filename)
+    named_pdf = os.path.splitext(filename)[1].lower() == ".pdf"
+    if kind != PDF and not (kind == IMAGE and named_pdf):
+        raise HTTPException(status_code=400, detail="Only PDF files can be previewed")
     try:
+        if kind == IMAGE:  # a photo saved under a .pdf name: show the photo itself
+            image = to_ocr_image(file_bytes)
+            mime = "image/png" if image.startswith(b"\x89PNG") else "image/webp" if image.startswith(b"RIFF") else "image/jpeg"
+            return {"pages": [f"data:{mime};base64," + base64.b64encode(image).decode("ascii")],
+                    "page_count": 1, "truncated": False}
         return render_pdf_pages(file_bytes)
     except Exception as e:
         logger.warning(f"PDF preview failed for {filename}: {e}")

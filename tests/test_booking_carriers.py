@@ -132,10 +132,10 @@ def test_cosco_booking():
     assert res["ETD_Pre"] == "03/10/2026 14:00"
     assert res["Trunk Vessel"] == "CSCL VENUS 090W"
     assert res["ETD_Trunk"] == "13/10/2026 22:00"
-    assert res["Port of Discharging"] == "ISTANBUL"
-    assert res["Place of Delivery"] == "KUMPORT,ISTANBUL, TURKEY"
+    assert res["Port of Discharging"] == "ISTANBUL / KUMPORT LIMAN HIZMETLERI AS"  # terminal kept, wrapped line joined
+    assert res["Place of Delivery"] == "KUMPORT, ISTANBUL, TURKEY"
     assert res["Block"] == "null"
-    assert res["Equipment Type"] == "40' HI-CUBE CONTAINER"
+    assert res["Equipment Type"] == "40'HC"
     assert res["Q'ty"] == "2"
     assert res["Empty Pick Up CY"] == "null"
     assert res["Full return CY"] == "ICD PHUOC LONG 3"
@@ -159,10 +159,10 @@ def test_oocl_direct_booking_side_by_side_depots():
     assert res["Trunk Vessel"] == "YM CELEBRITY 107A"
     assert res["Pre Carrier"] == "null"
     assert res["T/S Port"] == "null"
-    assert res["Port of Discharging"] == "KEELUNG"
-    assert res["Place of Delivery"] == "WUTU,NEW TAIPEI CITY, TAIWAN"
+    assert res["Port of Discharging"] == "KEELUNG / CHINA CONTAINER TERMINAL CORP. KEELUNG PORT WEST COAST CONTAINER TERMINAL"
+    assert res["Place of Delivery"] == "WUTU, NEW TAIPEI CITY, TAIWAN"
     assert res["Block"] == "null"  # empty label must not swallow the next line
-    assert res["Equipment Type"] == "20' GENERAL PURPOSE CONTAINER"
+    assert res["Equipment Type"] == "20'GP"
     assert res["Q'ty"] == "2"
     assert res["Empty Pick Up CY"] == "SINOVNL TAN VAN"
     assert res["Full return CY"] == "CAT LAI TERMINAL"
@@ -185,10 +185,10 @@ def test_oocl_with_cosco_vessel_is_still_oocl():
     assert res["Vessel"] == "COSCO SHIPPING PANAMA 006E"
     assert res["ETD"] == "28/08/2026"
     assert res["T/S Port"] == "null"
-    assert res["Port of Discharging"] == "LONG BEACH"
-    assert res["Place of Delivery"] == "LONG BEACH,LOS ANGELES, CALIFORNIA, UNITED STATES"
+    assert res["Port of Discharging"] == "LONG BEACH / LONG BEACH CONTAINER TERMINAL (PIER E)"
+    assert res["Place of Delivery"] == "LONG BEACH, LOS ANGELES, CALIFORNIA, UNITED STATES"
     assert res["Block"] == "USLGB"
-    assert res["Equipment Type"] == "40' HI-CUBE CONTAINER"
+    assert res["Equipment Type"] == "40'HC"
     assert res["Q'ty"] == "1"
     assert res["Empty Pick Up CY"] == "G-FORTUNE DONG AN DEPOT"
     assert res["Full return CY"] == "DONG NAI PORT"
@@ -201,7 +201,7 @@ def test_cargosmart_several_container_types():
         "BOOKING QTY SIZE/TYPE: 2 X 20' General Purpose Container\n1 X 40' Hi-Cube Container",
     )
     res = extract_booking_from_text(text, "OOCL 2.pdf")
-    assert res["Equipment Type"] == "2 X 20' GENERAL PURPOSE CONTAINER + 1 X 40' HI-CUBE CONTAINER"
+    assert res["Equipment Type"] == "2 X 20'GP + 1 X 40'HC"
     assert res["Q'ty"] == "3"
 
 
@@ -264,3 +264,110 @@ def test_parse_date_new_formats(raw, expected):
 def test_generic_booking_no_fallback_requires_digit():
     res = extract_booking_from_text("Booking Confirmation\nPort of Discharging : JEDDAH\n", "x.pdf")
     assert res["Booking No"] == "null"
+
+
+# OOCL App confirmation spelling the label 'TRANSSHIPMENT PORT' (2339911210)
+OOCL_TSS_TEXT = """By OOCL App
+FROM: OOCL (Vietnam) Co., Ltd
+CONTACT NUMBER: 84 -28 -39116006
+BOOKING ACKNOWLEDGEMENT REMARK
+- REFRESH CY closing time at Cat Lai Terminal: 08:00, 17 OCT 2026
+- Standby
+BOOKING NUMBER: 2339911210
+BOOKING STATUS: Confirmed
+RATE AGREEMENT NUMBER: FW190687 - (SERVICE CONTRACT)
+EXTERNAL REFERENCE INFORMATION
+CS Reference Number: CSO6248532255
+PARTIES INFORMATION
+BOOKING PARTY: Yusen Logistics (Vietnam) Co Ltd- Ho Chi Minh Branch
+FORWARDER: Yusen Logistics (Vietnam) Co Ltd- Ho Chi Minh Branch
+SHIPPER: Yusen Logistics (Vietnam) Co Ltd- Ho Chi Minh Branch
+ROUTE INFORMATION
+TOTAL CO2e EMISSION: 4181.31 KG (Tank-to-Wake); 5068.30 KG (Well-to-Wake)
+TOTAL BOOKING CONTAINER QTY 3 X 40HQ
+SIZE/TYPE:
+PLACE OF RECEIPT: Ho Chi Minh,Vietnam
+PORT OF LOADING: Ho Chi Minh (Cat Lai) / Cat Lai Terminal ETA: 17 Oct 2026
+INTENDED VESSEL/VOYAGE: INCEDA 056S ETD: 18 Oct 2026
+SERVICE CODE: VTS VESSEL FLAG: Marshall Islands
+TRANSSHIPMENT PORT: Singapore / PSA Corporation Limited ETA: 23 Oct 2026
+T/S INTENDED VESSEL/VOYAGE: OOCL SWEDEN 009W ETD: 24 Oct 2026
+PORT OF DISCHARGE: Hamburg / TCT Tollerort Container Terminal ETA: 24 Nov 2026
+FINAL DESTINATION: Hamburg,Hamburg, Germany ETA: 24 Nov 2026
+BLOCK NUMBER:
+ESTIMATED CARGO AVAILABILITY AT DESTINATION HUB: 27 Nov 2026 10:00
+INTENDED CY CUT-OFF: 17 Oct 2026 08:00
+INTENDED SI/eSI CUT-OFF: 15 Oct 2026 10:00
+INTENDED VGM CUT-OFF: 17 Oct 2026 04:00
+LATE AND/OR INCOMPLETE SHIPPING INSTRUCTION SUBMISSION MAY RESULT IN CONTAINER(S) SHORT SHIPMENT AND
+LATE SI SUBMISSION CHARGES
+CARGO INFORMATION
+BOOKING QTY SIZE/TYPE: 3 X 40' Hi-Cube Container
+"""
+
+
+def test_oocl_transshipment_port_spelled_with_double_s():
+    r = extract_booking_from_text(OOCL_TSS_TEXT, "6. 2339911210.pdf")
+    assert r["Carrier"] == "OOCL"
+    assert r["T/S Port"] == "SINGAPORE"
+    assert r["Vessel"] == r["Pre Carrier"] == "INCEDA 056S"
+    assert r["ETD_Pre"] == "18/10/2026"
+    assert r["Trunk Vessel"] == "OOCL SWEDEN 009W"
+    assert r["ETD_Trunk"] == "24/10/2026"
+    assert r["Port of Discharging"] == "HAMBURG / TCT TOLLERORT CONTAINER TERMINAL"
+
+
+# '6464007164 - 202654873222.pdf' (COSCO, CMA CGM vessel, direct): the terminal and the final
+# destination's country wrap onto lines of their own; the LTD time zone wraps too
+COSCO_OAKLAND_TEXT = """FROM: COSCO SHIPPINGS LINES VIETNAM COMPANY
+BOOKING NUMBER: 6464007164
+ROUTE INFORMATION
+TOTAL BOOKING CONTAINER 1 X 40' Hi-Cube Container
+QTY SIZE/TYPE:
+PLACE OF RECEIPT: Ho Chi Minh,Ho Chi Minh, Vietnam LTD: 06 Sep 2026 03:00
+(ICT)
+PORT OF LOADING: Ba Ria-Vung Tau(CM-TV) / ETA: 05 Sep 2026 03:00(ICT)
+GEMALINK CONTAINER TERMINAL
+INTENDED VESSEL/VOYAGE: CMA CGM AMAZON MTE000E19 ETD: 06 Sep 2026 03:00(ICT)
+SERVICE CODE: SEA2 VESSEL FLAG: Malta
+BLOCK NUMBER: USOAK
+PORT OF DISCHARGE: Oakland / SSA Terminal, Berths 55- ETA: 05 Oct 2026 07:00(PST)
+59
+FINAL DESTINATION: Oakland,Alameda, California, ETA: 07 Oct 2026 08:00(PST)
+United States
+ESTIMATED CARGO AVAILABILITY AT DESTINATION HUB: 07 Oct 2026 08:00(PST)
+INTENDED VGM CUT-OFF: 03 Sep 2026 10:00(ICT) INTENDED FCL CY CUT-OFF: 04 Sep 2026 03:00(ICT)
+CARGO INFORMATION
+BOOKING QTY SIZE/TYPE: 1 X 40' Hi-Cube Container
+SOC INDICATOR: N
+FULL RETURN LOCATION: ICD SOWATCO LONG BINH
+EMPTY PICKUP LOCATION:
+REQUIRED DOCUMENT INFORMATION
+"""
+
+
+def test_cosco_wrapped_terminal_and_destination():
+    res = extract_booking_from_text(COSCO_OAKLAND_TEXT, "6464007164 - 202654873222.pdf")
+    assert res["Booking No"] == "6464007164"
+    assert res["Carrier"] == "COSCO"
+    assert res["Vessel"] == res["Trunk Vessel"] == "CMA CGM AMAZON MTE000E19"
+    assert res["ETD"] == "06/09/2026 03:00"
+    assert res["T/S Port"] == "null"
+    assert res["Port of Discharging"] == "OAKLAND / SSA TERMINAL, BERTHS 55-59"
+    assert res["Place of Delivery"] == "OAKLAND, ALAMEDA, CALIFORNIA, UNITED STATES"
+    assert res["Block"] == "USOAK"
+    assert res["Equipment Type"] == "40'HC"
+    assert res["Q'ty"] == "1"
+    assert res["Empty Pick Up CY"] == "null"
+    assert res["Full return CY"] == "ICD SOWATCO LONG BINH"
+    assert res["Port Cargo Cut-off"] == "04/09/2026 03:00"
+
+
+@pytest.mark.parametrize("name, code", [
+    ("40' Hi-Cube Container", "40'HC"), ("20' General Purpose Container", "20'GP"),
+    ("40' Reefer High Cube Container", "40'RH"), ("20' Reefer Container", "20'RF"),
+    ("20GP", "20'GP"), ("40HQ", "40'HC"), ("45' Something Else", "45' Something Else"),
+])
+def test_cargosmart_container_type_codes(name, code):
+    from backend.app.services.carrier_parsers.cargosmart import _type_code
+    assert _type_code(name) == code

@@ -71,6 +71,25 @@ describe('ImageQueueProvider', () => {
     expect(result.current.items[0]).toMatchObject({ engine: 'gemini', model: 'gemini-2.5-flash' });
   });
 
+  it('reads PDFs beside the images: a PDF never waits for a slow image, images still go one at a time', async () => {
+    const pdf = (name: string) => new File([new Uint8Array(4)], name, { type: 'application/pdf', lastModified: 1 });
+    const slowImage = deferred<ImageExtractResult>();
+    extract.mockImplementation((file: File) => (file.name.endsWith('.pdf')
+      ? Promise.resolve(ok(file.name, { engine_used: 'pdf', data: { 'Booking No': file.name, Vessel: 'INCRES 074S', ETD: '21/06/2026' } }))
+      : slowImage.promise));
+    const { result } = renderHook(() => useImageQueue(), { wrapper });
+
+    // Images first, PDFs after them, as when a mixed selection is dropped in
+    act(() => { result.current.enqueue([png('a.png'), png('b.png'), pdf('c.pdf'), pdf('d.pdf')], 'upload'); });
+    await waitFor(() => expect(statuses(result)).toEqual(['reading', 'queued', 'success', 'success']));
+    const names = () => extract.mock.calls.map((c) => (c[0] as File).name);
+    expect(names()).not.toContain('b.png'); // one image at a time
+
+    await act(async () => { slowImage.resolve(ok('SGN1')); });
+    await waitFor(() => expect(statuses(result)).toEqual(['success', 'success', 'success', 'success']));
+    expect(names().filter((n) => n.endsWith('.png'))).toEqual(['a.png', 'b.png']);
+  });
+
   it('marks a failed request, and re-reads it on retry', async () => {
     extract.mockRejectedValueOnce(new Error('Network Error')).mockResolvedValueOnce(ok('SGN1'));
     const { result } = renderHook(() => useImageQueue(), { wrapper });
@@ -104,17 +123,17 @@ describe('ImageQueueProvider', () => {
 
   it('accepts PDFs and keeps reading them while Gemini has paused the images', async () => {
     const pdf = (name: string) => new File([new Uint8Array(4)], name, { type: 'application/pdf', lastModified: 1 });
-    extract
-      .mockResolvedValueOnce(ok('SGN1', { engine_used: 'ocr', gemini_error_kind: 'quota', warnings: ['quota'] }))
-      .mockResolvedValueOnce(ok('PDF1', { engine_used: 'pdf', data: { 'Booking No': 'PDF1', Vessel: 'YM CELEBRITY 107A', ETD: '02/10/2026' } }));
+    // The PDF and the first image are read side by side: answer by file, not by call order
+    extract.mockImplementation(async (file: File) => (file.name.endsWith('.pdf')
+      ? ok('PDF1', { engine_used: 'pdf', data: { 'Booking No': 'PDF1', Vessel: 'YM CELEBRITY 107A', ETD: '02/10/2026' } })
+      : ok('SGN1', { engine_used: 'ocr', gemini_error_kind: 'quota', warnings: ['quota'] })));
     const { result } = renderHook(() => useImageQueue(), { wrapper });
     act(() => { result.current.enqueue([png('a.png'), png('b.png'), pdf('c.pdf')], 'upload'); });
 
     await waitFor(() => expect(statuses(result)).toEqual(['queued', 'queued', 'success']));
     expect(result.current.paused).toBe('quota');
-    expect((extract.mock.calls[1][0] as File).name).toBe('c.pdf');
     await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
-    expect(extract).toHaveBeenCalledTimes(2); // the images wait for Resume
+    expect(extract.mock.calls.map((c) => (c[0] as File).name).sort()).toEqual(['a.png', 'c.pdf']); // the images wait for Resume
     expect(addToast).not.toHaveBeenCalledWith(q.onlyImages, 'info');
   });
 

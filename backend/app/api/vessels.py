@@ -9,6 +9,7 @@ from backend.app.core.database import (
     remove_vessel_watchlist_batch, get_vessel_schedules_by_ids, update_watchlist_sync_status,
     get_vessel_schedules_page, get_vessel_schedule_ids
 )
+from backend.app.api.trash import add_trash_routes
 from backend.app.services.eport_client import search_vessels, search_vessels_detailed
 from backend.app.schemas.models import (
     VesselSearchRequest, VesselWatchlistAddRequest, BatchDeleteRequest,
@@ -18,6 +19,7 @@ from backend.app.schemas.models import (
 
 logger = logging.getLogger("backend.api.vessels")
 router = APIRouter(prefix="/vessels", tags=["Vessels"])
+add_trash_routes(router, "vessel", logger, "vessel schedule")
 
 # Pause between consecutive ePort vessel calls (avoid overloading ePort)
 RESYNC_VESSEL_DELAY_SECONDS = 1.0
@@ -90,8 +92,9 @@ def save_vessel_results(payload: VesselSaveResultsRequest):
 
 @router.post("/batch-delete")
 def remove_schedules_batch(payload: BatchDeleteRequest):
-    delete_vessel_schedules_batch(payload.ids)
-    return {"status": "success", "deleted_count": len(payload.ids)}
+    deleted = delete_vessel_schedules_batch(payload.ids)
+    logger.info(f"Moved {deleted} vessel schedule(s) to the trash")
+    return {"status": "success", "deleted_count": deleted}
 
 @router.post("/resync", response_model=ResyncResponse)
 def resync_vessels(payload: ResyncRequest):
@@ -147,8 +150,9 @@ def remove_schedule(schedule_id: int):
 
 @router.delete("/clear/{collection_id}")
 def clear_all_schedules(collection_id: int):
-    clear_vessel_schedules(collection_id)
-    return {"status": "success", "cleared_collection_id": collection_id}
+    deleted = clear_vessel_schedules(collection_id)
+    logger.info(f"Moved all {deleted} vessel schedule(s) of collection {collection_id} to the trash")
+    return {"status": "success", "cleared_collection_id": collection_id, "deleted": deleted}
 
 @router.get("/watchlist")
 def list_watchlist(collection_id: int = Query(...)):

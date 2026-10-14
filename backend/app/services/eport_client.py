@@ -36,6 +36,8 @@ def is_voyage_match(query_voy: str, eport_voy: str) -> bool:
     """
     So sánh chính xác số chuyến. ePort trả dạng "nhập-xuất" (vd '062E-062E'), nên khớp khi
     số chuyến yêu cầu trùng cả chuỗi đầy đủ HOẶC trùng chính xác một phần (chuyến nhập / chuyến xuất).
+    Mỗi chiều có thể tự chứa dấu gạch (Evergreen '1468-009W-1477-010E' = nhập '1468-009W', xuất
+    '1477-010E'), nên "một phần" là một đoạn liền mạch các mảnh, không chỉ một mảnh.
     """
     if not query_voy or not eport_voy:
         return False
@@ -44,8 +46,9 @@ def is_voyage_match(query_voy: str, eport_voy: str) -> bool:
         return False
     if query == normalize_string(eport_voy):
         return True
-    parts = re.split(r"[-/\\]", eport_voy)
-    return len(parts) > 1 and any(normalize_string(p) == query for p in parts)
+    parts = [normalize_string(p) for p in re.split(r"[-/\\]", eport_voy)]
+    return len(parts) > 1 and any("".join(parts[i:j]) == query
+                                  for i in range(len(parts)) for j in range(i + 1, len(parts) + 1))
 
 def clean_vessel_name_for_eport(vessel_name: str, voyage: str = None) -> str:
     """

@@ -54,6 +54,10 @@ export interface ImageQueueValue {
 
 const ImageQueueContext = createContext<ImageQueueValue | null>(null);
 
+type Lane = 'pdf' | 'image';
+const LANES: readonly Lane[] = ['pdf', 'image'];
+const laneOf = (item: QueueItem): Lane => (isPdfItem(item) ? 'pdf' : 'image');
+
 const isCancel = (e: any) => e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError' || e?.name === 'AbortError';
 
 export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -75,7 +79,8 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   activeCollectionRef.current = activeCollection;
   const addToastRef = useRef(addToast);
   addToastRef.current = addToast;
-  const processingRef = useRef(false);
+  // One reader per lane: PDFs (text layer, read locally in a second) never wait behind a slow image
+  const processingRef = useRef<Record<Lane, boolean>>({ pdf: false, image: false });
   const controllersRef = useRef(new Map<string, AbortController>());
   const transientRetriesRef = useRef(new Map<string, number>());
   const dupTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -104,7 +109,7 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
-  // ---- worker: one image at a time -------------------------------------------------------------
+  // ---- workers: one PDF and one image at a time, side by side ----------------------------------
   const runItem = useCallback(async (item: QueueItem) => {
     const controller = new AbortController();
     controllersRef.current.set(item.id, controller);
@@ -155,16 +160,19 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [checkDbDuplicate]);
 
   useEffect(() => {
-    if (processingRef.current) return;
-    // A pause is about Gemini (quota, key, overload) or the user's images: PDFs are read locally and keep going
-    const next = items.find((i) => i.status === 'queued' && (!paused || isPdfItem(i)));
-    if (!next) return;
-    processingRef.current = true; // ref guard: an effect re-run can never start the same image twice
-    dispatch({ type: 'start', id: next.id });
-    void runItem(next).finally(() => {
-      processingRef.current = false;
-      if (mountedRef.current) setTick((n) => n + 1);
-    });
+    for (const lane of LANES) {
+      if (processingRef.current[lane]) continue;
+      // A pause is about Gemini (quota, key, overload) or the user's images: PDFs are read locally and keep going
+      if (paused && lane === 'image') continue;
+      const next = items.find((i) => i.status === 'queued' && laneOf(i) === lane);
+      if (!next) continue;
+      processingRef.current[lane] = true; // ref guard: an effect re-run can never start the same file twice
+      dispatch({ type: 'start', id: next.id });
+      void runItem(next).finally(() => {
+        processingRef.current[lane] = false;
+        if (mountedRef.current) setTick((n) => n + 1);
+      });
+    }
   }, [items, paused, tick, runItem]);
 
   // ---- actions ---------------------------------------------------------------------------------

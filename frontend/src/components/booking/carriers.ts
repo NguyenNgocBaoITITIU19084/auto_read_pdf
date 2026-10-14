@@ -12,6 +12,10 @@ export interface CarrierDef {
 
 export const CARRIERS: CarrierDef[] = [
   {
+    key: 'DJ SHIPPING',
+    patterns: [/\bDJ\s+SHIPPING\b/],
+  },
+  {
     key: 'DONGJIN',
     patterns: [/\bDONG\s?JIN\b/, /\bDJSC\b/],
   },
@@ -48,6 +52,22 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bEVERGREEN\b/, /\bEVER\b/],
   },
   {
+    key: 'INTERASIA',
+    patterns: [/\bINTER\s?ASIA\b/],
+  },
+  {
+    key: 'LEGEND SHIPPING',
+    patterns: [/\bLEGEND\s+SHIPPING\b/],
+  },
+  {
+    key: 'MATSON',
+    patterns: [/\bMATSON\b/],
+  },
+  {
+    key: 'SWIRE SHIPPING',
+    patterns: [/\bSWIRE\b/],
+  },
+  {
     key: 'WAN HAI',
     patterns: [/\bWAN\s?HAI\b/, /\bWHL\b/],
   },
@@ -76,8 +96,28 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bKMTC\b/, /\bKOREA MARINE TRANSPORT\b/],
   },
   {
-    key: 'TS LINES',
+    key: 'SINOKOR LINE',
+    patterns: [/\bSINOKOR\b/],
+  },
+  {
+    key: 'HEUNG A LINE',
+    patterns: [/\bHEUNG[-\s]?A\b/],
+  },
+  {
+    key: 'NAMSUNG LINE',
+    patterns: [/\bNAM\s?SUNG\b/],
+  },
+  {
+    key: 'TS LINE',
     patterns: [/\bTS\s?LINES?\b/, /\bT\.S\. LINES?\b/],
+  },
+  {
+    key: 'SAMUDERA',
+    patterns: [/\bSAMUDERA\b/],
+  },
+  {
+    key: 'RCL',
+    patterns: [/\bRCL\b/, /\bREGIONAL CONTAINER LINES?\b/],
   },
   {
     key: 'ZIM',
@@ -96,6 +136,9 @@ export function matchCarrier(text?: string | null): CarrierDef | null {
 
 /** Booking number prefixes used when the Carrier field is empty. */
 const BOOKING_PREFIXES: [RegExp, string][] = [
+  [/^DJL/, 'DJ SHIPPING'],
+  [/^LGVN/, 'LEGEND SHIPPING'],
+  [/^ZIMU/, 'ZIM'],
   [/^DJ/, 'DONGJIN'],
   [/^CUL/, 'CULINES'],
   [/^SGN6/, 'PIL'],

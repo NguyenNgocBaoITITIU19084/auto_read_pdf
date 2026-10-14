@@ -18,6 +18,8 @@ _RE_MONDY = re.compile(r"^([A-Za-z]{3})[\s-]+(\d{1,2})[\s,-]+(\d{4})(?:\s+(\d{1,
 # Trailing time-zone tag printed by CargoSmart-style bookings, e.g. '01 Oct 2026 23:59(ICT)'
 _RE_TZ_SUFFIX = re.compile(r"\s*\([A-Z]{2,5}\)$")
 _RE_ISO = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
+# Year-first without separators, as Wan Hai prints it: '20261015 21:00'
+_RE_YMD_COMPACT = re.compile(r"^(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 
 # Finds a date-shaped token anywhere in a string (not anchored like the formats above), used to
@@ -60,6 +62,7 @@ def parse_date_str(date_str: str) -> str:
     - '01 Oct 2026 23:59(ICT)'  -> '01/10/2026 23:59'
     - 'Oct-04-2026 23:00'       -> '04/10/2026 23:00'
     - '2026.10.08 00:00'        -> '08/10/2026 00:00'
+    - '20261015 21:00'          -> '15/10/2026 21:00'
     Unrecognized strings (including 'null') are returned unchanged (stripped).
     """
     if not date_str:
@@ -86,7 +89,7 @@ def parse_date_str(date_str: str) -> str:
             if formatted is not None:
                 return formatted
 
-    m = _RE_ISO.match(date_str)
+    m = _RE_ISO.match(date_str) or _RE_YMD_COMPACT.match(date_str)
     if m:
         yr, mon, day, time_part = m.groups()
         formatted = _fmt_date(day, mon, yr, time_part)
@@ -135,6 +138,8 @@ def _rx(*patterns: str) -> List[Pattern]:
 
 
 CARRIERS: List[CarrierEntry] = [
+    # Before DONGJIN: its 'DJ' booking prefix would claim DJ Shipping's 'DJL...' numbers
+    ("DJ SHIPPING", _rx(r"\bDJ\s+SHIPPING\b"), ("DJL",), []),
     ("DONGJIN", _rx(r"\bDONG\s?JIN\b", r"\bDJSC\b"), ("DJSC", "DJ"), []),
     ("PIL", _rx(r"\bPACIFIC\s+INTERNATIONAL\s+LINES?\b", r"\bPIL\b", r"\bPILSHIP\b"), ("SGN6",), _rx(r"^KOTA\b")),
     ("CULINES", _rx(r"\bCU\s?LINES\b", r"\bCHINA\s+UNITED\s+LINES?\b", r"\bCUL\b"), ("CUL",), []),
@@ -144,17 +149,27 @@ CARRIERS: List[CarrierEntry] = [
     ("MAERSK", _rx(r"\bMAERSK\b", r"\bSEA\s?LAND\b"), ("MAEU",), []),
     ("CMA CGM", _rx(r"\bCMA\s?CGM\b", r"\bCNC\s+LINE\b", r"\bANL\b"), ("CMAU",), []),
     ("EVERGREEN", _rx(r"\bEVERGREEN\b", r"\bEMC\b"), ("EGLV",), _rx(r"^EVER\s")),
+    # Wan Hai group, before WAN HAI: its notices carry Wan Hai vessel names. Matched on the company name
+    # only: partner lines' notices name Interasia vessels ('INTERASIA ELEVATE' on a T.S. Lines booking)
+    ("INTERASIA", _rx(r"\bINTER\s?ASIA\s+LINES?\b"), (), []),
     ("WAN HAI", _rx(r"\bWAN\s?HAI\b", r"\bWHL\b"), ("WHLC",), []),
     ("HAPAG-LLOYD", _rx(r"\bHAPAG[-\s]?LLOYD\b"), ("HLCU",), []),
     ("YANG MING", _rx(r"\bYANG\s?MING\b", r"\bYML\b"), ("YMLU",), []),
     ("HMM", _rx(r"\bHYUNDAI\s+MERCHANT\b", r"\bHMM\b"), ("HDMU",), []),
-    ("SINOKOR", _rx(r"\bSINOKOR\b"), ("SKLU",), []),
-    ("HEUNG-A", _rx(r"\bHEUNG[-\s]?A\b"), (), []),
+    ("SINOKOR LINE", _rx(r"\bSINOKOR\b"), ("SKLU",), []),
+    ("HEUNG A LINE", _rx(r"\bHEUNG[-\s]?A\b"), (), []),
     ("SAMUDERA", _rx(r"\bSAMUDERA\b"), (), []),
-    ("TS LINES", _rx(r"\bTS\s?LINES\b", r"\bTSL\b"), (), []),
+    ("TS LINE", _rx(r"\bTS\s?LINES?\b", r"\bTSL\b", r"\bT\.\s?S\.\s+(?:CONTAINER\s+)?LINES?\b"), (), []),
     ("RCL", _rx(r"\bREGIONAL\s+CONTAINER\s+LINES?\b", r"\bRCL\b"), (), []),
     ("OOCL", _rx(r"\bOOCL\b"), ("OOLU",), []),
     ("KMTC", _rx(r"\bKMTC\b", r"\bKOREA\s+MARINE\s+TRANSPORT\b"), (), _rx(r"^KMTC\s")),
+    ("NAMSUNG LINE", _rx(r"\bNAM\s?SUNG\b"), (), []),
+    ("MATSON", _rx(r"\bMATSON\b"), ("MATS",), []),
+    ("LEGEND SHIPPING", _rx(r"\bLEGEND\s+SHIPPING\b"), ("LGVN",), []),
+    ("SWIRE SHIPPING", _rx(r"\bSWIRE\s+SHIPPING\b", r"\bSWIRE\b"), (), []),
+    # Before MSC: ZIM's terms cite IMO circular 'MSC.1/CIRC.1474'
+    ("ZIM", _rx(r"\bZIM\s+INTEGRATED\b", r"\bZIM\b"), ("ZIMU",), []),
+    ("MSC", _rx(r"\bMEDITERRANEAN\s+SHIPPING\b", r"\bMSC\b"), ("MEDU",), _rx(r"^MSC\s")),
 ]
 
 UNKNOWN_CARRIER = "Khác"
@@ -349,7 +364,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC, ZIM) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

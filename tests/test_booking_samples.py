@@ -186,7 +186,7 @@ def test_detect_carrier_particulars_does_not_hijack_other_carrier():
     ({"vessel": "EVER UTILE 201W"}, "EVERGREEN"),
     ({"text": "HAPAG-LLOYD AG"}, "HAPAG-LLOYD"),
     ({"text": "WAN HAI LINES"}, "WAN HAI"),
-    ({"text": "HEUNG-A LINE"}, "HEUNG-A"),
+    ({"text": "HEUNG-A LINE"}, "HEUNG A LINE"),
     ({}, "Khác"),
 ])
 def test_detect_carrier_positive(kwargs, expected):
@@ -207,8 +207,8 @@ def test_real_samples_carriers_do_not_cross_match():
 def test_carriers_table_canonical_names_used_by_frontend():
     names = [c[0] for c in CARRIERS]
     for n in ("DONGJIN", "PIL", "CULINES", "ONE", "SITC", "COSCO", "MAERSK", "CMA CGM", "EVERGREEN",
-              "WAN HAI", "HAPAG-LLOYD", "YANG MING", "HMM", "SINOKOR", "HEUNG-A", "SAMUDERA",
-              "TS LINES", "RCL", "OOCL"):
+              "WAN HAI", "HAPAG-LLOYD", "YANG MING", "HMM", "SINOKOR LINE", "HEUNG A LINE", "SAMUDERA",
+              "TS LINE", "RCL", "OOCL"):
         assert n in names
     assert len(names) == len(set(names))
 
