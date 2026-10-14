@@ -44,7 +44,7 @@ Analyze the image (which may be a photo, scan, or screenshot of a booking confir
 Return ONLY a valid JSON object with the following exact keys:
 {
   "Booking No": "string or 'null'",
-  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR | HEUNG-A | SAMUDERA | TS LINES | RCL | OOCL | KMTC | NAMSUNG LINE | Khác",
+  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR LINE | HEUNG-A | SAMUDERA | TS LINES | RCL | OOCL | KMTC | NAMSUNG LINE | Khác",
   "Port of Discharging": "string or 'null'",
   "Place of Delivery": "string or 'null'",
   "Block": "string or 'null'",
@@ -68,7 +68,8 @@ Rules:
 3. If a field cannot be found or is empty, use 'null'.
 4. Namsung Line (NSS) 'BOOKING RECEIPT NOTICE': Carrier is 'NAMSUNG LINE'; CNTR TYPE codes are size digit + optional H (high cube) + type, e.g. '4HDC x 1' -> Equipment Type '40'HC', Q'ty '1' ('2DC' = 20'GP, '4DC' = 40'GP, '4HRF' = 40'RH); Port Cargo Cut-off is CARGO CLOSING (not DOCUMENT CLOSING); Empty Pick Up CY is PICK UP PLACE ('null' when blank); Full return CY is FULL RETURN PLACE. If '2ND VESSEL VOYAGE (IF ANY)' has a vessel, VESSEL VOYAGE is the Pre Carrier, the 2nd vessel is the Trunk Vessel and the T/S Port is written in REMARK.
 5. Wan Hai 'BOOKING CONFIRMATION': dates are YYYYMMDD ('20261015 21:00' -> '15/10/2026 21:00'); Trunk Vessel is 'Mother Vessel' + 'Voy' (e.g. 'WAN HAI 286 S115') with the ETD printed beside Port of Loading; T/S Port is 'Port of Transship'; Port Cargo Cut-off is 'Close Date' (not S/I or VGM cut off); the container table row 'COC General Purpose 20' 86 1' means Equipment Type '20'GP' (height 96 = HC), Q'ty '1'; Empty Pick Up CY is 'Releasing Empty Container' without its TEL/Address; Full return CY is 'Laden Place Of Receipt', else Port of Loading.
-6. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
+6. Sinokor 'Booking Notice': Carrier is 'SINOKOR LINE'; the first 'VSL / VYG' (e.g. 'PANCON CHAMPION // 2610N' -> 'PANCON CHAMPION 2610N') leaves Vietnam with E.T.D; if 'T/S Info.' lists a Port and a second VSL/VYG, that port is the T/S Port, the first vessel is the Pre Carrier and the second is the Trunk Vessel; 'CNTR Q'ty : 40Hx5' means Equipment Type '40'HC', Q'ty '5' (G = GP, H = HC, R = RF); Port Cargo Cut-off is 'CY Cut-off' (not D.O.C Cut-off); Empty Pick Up CY is 'Pickup Area'; Full return CY is 'L-Terminal'; Block is the stowage code if printed.
+7. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
 """
 
 # ---------------------------------------------------------------------------
