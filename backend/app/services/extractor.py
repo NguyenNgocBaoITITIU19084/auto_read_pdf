@@ -362,7 +362,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})
