@@ -469,3 +469,37 @@ def test_backend_search_vessels_detailed_vessel_not_found(mock_post):
     assert detail["reason"] == "vessel_not_found"
     assert detail["available_voyages"] == []
     assert "EVER MEMO" in detail["message"]
+
+
+@pytest.mark.parametrize("query, eport_voyage, expected", [
+    # ePort joins Evergreen's in- and outbound voyages, each with its own dash
+    ("1477-010E", "1468-009W-1477-010E", True),
+    ("1468-009W", "1468-009W-1477-010E", True),
+    ("1477010E", "1468-009W-1477-010E", True),
+    ("1468-009W-1477-010E", "1468-009W-1477-010E", True),
+    ("1461-012E", "1461-012E", True),
+    ("062E", "062E-062E", True),
+    ("S115", "S114-S115", True),
+    ("1477-011E", "1468-009W-1477-010E", False),
+    ("010E-1468", "1468-009W-1477-010E", False),
+    ("999X", "1461-012E", False),
+])
+def test_voyage_match_on_multi_part_eport_voyages(query, eport_voyage, expected):
+    from backend.app.services.eport_client import is_voyage_match
+    assert is_voyage_match(query, eport_voyage) is expected
+
+
+@patch("backend.app.services.eport_client.requests.post")
+def test_search_finds_voyage_inside_joined_in_out_voyage(mock_post):
+    from backend.app.services.eport_client import search_vessels_detailed
+    mock_post.return_value = _vessel_response([{"VESSELNAME": "EVER MAGIC", "IN_OUT_VOYAGE": "1468-009W-1477-010E"}])
+    detail = search_vessels_detailed("GNL", "EVER MAGIC", "1477-010E")
+    assert detail["reason"] == "ok"
+    assert [m["IN_OUT_VOYAGE"] for m in detail["items"]] == ["1468-009W-1477-010E"]
+
+
+def test_booking_vessel_matches_joined_in_out_voyage():
+    from backend.app.services.vessel_match import text_matches_schedule
+    schedule = {"vessel_name": "EVER MAGIC", "in_out_voyage": "1468-009W-1477-010E"}
+    assert text_matches_schedule("EVER MAGIC 1477-010E", schedule)
+    assert not text_matches_schedule("EVER MAGIC 1477-011E", schedule)

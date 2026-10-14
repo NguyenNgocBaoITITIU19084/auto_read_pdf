@@ -36,7 +36,10 @@ def match_voyage(remainder: list[str], eport_voyage: str) -> bool:
     """Leftover words (all must look like voyage codes) against ePort's "in-out" voyage, e.g. 062E-062E."""
     if not remainder or not all(any(c.isdigit() for c in w) for w in remainder):
         return False
-    candidates = {"-".join(remainder), "".join(remainder), *remainder}
+    # A lone word may be the voyage ('062E EC2'), but an all-digit word is only half of a dashed
+    # voyage ('1477' of '1477-010E'): matching it alone would accept 1477-011E as well
+    singles = [w for w in remainder if not w.isdigit()] if len(remainder) > 1 else remainder
+    candidates = {"-".join(remainder), "".join(remainder), *singles}
     return any(is_voyage_match(c, eport_voyage) for c in candidates)
 
 
