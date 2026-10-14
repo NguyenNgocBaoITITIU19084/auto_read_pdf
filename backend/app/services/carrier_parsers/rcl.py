@@ -21,7 +21,8 @@ and, on page 2, the closing times per cargo kind:
 The vessel is the first sea leg (not BARGE, TRUCK, RAIL or other inland legs) leaving Vietnam, with its
 ETD. The port that leg reaches is the transshipment port unless it is the port of discharge; a later
 sea leg is then the trunk vessel. The CY cut-off is the 'Terminal Closing Time' of the NORMAL row
-(REEFER for reefer containers). The return location is stored without its city ('CAT LAI PORT').
+(REEFER for reefer containers). The return location is stored without its city ('CAT LAI PORT');
+a pickup depot whose address starts with an ICD gets it in brackets ('CHAN THAT DEPOT (ICD SONG THAN)').
 No block code is printed.
 
 The table's values start left of their header labels, so word boxes are given to the column whose
@@ -95,8 +96,9 @@ def _legs_from_text(text: str) -> List[Dict[str, str]]:
                          text, re.MULTILINE):
         origin, dest, mode, rest, etd, eta, countries = m.group(2, 3, 4, 5, 6, 7, 8)
         tokens = rest.split()
-        if tokens and re.fullmatch(r"(?=\w*\d)[A-Z0-9]{2,6}", tokens[0]) and "/" in rest:
-            tokens = tokens[1:]  # the service code ('RNV2')
+        # The service code ('RNV2', 'RVI') printed before every sea leg's vessel name
+        if "/" in tokens[2:] and re.fullmatch(r"[A-Z0-9]{2,6}", tokens[0]):
+            tokens = tokens[1:]
         pair = countries.split()
         if len(pair) == 2:
             origin, dest = f"{origin}, {pair[0]}", f"{dest}, {pair[1]}"
@@ -153,10 +155,14 @@ def _closing_time(text: str, cargo: str) -> str:
     # OCR: the column's label, then one line per cargo row (in the order printed under 'Cargo')
     kinds = re.search(r"^\s*Cargo\s*\n((?:\s*[A-Z0-9]{2,6}\s*\n)+)", text, re.MULTILINE)
     order = [k.strip().replace("0", "O") for k in kinds.group(1).splitlines()] if kinds else ["NORMAL"]
-    m = re.search(r"^\s*Terminal\s+Closing\s+Time\s*\n((?:.*\n){1,4})", text, re.IGNORECASE | re.MULTILINE)
+    # When the SI label follows straight on, the two columns were read together: Terminal, SI per row
+    m = re.search(r"^\s*Terminal\s+Closing\s+Time\s*\n(\s*SI\s+and\s+eSI\s+Closing\s+Time\s*\n)?((?:.*\n){1,8})",
+                  text, re.IGNORECASE | re.MULTILINE)
     if m:
-        cells = [ln.strip() for ln in m.group(1).splitlines()]
+        cells = [ln.strip() for ln in m.group(2).splitlines()]
         i = order.index(cargo) if cargo in order else 0
+        if m.group(1):
+            i *= 2
         if i < len(cells) and re.fullmatch(_DAY_TIME, cells[i]):
             return cells[i]
     return ""
@@ -190,7 +196,13 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
 
     out["Equipment Type"], out["Q'ty"] = _equipment(_field(text, r"No\.\s+of\s+Containers", r"EQ\s+GRADE|$"))
 
-    out["Empty Pick Up CY"] = _field(text, r"MT\s+Container\s+Pickup\s+Depot\s*/\s*CFS")
+    # A depot inside an ICD names it first in its address: 'CHAN THAT DEPOT' + 'ICD SONG THAN, ROAD 743'
+    depot = _field(text, r"MT\s+Container\s+Pickup\s+Depot\s*/\s*CFS")
+    m = re.search(r"MT\s+Container\s+Pickup\s+Depot.*\n\s*Address\s*:\s*((?:ICD|PORT|CANG|CẢNG)\b[^,\n]*?)\s*,",
+                  text, re.IGNORECASE)
+    if depot and m and m.group(1).upper() not in depot.upper():
+        depot = f"{depot} ({m.group(1)})"
+    out["Empty Pick Up CY"] = depot
     # 'HO CHI MINH CITY, CAT LAI PORT' -> 'CAT LAI PORT' (the city of the port of loading)
     laden = _field(text, r"Return\s+Location")
     city = _field(text, r"Port\s+of\s+Loading", r",|$", next_line=True)
