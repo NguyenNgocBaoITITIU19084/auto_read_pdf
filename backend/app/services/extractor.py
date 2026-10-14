@@ -18,6 +18,8 @@ _RE_MONDY = re.compile(r"^([A-Za-z]{3})[\s-]+(\d{1,2})[\s,-]+(\d{4})(?:\s+(\d{1,
 # Trailing time-zone tag printed by CargoSmart-style bookings, e.g. '01 Oct 2026 23:59(ICT)'
 _RE_TZ_SUFFIX = re.compile(r"\s*\([A-Z]{2,5}\)$")
 _RE_ISO = re.compile(r"^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T](\d{1,2}:\d{2})(?::\d{2})?)?$")
+# Year-first without separators, as Wan Hai prints it: '20261015 21:00'
+_RE_YMD_COMPACT = re.compile(r"^(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 _RE_DMY = re.compile(r"^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:\s+(\d{1,2}:\d{2})(?::\d{2})?)?$")
 
 # Finds a date-shaped token anywhere in a string (not anchored like the formats above), used to
@@ -60,6 +62,7 @@ def parse_date_str(date_str: str) -> str:
     - '01 Oct 2026 23:59(ICT)'  -> '01/10/2026 23:59'
     - 'Oct-04-2026 23:00'       -> '04/10/2026 23:00'
     - '2026.10.08 00:00'        -> '08/10/2026 00:00'
+    - '20261015 21:00'          -> '15/10/2026 21:00'
     Unrecognized strings (including 'null') are returned unchanged (stripped).
     """
     if not date_str:
@@ -86,7 +89,7 @@ def parse_date_str(date_str: str) -> str:
             if formatted is not None:
                 return formatted
 
-    m = _RE_ISO.match(date_str)
+    m = _RE_ISO.match(date_str) or _RE_YMD_COMPACT.match(date_str)
     if m:
         yr, mon, day, time_part = m.groups()
         formatted = _fmt_date(day, mon, yr, time_part)
@@ -350,7 +353,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Wan Hai) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

@@ -67,7 +67,8 @@ Rules:
 2. If equipment format is '40HC-2' or '40'DRY HQ.-2' or '20'DRY ST.-1', split into Equipment Type (e.g. '40'HC' / '20'DRY ST') and Q'ty (e.g. '2' / '1').
 3. If a field cannot be found or is empty, use 'null'.
 4. Namsung Line (NSS) 'BOOKING RECEIPT NOTICE': Carrier is 'NAMSUNG LINE'; CNTR TYPE codes are size digit + optional H (high cube) + type, e.g. '4HDC x 1' -> Equipment Type '40'HC', Q'ty '1' ('2DC' = 20'GP, '4DC' = 40'GP, '4HRF' = 40'RH); Port Cargo Cut-off is CARGO CLOSING (not DOCUMENT CLOSING); Empty Pick Up CY is PICK UP PLACE ('null' when blank); Full return CY is FULL RETURN PLACE. If '2ND VESSEL VOYAGE (IF ANY)' has a vessel, VESSEL VOYAGE is the Pre Carrier, the 2nd vessel is the Trunk Vessel and the T/S Port is written in REMARK.
-5. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
+5. Wan Hai 'BOOKING CONFIRMATION': dates are YYYYMMDD ('20261015 21:00' -> '15/10/2026 21:00'); Trunk Vessel is 'Mother Vessel' + 'Voy' (e.g. 'WAN HAI 286 S115') with the ETD printed beside Port of Loading; T/S Port is 'Port of Transship'; Port Cargo Cut-off is 'Close Date' (not S/I or VGM cut off); the container table row 'COC General Purpose 20' 86 1' means Equipment Type '20'GP' (height 96 = HC), Q'ty '1'; Empty Pick Up CY is 'Releasing Empty Container' without its TEL/Address; Full return CY is 'Laden Place Of Receipt', else Port of Loading.
+6. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
 """
 
 # ---------------------------------------------------------------------------
