@@ -206,7 +206,22 @@ export const deleteBookingsBatch = async (ids: number[]): Promise<{ status: stri
   return res.data;
 };
 
-export type TrashedBooking = Booking & { deleted_at: string; purge_at: string; days_left: number };
+export interface TrashedRowFields { deleted_at: string; purge_at: string; days_left: number }
+export type TrashedBooking = Booking & TrashedRowFields;
+
+/** The /trash endpoints of the vessel and container routers (backend/app/api/trash.py). */
+const trashApi = <T,>(base: string) => ({
+  list: async (collectionId: number, limit: number, offset: number): Promise<PageResult<T> & { keep_days: number }> =>
+    (await apiClient.get(`${base}/trash`, { params: { collection_id: collectionId, limit, offset } })).data,
+  ids: async (collectionId: number): Promise<number[]> =>
+    (await apiClient.get<{ ids: number[] }>(`${base}/trash/ids`, { params: { collection_id: collectionId } })).data.ids || [],
+  count: async (collectionId: number): Promise<number> =>
+    (await apiClient.get<{ count: number }>(`${base}/trash/count`, { params: { collection_id: collectionId } })).data.count,
+  restore: async (ids: number[]): Promise<{ restored: number; superseded: number }> =>
+    (await apiClient.post<{ restored: number; superseded: number }>(`${base}/trash/restore`, { ids })).data,
+  deleteNow: async (ids: number[]): Promise<number> =>
+    (await apiClient.post<{ deleted: number }>(`${base}/trash/delete`, { ids })).data.deleted,
+});
 
 export const getBookingTrash = async (
   collectionId: number, limit: number, offset: number,
@@ -262,13 +277,14 @@ export const deleteVessel = async (id: number): Promise<void> => {
   await apiClient.delete(`/vessels/${id}`);
 };
 
-export const deleteVesselsBatch = async (ids: number[]): Promise<void> => {
-  await apiClient.post('/vessels/batch-delete', { ids });
-};
+export const deleteVesselsBatch = async (ids: number[]): Promise<number> =>
+  (await apiClient.post<{ deleted_count: number }>('/vessels/batch-delete', { ids })).data.deleted_count;
 
-export const clearVessels = async (collectionId: number): Promise<void> => {
-  await apiClient.delete(`/vessels/clear/${collectionId}`);
-};
+export const clearVessels = async (collectionId: number): Promise<number> =>
+  (await apiClient.delete<{ deleted: number }>(`/vessels/clear/${collectionId}`)).data.deleted;
+
+export type TrashedVessel = VesselSchedule & TrashedRowFields;
+export const vesselTrashApi = trashApi<TrashedVessel>('/vessels');
 
 export const getVesselWatchlist = async (collectionId: number): Promise<VesselWatchlist[]> => {
   const res = await apiClient.get<VesselWatchlist[]>('/vessels/watchlist', { params: { collection_id: collectionId } });
@@ -351,13 +367,14 @@ export const deleteContainer = async (id: number): Promise<void> => {
   await apiClient.delete(`/containers/${id}`);
 };
 
-export const deleteContainersBatch = async (ids: number[]): Promise<void> => {
-  await apiClient.post('/containers/batch-delete', { ids });
-};
+export const deleteContainersBatch = async (ids: number[]): Promise<number> =>
+  (await apiClient.post<{ deleted_count: number }>('/containers/batch-delete', { ids })).data.deleted_count;
 
-export const clearContainers = async (collectionId: number): Promise<void> => {
-  await apiClient.delete(`/containers/clear/${collectionId}`);
-};
+export const clearContainers = async (collectionId: number): Promise<number> =>
+  (await apiClient.delete<{ deleted: number }>(`/containers/clear/${collectionId}`)).data.deleted;
+
+export type TrashedContainer = ContainerInfo & TrashedRowFields;
+export const containerTrashApi = trashApi<TrashedContainer>('/containers');
 
 export const getContainerWatchlist = async (collectionId: number): Promise<ContainerWatchlist[]> => {
   const res = await apiClient.get<ContainerWatchlist[]>('/containers/watchlist', { params: { collection_id: collectionId } });
