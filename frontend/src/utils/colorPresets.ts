@@ -314,6 +314,19 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#6b21a8',
     badgeClass: 'bg-purple-800 text-purple-50 border-purple-900 dark:bg-purple-700 dark:text-purple-50 dark:border-purple-500',
   },
+  {
+    id: 'magenta',
+    name: 'Magenta (Solid)',
+    nameVi: 'Hồng đậm (đậm)',
+    bgClass: 'bg-pink-700',
+    darkBgClass: 'dark:bg-pink-600',
+    borderClass: 'border-pink-800',
+    darkBorderClass: 'dark:border-pink-400',
+    textClass: 'text-pink-50',
+    darkTextClass: 'dark:text-pink-50',
+    hexPreview: '#be185d',
+    badgeClass: 'bg-pink-700 text-pink-50 border-pink-800 dark:bg-pink-600 dark:text-pink-50 dark:border-pink-400',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));
