@@ -10,10 +10,10 @@ in which case parsers fall back to what the text alone can give.
 """
 from typing import Optional
 
-from . import booking_notice, cargosmart, cma, djshipping, evergreen, hapag, hmm, interasia, kmtc, legend, maersk, matson, msc, namsung, rcl, swire, tslines, wanhai
+from . import booking_notice, cargosmart, cma, djshipping, evergreen, hapag, hmm, interasia, kmtc, legend, maersk, matson, msc, namsung, rcl, swire, tslines, wanhai, yangming
 
 # Checked in order; the first matching layout wins
-PARSERS = (hapag, cargosmart, kmtc, namsung, booking_notice, wanhai, cma, msc, hmm, maersk, evergreen, tslines, interasia, swire, matson, djshipping, legend, rcl)
+PARSERS = (hapag, cargosmart, kmtc, namsung, booking_notice, wanhai, cma, msc, hmm, maersk, evergreen, tslines, interasia, swire, matson, djshipping, legend, rcl, yangming)
 
 
 def find_parser(text: str) -> Optional[object]:
