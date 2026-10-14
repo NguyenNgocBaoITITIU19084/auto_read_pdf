@@ -226,11 +226,9 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                     </span>
                   )}
                 </div>
-                <div className={`text-xs font-semibold break-words ${f.key === "Carrier" ? 'text-sm font-bold text-primary-700 dark:text-primary-300' : isNull ? 'text-slate-400 dark:text-slate-500 italic font-normal' : 'text-slate-900 dark:text-slate-100'}`}>
-                  {String(val)}
-                </div>
                 {f.key === "Port Cargo Cut-off" && eportCutoff && (
-                  <div className="mt-1.5 pt-1.5 border-t border-dashed border-sky-200 dark:border-sky-900 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+                  // ePort's (the port's newer) time leads; the booking's own time sits below it
+                  <div className="mb-1.5 pb-1.5 border-b border-dashed border-sky-200 dark:border-sky-900 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
                     <span className="px-1 rounded border border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/60 text-[9px] font-bold text-sky-700 dark:text-sky-300">
                       {t.booking.eportCutoff.badge}
                     </span>
@@ -242,6 +240,9 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                     )}
                   </div>
                 )}
+                <div className={`text-xs font-semibold break-words ${f.key === "Carrier" ? 'text-sm font-bold text-primary-700 dark:text-primary-300' : isNull ? 'text-slate-400 dark:text-slate-500 italic font-normal' : 'text-slate-900 dark:text-slate-100'}`}>
+                  {String(val)}
+                </div>
               </div>
             );
           })}
