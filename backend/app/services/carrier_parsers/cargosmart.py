@@ -9,9 +9,13 @@ COSCO / OOCL booking confirmations (CargoSmart/IRIS layout, shared labels):
     FINAL DESTINATION: Kumport,Istanbul, Turkey ETA: ...
     BLOCK NUMBER: USLGB
     INTENDED (FCL )CY CUT-OFF: 01 Oct 2026 23:59(ICT)
-    BOOKING QTY SIZE/TYPE: 2 X 40' Hi-Cube Container
+    BOOKING QTY SIZE/TYPE: 2 X 40' Hi-Cube Container               -> 2 x 40'HC
     FULL RETURN LOCATION: Icd Phuoc Long 3          (COSCO: stacked labels)
     EMPTY PICKUP LOCATION: FULL RETURN LOCATION:    (OOCL: side by side, values on the next row)
+
+The port of discharge keeps its terminal; long values wrap onto lines of their own
+('Oakland / SSA Terminal, Berths 55-' / '59', 'Oakland,Alameda, California,' / 'United States'),
+which are joined back.
 """
 import re
 from typing import Dict, List, Optional, Sequence
@@ -36,6 +40,30 @@ def _line_value(text: str, label: str) -> str:
     return re.split(r"\s+ET[AD]:", m.group(1))[0].strip()
 
 
+# A label line ('FINAL DESTINATION:', 'ESTIMATED CARGO AVAILABILITY AT DESTINATION HUB:'), not a wrapped value
+_LABEL_LINE = re.compile(r"^[A-Z][A-Z0-9 /()&.'-]*:")
+_TIME_ZONE = re.compile(r"\s*\([A-Z]{2,4}\)$")  # '(ICT)' wrapped from the ETA column
+
+
+def _wrapped_value(text: str, label: str) -> str:
+    """`_line_value` plus the wrapped lines below it, up to the next label."""
+    m = re.search(rf"^{label}[ \t]*(.*)$", text, re.MULTILINE)
+    if not m:
+        return ""
+    value = re.split(r"\s+ET[AD]:", m.group(1))[0].strip()
+    for line in text[m.end():].lstrip("\n").splitlines()[:2]:
+        line = _TIME_ZONE.sub("", line.strip())
+        if not line or _LABEL_LINE.match(line):
+            break
+        value = value + line if value.endswith("-") else f"{value} {line}"
+    return value
+
+
+def _place(value: str) -> str:
+    """'Oakland,Alameda, California, United States' -> 'Oakland, Alameda, California, United States'."""
+    return re.sub(r"\s*,\s*", ", ", value).strip(" ,")
+
+
 def _port_name(value: str) -> str:
     """'Istanbul / Kumport Liman' -> 'Istanbul' (port, without the terminal)."""
     return value.split(" / ")[0].strip()
@@ -48,8 +76,25 @@ def _vessel_etd(text: str, label: str):
     return m.group(1).strip(), m.group(2).strip()
 
 
+# Container names -> type codes (reefer high cube before reefer, high cube before the rest)
+_KINDS = ((r"REEFER\s+HI(?:GH)?[-\s]?CUBE", "RH"), (r"HI(?:GH)?[-\s]?CUBE", "HC"), (r"REEFER", "RF"),
+          (r"OPEN\s*TOP", "OT"), (r"FLAT\s*RACK", "FR"), (r"TANK", "TK"), (r"GENERAL\s+PURPOSE|DRY", "GP"))
+
+
+def _type_code(name: str) -> str:
+    """"40' Hi-Cube Container" -> "40'HC"; '20GP' -> "20'GP"; unknown names stay as printed."""
+    m = re.match(r"(\d{2})\s*'?\s*([A-Z]{2})?\b(.*)$", name.strip(), re.IGNORECASE)
+    if not m:
+        return name
+    size, code, rest = m.group(1), (m.group(2) or "").upper(), m.group(3)
+    if code in ("GP", "HC", "HQ", "RF", "RH", "OT", "FR", "TK", "DC", "DV") and not rest.strip():
+        return f"{size}'{ {'HQ': 'HC', 'DC': 'GP', 'DV': 'GP'}.get(code, code) }"
+    kind = next((c for rx, c in _KINDS if re.search(rx, name, re.IGNORECASE)), "")
+    return f"{size}'{kind}" if kind else name
+
+
 def _equipment(text: str):
-    """'BOOKING QTY SIZE/TYPE: 2 X 40' Hi-Cube Container' (several types -> one per line)."""
+    """'BOOKING QTY SIZE/TYPE: 2 X 40' Hi-Cube Container' -> ("40'HC", '2') (several types -> one per line)."""
     m = re.search(r"^BOOKING QTY SIZE/TYPE:[ \t]*(.*)$", text, re.MULTILINE)
     if not m:
         return "", ""
@@ -60,7 +105,7 @@ def _equipment(text: str):
         lines.append(nxt)
     items = []
     for line in lines:
-        items += re.findall(r"(\d+)\s*X\s+(.+?)\s*(?=,\s*\d+\s*X\s|$)", line.strip())
+        items += [(q, _type_code(t)) for q, t in re.findall(r"(\d+)\s*X\s+(.+?)\s*(?=,\s*\d+\s*X\s|$)", line.strip())]
     if not items:
         return "", ""
     if len(items) == 1:
@@ -114,8 +159,8 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
     else:
         out["Trunk Vessel"], out["ETD_Trunk"] = vessel, etd
 
-    out["Port of Discharging"] = _port_name(_line_value(text, "PORT OF DISCHARGE:"))
-    out["Place of Delivery"] = _line_value(text, "FINAL DESTINATION:")
+    out["Port of Discharging"] = _place(_wrapped_value(text, "PORT OF DISCHARGE:"))
+    out["Place of Delivery"] = _place(_wrapped_value(text, "FINAL DESTINATION:"))
 
     m = re.search(r"^BLOCK NUMBER:[ \t]*(\S[^\n]*)?$", text, re.MULTILINE)
     if m and m.group(1):
