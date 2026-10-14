@@ -208,7 +208,7 @@ def test_carriers_table_canonical_names_used_by_frontend():
     names = [c[0] for c in CARRIERS]
     for n in ("DONGJIN", "PIL", "CULINES", "ONE", "SITC", "COSCO", "MAERSK", "CMA CGM", "EVERGREEN",
               "WAN HAI", "HAPAG-LLOYD", "YANG MING", "HMM", "SINOKOR LINE", "HEUNG A LINE", "SAMUDERA",
-              "TS LINES", "RCL", "OOCL"):
+              "TS LINE", "RCL", "OOCL"):
         assert n in names
     assert len(names) == len(set(names))
 

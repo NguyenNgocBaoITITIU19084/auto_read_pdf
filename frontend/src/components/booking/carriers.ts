@@ -92,7 +92,7 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bNAM\s?SUNG\b/],
   },
   {
-    key: 'TS LINES',
+    key: 'TS LINE',
     patterns: [/\bTS\s?LINES?\b/, /\bT\.S\. LINES?\b/],
   },
   {

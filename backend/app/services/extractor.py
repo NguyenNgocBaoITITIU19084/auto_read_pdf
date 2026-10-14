@@ -147,8 +147,9 @@ CARRIERS: List[CarrierEntry] = [
     ("MAERSK", _rx(r"\bMAERSK\b", r"\bSEA\s?LAND\b"), ("MAEU",), []),
     ("CMA CGM", _rx(r"\bCMA\s?CGM\b", r"\bCNC\s+LINE\b", r"\bANL\b"), ("CMAU",), []),
     ("EVERGREEN", _rx(r"\bEVERGREEN\b", r"\bEMC\b"), ("EGLV",), _rx(r"^EVER\s")),
-    # Wan Hai group, before WAN HAI: its notices carry Wan Hai vessel names
-    ("INTERASIA", _rx(r"\bINTER\s?ASIA\b"), (), []),
+    # Wan Hai group, before WAN HAI: its notices carry Wan Hai vessel names. Matched on the company name
+    # only: partner lines' notices name Interasia vessels ('INTERASIA ELEVATE' on a T.S. Lines booking)
+    ("INTERASIA", _rx(r"\bINTER\s?ASIA\s+LINES?\b"), (), []),
     ("WAN HAI", _rx(r"\bWAN\s?HAI\b", r"\bWHL\b"), ("WHLC",), []),
     ("HAPAG-LLOYD", _rx(r"\bHAPAG[-\s]?LLOYD\b"), ("HLCU",), []),
     ("YANG MING", _rx(r"\bYANG\s?MING\b", r"\bYML\b"), ("YMLU",), []),
@@ -156,7 +157,7 @@ CARRIERS: List[CarrierEntry] = [
     ("SINOKOR LINE", _rx(r"\bSINOKOR\b"), ("SKLU",), []),
     ("HEUNG A LINE", _rx(r"\bHEUNG[-\s]?A\b"), (), []),
     ("SAMUDERA", _rx(r"\bSAMUDERA\b"), (), []),
-    ("TS LINES", _rx(r"\bTS\s?LINES\b", r"\bTSL\b"), (), []),
+    ("TS LINE", _rx(r"\bTS\s?LINES?\b", r"\bTSL\b", r"\bT\.\s?S\.\s+(?:CONTAINER\s+)?LINES?\b"), (), []),
     ("RCL", _rx(r"\bREGIONAL\s+CONTAINER\s+LINES?\b", r"\bRCL\b"), (), []),
     ("OOCL", _rx(r"\bOOCL\b"), ("OOLU",), []),
     ("KMTC", _rx(r"\bKMTC\b", r"\bKOREA\s+MARINE\s+TRANSPORT\b"), (), _rx(r"^KMTC\s")),
@@ -356,7 +357,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

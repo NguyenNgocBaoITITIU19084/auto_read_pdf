@@ -21,4 +21,5 @@ def test_carrier_colours_are_seeded_and_distinct(fresh_db):
 
 def test_new_carriers_have_their_own_colour(fresh_db):
     rules = {(r["match_value"], r["preset_id"]) for r in db.get_color_rules() if r["column_key"] == "Carrier"}
-    assert {("NAMSUNG", "navy"), ("SINOKOR", "maroon"), ("HEUNG", "forest"), ("INTERASIA", "brown")} <= rules
+    assert {("NAMSUNG", "navy"), ("SINOKOR", "maroon"), ("HEUNG", "forest"), ("INTERASIA", "brown"),
+            ("TS LINE", "purple")} <= rules
