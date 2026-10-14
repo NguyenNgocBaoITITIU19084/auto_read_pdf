@@ -127,7 +127,7 @@ Ho Chi Minh City
 
 
 def _plan_words():
-    return json.loads((FIXTURES / "maersk_words.json").read_text())
+    return json.loads((FIXTURES / "maersk_words.json").read_text(encoding="utf-8"))
 
 
 def _assert_common(r):

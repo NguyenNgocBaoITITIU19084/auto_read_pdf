@@ -67,8 +67,8 @@ def test_info_goes_to_app_log_only_warning_goes_to_both(monkeypatch, tmp_path):
     logger.info("just an info line")
     logger.warning("something is off")
 
-    app_log = (tmp_path / "app.log").read_text()
-    error_log = (tmp_path / "errors.log").read_text()
+    app_log = (tmp_path / "app.log").read_text(encoding="utf-8")
+    error_log = (tmp_path / "errors.log").read_text(encoding="utf-8")
 
     assert "just an info line" in app_log
     assert "something is off" in app_log
@@ -85,7 +85,7 @@ def test_gemini_key_masked_in_log_file(monkeypatch, tmp_path):
     logger.info(f"calling gemini url ?key={secret}&model=x")
     logger.info('payload={"gemini_api_key": "%s", "other": 1}' % secret)
 
-    app_log = (tmp_path / "app.log").read_text()
+    app_log = (tmp_path / "app.log").read_text(encoding="utf-8")
     assert secret not in app_log
     assert "***MASKED***" in app_log
 
@@ -133,7 +133,7 @@ def test_log_timestamp_uses_vn_timezone_regardless_of_machine_tz(monkeypatch, tm
         logger = logging.getLogger("backend.tests.logging")
         logger.info("vn time check")
 
-        app_log = (tmp_path / "app.log").read_text()
+        app_log = (tmp_path / "app.log").read_text(encoding="utf-8")
         line = next(l for l in app_log.splitlines() if "vn time check" in l)
         from backend.app.core.timezone import VN_TZ
         from datetime import datetime
@@ -157,5 +157,5 @@ def test_request_middleware_logs_method_path_status_no_body(monkeypatch, tmp_pat
     res = client.get("/api/v1/collections")
     assert res.status_code == 200
 
-    app_log = (tmp_path / "app.log").read_text()
+    app_log = (tmp_path / "app.log").read_text(encoding="utf-8")
     assert "GET /api/v1/collections -> 200" in app_log

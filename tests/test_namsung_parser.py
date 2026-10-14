@@ -42,7 +42,7 @@ DG
 
 
 def _words():
-    return [json.loads((FIXTURES / "namsung_words.json").read_text())]
+    return [json.loads((FIXTURES / "namsung_words.json").read_text(encoding="utf-8"))]
 
 
 def test_namsung_layout_is_detected():

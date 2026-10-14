@@ -144,7 +144,7 @@ As Agent for SWIRE SHIPPING PTE LTD.
 
 
 def _words():
-    return [json.loads((FIXTURES / "swire_words.json").read_text())]
+    return [json.loads((FIXTURES / "swire_words.json").read_text(encoding="utf-8"))]
 
 
 def _assert_booking(r):

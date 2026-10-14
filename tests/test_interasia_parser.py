@@ -124,7 +124,7 @@ N
 
 
 def _words():
-    return json.loads((FIXTURES / "interasia_words.json").read_text())
+    return json.loads((FIXTURES / "interasia_words.json").read_text(encoding="utf-8"))
 
 
 def _assert_booking(r):

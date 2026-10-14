@@ -19,7 +19,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "booking_layouts"
 
 
 def words(name):
-    return [json.loads((FIXTURES / f"{name}_words.json").read_text())]
+    return [json.loads((FIXTURES / f"{name}_words.json").read_text(encoding="utf-8"))]
 
 
 COSCO_TEXT = """6469390440 PILLLIPAOCHHJAPILLLIP

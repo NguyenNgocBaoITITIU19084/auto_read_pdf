@@ -172,7 +172,7 @@ Qúý khách vui lòng chọn đúng code Đại lý/ Hãng tàu "MAT"
 
 
 def _words():
-    return [json.loads((FIXTURES / "matson_words.json").read_text())]
+    return [json.loads((FIXTURES / "matson_words.json").read_text(encoding="utf-8"))]
 
 
 def _assert_booking(r, cut_off="14/10/2026 18:00"):
