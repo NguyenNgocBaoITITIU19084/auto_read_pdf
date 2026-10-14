@@ -48,6 +48,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bEVERGREEN\b/, /\bEVER\b/],
   },
   {
+    key: 'INTERASIA',
+    patterns: [/\bINTER\s?ASIA\b/],
+  },
+  {
     key: 'WAN HAI',
     patterns: [/\bWAN\s?HAI\b/, /\bWHL\b/],
   },
