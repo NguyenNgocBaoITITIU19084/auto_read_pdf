@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
   SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2,
-  ArchiveRestore, ListChecks, EyeOff, Table2, CalendarDays
+  ArchiveRestore, ListChecks, EyeOff
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -33,6 +33,7 @@ import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteH
 import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, eportTooltip } from './EportCutoff';
 import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
 import { BookingCalendar, BookingCalendarLabels } from './BookingCalendar';
+import { ViewToggle, useTableView } from '../common/ViewToggle';
 import { BookingStatusCell, BookingStatusLabels, BookingStatusPicker, OverdueMark, OVERDUE_KEY, STATUS_KEY, statusOf } from './BookingStatus';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
@@ -77,7 +78,6 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 const getBookingId = (b: Booking) => b.id;
 const HIDE_CLOSED_STORAGE_KEY = 'booking_hide_closed';
 const VIEW_STORAGE_KEY = 'booking_view';
-type BookingView = 'table' | 'calendar';
 const BOOKING_COLUMNS_MIGRATION = { version: 1, moveAfter: { [STATUS_KEY]: 'Booking No' } };
 
 interface BookingRowProps {
@@ -205,7 +205,7 @@ const BookingRow = React.memo(function BookingRow({
             ) : col.key === CUTOFF_KEY && (eport || overdue) ? (
               <span className="inline-flex items-center gap-1.5 max-w-full">
                 {eport ? (
-                  <EportCutoffCell eport={eport} original={val} badge={eportLabels.badge} />
+                  <EportCutoffCell eport={eport} badge={eportLabels.badge} />
                 ) : (
                   <span className="font-semibold text-rose-600 dark:text-rose-400 truncate">{String(val)}</span>
                 )}
@@ -300,20 +300,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     }
   });
   // Table or week calendar, remembered like the toggle above
-  const [view, setView] = useState<BookingView>(() => {
-    try {
-      return localStorage.getItem(VIEW_STORAGE_KEY) === 'calendar' ? 'calendar' : 'table';
-    } catch {
-      return 'table';
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem(VIEW_STORAGE_KEY, view);
-    } catch {
-      /* only a convenience */
-    }
-  }, [view]);
+  const [view, setView] = useTableView(VIEW_STORAGE_KEY);
   // Bumped on every reload so the calendar refetches too
   const [calendarReloadKey, setCalendarReloadKey] = useState(0);
   useEffect(() => {
@@ -1023,29 +1010,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
         {/* Table / calendar and the done-cancelled toggle, right after the search */}
         <div className="flex items-center gap-2 shrink-0">
-          <Tooltip content={t.booking.calendar.viewTooltip}>
-            <div role="group" className="shrink-0 inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
-              {([
-                ['table', Table2, t.booking.calendar.viewTable],
-                ['calendar', CalendarDays, t.booking.calendar.viewCalendar],
-              ] as const).map(([v, Icon, label]) => (
-                <button
-                  key={v}
-                  type="button"
-                  aria-pressed={view === v}
-                  onClick={() => setView(v)}
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
-                    view === v
-                      ? 'bg-white dark:bg-slate-900 text-primary-700 dark:text-primary-300 shadow-sm'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </Tooltip>
+          <ViewToggle view={view} onChange={setView} labels={t.booking.calendar} />
           <Tooltip content={hideClosed ? t.booking.status.hideClosedTooltip : t.booking.status.showClosedTooltip}>
             <button
               type="button"

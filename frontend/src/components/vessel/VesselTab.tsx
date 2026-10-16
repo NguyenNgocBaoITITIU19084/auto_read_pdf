@@ -25,6 +25,9 @@ import { VesselTrashModal } from './VesselTrashModal';
 import { VesselDetailModal } from './VesselDetailModal';
 import { VesselWatchlistModal } from './VesselWatchlistModal';
 import { VesselRow } from './VesselRow';
+import { VesselCalendar, VesselCalendarLabels } from './VesselCalendar';
+import { ViewToggle, useTableView } from '../common/ViewToggle';
+import type { TabId } from '../common/Tabs';
 import { ResizableTh } from '../common/ResizableTh';
 import { useTableSort } from '../../hooks/useTableSort';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
@@ -42,6 +45,7 @@ import {
 
 interface VesselTabProps {
   initialSearchQuery?: string;
+  onNavigateTab?: (tab: TabId, query?: string) => void;
 }
 
 const getRowId = (r: VesselSchedule) => r.id;
@@ -51,7 +55,7 @@ const normSite = (s?: string | null) => (s || '').trim().toUpperCase();
 const previewList = (items: string[], max = 5) =>
   items.length > max ? `${items.slice(0, max).join(', ')}, … (+${items.length - max})` : items.join(', ');
 
-export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
+export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavigateTab }) => {
   const { t, activeCollection, autoSyncEnabled, autoSyncStatus } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
@@ -177,6 +181,9 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     onError: (e) => addToast(errorMessage(e, t.common.error), 'error'),
   });
   const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+  // Table or week calendar by closing time; the calendar refetches whenever the table reloads
+  const [view, setView] = useTableView('vessel_view');
+  const [calendarReloadKey, setCalendarReloadKey] = useState(0);
 
   const watchSigRef = useRef('');
   const loadWatchlist = useStableCallback(async () => {
@@ -204,6 +211,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
   /** 'loading' | 'refresh' | 'silent' — reloads the current page and the watchlist together. */
   const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    setCalendarReloadKey((k) => k + 1);
     await Promise.all([table.reload(mode), loadWatchlist(), refreshTrashCount()]);
   });
 
@@ -506,6 +514,10 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
     { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: handleBatchDelete, danger: true, loading: bulkBusy === 'delete', disabled: !!bulkBusy },
   ];
 
+  const calendarLabels = useMemo<VesselCalendarLabels>(() => t.vessel.calendar, [t]);
+  const showCalendarError = useStableCallback((message: string) => addToast(message, 'error'));
+  const openVesselBookings = useStableCallback((v: VesselSchedule) => onNavigateTab?.('booking', v.vessel_name));
+
   // Right-click menu: the clicked row's own actions, then the tab's bulk actions for the selection
   const rowMenu = useRowContextMenu<VesselSchedule>();
   const handleRowContextMenu = useStableCallback((item: VesselSchedule, e: React.MouseEvent) => {
@@ -635,7 +647,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
 
       {/* Controls: Filter & Table actions */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
-        <div className="flex items-center gap-2 flex-1 max-w-md">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-1 min-w-[280px] max-w-md">
           <select
             value={searchField}
             onChange={(e) => setSearchField(e.target.value)}
@@ -649,7 +662,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
             <option value="remarks">{getColLabel("remarks", t.vessel.columns["remarks"])}</option>
           </select>
 
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-[150px]">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -659,6 +672,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
               className="w-full pl-8 pr-3 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500"
             />
           </div>
+        </div>
+        <ViewToggle view={view} onChange={setView} labels={t.vessel.calendar} />
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -721,6 +736,18 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
       </div>
 
       {/* Vessel Schedules Table */}
+      {view === 'calendar' && activeCollection ? (
+        <VesselCalendar
+          collectionId={activeCollection.id}
+          query={tableQuery}
+          reloadKey={calendarReloadKey}
+          labels={calendarLabels}
+          onOpen={setSelectedSchedule}
+          onContextMenu={handleRowContextMenu}
+          onOpenBookings={onNavigateTab ? openVesselBookings : undefined}
+          onError={showCalendarError}
+        />
+      ) : (
       <div data-tour="vessel-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
@@ -824,6 +851,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
           onPageSizeChange={setPageSize}
         />
       </div>
+      )}
 
       <RowContextMenu
         position={rowMenu.state}

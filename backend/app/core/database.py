@@ -1580,6 +1580,48 @@ def get_vessel_schedules_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offs
     return {"items": items, "total": total}
 
 
+CLOSING_SOON_HOURS = 24
+
+
+def get_vessel_calendar(col_id: int, date_from: str, date_to: str, search_query: str = None,
+                        search_field: str = None, now: datetime | None = None) -> dict:
+    """Vessel schedules whose closing time (cắt máng) falls between two days (inclusive, 'YYYY-MM-DD'),
+    earliest first. Each item adds "calendar_deadline" ('YYYY-MM-DD HH:MM'), "closing_estimated" (ePort's
+    time is still an estimate), "closing_state" ('closed' | 'soon' | 'open'), and the collection's bookings
+    on that vessel + voyage: "booking_count" and "booking_open_count" (not gated in / done / cancelled yet).
+    `undated` counts the matching schedules without a readable closing time."""
+    where, params = _vessel_where(col_id, search_query, search_field)
+    day = "substr(sort_key(closing_time), 1, 9)"
+    with get_connection() as conn:
+        rows = _select_dicts(
+            conn, f"SELECT * FROM vessel_schedules WHERE {where} AND {day} BETWEEN ? AND ? "
+                  f"ORDER BY sort_key(closing_time), id;",
+            (*params, _calendar_day_key(date_from), _calendar_day_key(date_to)))
+        undated = conn.execute(
+            f"SELECT COUNT(*) FROM vessel_schedules WHERE {where} AND sort_key(closing_time) NOT LIKE '1%';",
+            tuple(params)).fetchone()[0]
+        bookings = conn.execute(
+            f"SELECT vessel, {_STATUS_EXPR} FROM bookings WHERE collection_id = ? "
+            "AND TRIM(COALESCE(vessel, '')) NOT IN ('', 'null');", (col_id,)).fetchall() if rows else []
+    now = now or datetime.now(VN_TZ)
+    items = []
+    for r in rows:
+        deadline = _cutoff_deadline(r.get("closing_time"))
+        if deadline is None:
+            continue
+        hours_left = (deadline - now).total_seconds() / 3600
+        mine = [status for vessel, status in bookings if text_matches_schedule(vessel, r)]
+        items.append({
+            **r,
+            "calendar_deadline": deadline.strftime("%Y-%m-%d %H:%M"),
+            "closing_estimated": "EST" in str(r.get("closing_time") or "").upper(),
+            "closing_state": "closed" if hours_left < 0 else "soon" if hours_left <= CLOSING_SOON_HOURS else "open",
+            "booking_count": len(mine),
+            "booking_open_count": sum(1 for status in mine if status in _BOOKING_OPEN_STATUSES),
+        })
+    return {"items": items, "undated": undated}
+
+
 def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None,
                             sort_by: str = None, sort_dir: str = None) -> list[int]:
     where, params = _vessel_where(col_id, search_query, search_field)

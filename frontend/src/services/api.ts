@@ -282,6 +282,14 @@ export const getVessels = async (collectionId: number, query?: string, field?: s
 
 export const getVesselsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<VesselSchedule>> =>
   (await apiClient.get<PageResult<VesselSchedule>>('/vessels/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
+/** Vessel schedules whose closing time falls between two days ('YYYY-MM-DD'), with the table's search. */
+export const getVesselsCalendar = async (
+  collectionId: number, dateFrom: string, dateTo: string, q: TableQuery,
+): Promise<{ items: VesselSchedule[]; undated: number }> =>
+  (await apiClient.get<{ items: VesselSchedule[]; undated: number }>('/vessels/calendar', {
+    params: { ...tableParams(collectionId, { ...q, sort_by: undefined }), date_from: dateFrom, date_to: dateTo },
+    paramsSerializer: listParams,
+  })).data;
 export const getVesselIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
   (await apiClient.get<{ ids: number[] }>('/vessels/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getVesselsByIds = async (ids: number[]): Promise<VesselSchedule[]> =>

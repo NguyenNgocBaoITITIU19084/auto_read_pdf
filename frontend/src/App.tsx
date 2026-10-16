@@ -146,7 +146,7 @@ export const App: React.FC = () => {
             />
           )}
           {activeTab === 'vessel' && (
-            <VesselTab initialSearchQuery={drilldownKeywords.vessel} />
+            <VesselTab initialSearchQuery={drilldownKeywords.vessel} onNavigateTab={handleNavigateTab} />
           )}
           {activeTab === 'container' && (
             <ContainerTab initialSearchQuery={drilldownKeywords.container} />
