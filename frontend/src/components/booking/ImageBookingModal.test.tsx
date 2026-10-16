@@ -88,7 +88,8 @@ describe('ImageBookingModal (reading queue)', () => {
 
     fireEvent.change(screen.getByDisplayValue('PIL'), { target: { value: 'PIL LINE' } });
     expect(screen.getByDisplayValue('PIL LINE').className).toContain('amber');
-    fireEvent.click(screen.getByRole('button', { name: new RegExp(`${q.aiOriginal} · 1 ${q.edited}`) }));
+    // the raw data section is open by default and counts the edit
+    expect(screen.getByRole('button', { name: new RegExp(`${q.aiOriginal} · 1 ${q.edited}`) })).toBeInTheDocument();
     expect(screen.getByText('PIL')).toBeInTheDocument();                              // the untouched AI value stays visible
   });
 

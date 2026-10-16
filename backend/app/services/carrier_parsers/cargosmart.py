@@ -117,17 +117,34 @@ _EMPTY_LABEL = "EMPTY PICKUP LOCATION:"
 _FULL_LABEL = "FULL RETURN LOCATION:"
 
 
+_BARCODE_WORD = re.compile(r"^[A-Z]{18,}$")  # page header barcode rows ('AAAAAAAPPIIJJJJJJIIPP...')
+
+
+def _page_body_top(rows: Sequence[List[Dict]]) -> float:
+    """Top of the last barcode row of the repeated page header (the page body starts below it)."""
+    tops = [w["top"] for r in rows for w in r if _BARCODE_WORD.match(w["text"])]
+    return max(tops) if tops else 0.0
+
+
 def _depots_from_words(pages_words: Sequence[List[Dict]]):
-    """OOCL: both labels on one row, depot names on the row below, split at the 'FULL' label."""
-    for words in pages_words:
+    """OOCL: both labels on one row, depot names on the row below, split at the 'FULL' label.
+
+    When the labels are the last row of a page, the names open the next page, below its barcode header."""
+    for i, words in enumerate(pages_words):
         rows = group_rows(words)
         empty = find_phrase(rows, _EMPTY_LABEL)
         full = find_phrase(rows, _FULL_LABEL)
         if not (empty and full) or abs(empty["top"] - full["top"]) > 3 or full["x0"] <= empty["x0"]:
             continue
         split_x = full["x0"] - 2
-        return (first_line_below(rows, empty["top"], 0, split_x),
-                first_line_below(rows, full["top"], split_x))
+        depots = (first_line_below(rows, empty["top"], 0, split_x),
+                  first_line_below(rows, full["top"], split_x))
+        if not any(depots) and i + 1 < len(pages_words) and rows[-1][0]["top"] - empty["top"] <= 3:
+            nxt = group_rows(pages_words[i + 1])
+            top = _page_body_top(nxt)
+            depots = (first_line_below(nxt, top, 0, split_x, max_gap=40),
+                      first_line_below(nxt, top, split_x, max_gap=40))
+        return depots
     return None
 
 
@@ -174,6 +191,7 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
 
     depots = _depots_from_words(pages_words) if pages_words else None
     empty, full = depots or _depots_from_text(text)
-    out["Empty Pick Up CY"], out["Full return CY"] = empty, full
+    # 'Cat Lai Terminal' -> 'Cat Lai': the trailing 'Terminal' adds nothing to the depot name
+    out["Empty Pick Up CY"], out["Full return CY"] = empty, re.sub(r"\s+Terminal$", "", full, flags=re.IGNORECASE)
 
     return {k: v for k, v in out.items() if v}

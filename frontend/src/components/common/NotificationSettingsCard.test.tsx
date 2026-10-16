@@ -5,7 +5,7 @@ import { translations } from '../../i18n/translations';
 const addToast = vi.fn();
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
 
-const ALL = ['container_customs', 'container_ingate', 'container_outgate', 'vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd'];
+const ALL = ['container_customs', 'container_ingate', 'container_outgate', 'vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd', 'booking_cutoff', 'morning_brief'];
 const refresh = vi.fn();
 vi.mock('../../context/NotificationsContext', () => ({ useNotifications: () => ({ refresh }) }));
 const sendTest = vi.fn();
@@ -26,16 +26,34 @@ beforeEach(() => {
   addToast.mockReset();
   refresh.mockReset().mockResolvedValue(undefined);
   sendTest.mockReset().mockResolvedValue({ id: 1 });
-  getSettings.mockReset().mockResolvedValue({ kinds: ALL, os_enabled: true, all_kinds: ALL });
-  saveSettings.mockReset().mockImplementation(async (kinds: string[], os: boolean) => ({ kinds, os_enabled: os, all_kinds: ALL }));
+  getSettings.mockReset().mockResolvedValue({ kinds: ALL, os_enabled: true, all_kinds: ALL, brief_time: '07:30' });
+  saveSettings.mockReset().mockImplementation(async (kinds: string[], os: boolean, brief?: string) => (
+    { kinds, os_enabled: os, all_kinds: ALL, brief_time: brief || '07:30' }));
 });
 
 describe('NotificationSettingsCard', () => {
+  it('offers the reminders and saves a new brief time', async () => {
+    const { container } = render(<NotificationSettingsCard />);
+    await waitFor(() => expect(screen.getByLabelText(k.booking_cutoff)).toBeChecked());
+    expect(screen.getByLabelText(k.morning_brief)).toBeChecked();
+    const time = container.querySelector('input[type="time"]') as HTMLInputElement;
+    await waitFor(() => expect(time.value).toBe('07:30'));
+    fireEvent.change(time, { target: { value: '06:45' } });
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(ALL, true, '06:45'));
+  });
+
+  it('greys out the brief time while the brief is off', async () => {
+    getSettings.mockResolvedValue({ kinds: ALL.filter((x) => x !== 'morning_brief'), os_enabled: true, all_kinds: ALL, brief_time: '07:30' });
+    const { container } = render(<NotificationSettingsCard />);
+    await waitFor(() => expect(screen.getByLabelText(k.morning_brief)).not.toBeChecked());
+    expect(container.querySelector('input[type="time"]')).toBeDisabled();
+  });
+
   it('shows every kind, ticked as saved', async () => {
     render(<NotificationSettingsCard />);
     const box = await screen.findByLabelText(k.container_outgate);
     await waitFor(() => expect(box).toBeChecked());
-    expect(screen.getAllByRole('checkbox')).toHaveLength(9);          // 8 kinds + the OS popup switch
+    expect(screen.getAllByRole('checkbox')).toHaveLength(11);         // 10 kinds + the OS popup switch
   });
 
   it('saves the new selection as soon as a kind is toggled', async () => {
@@ -43,7 +61,7 @@ describe('NotificationSettingsCard', () => {
     const eta = await screen.findByLabelText(k.vessel_eta);
     await waitFor(() => expect(eta).toBeChecked());
     fireEvent.click(eta);
-    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(ALL.filter((x) => x !== 'vessel_eta'), true));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(ALL.filter((x) => x !== 'vessel_eta'), true, undefined));
     await waitFor(() => expect(screen.getByLabelText(k.vessel_eta)).not.toBeChecked());
   });
 
@@ -59,7 +77,7 @@ describe('NotificationSettingsCard', () => {
     const desktopOs = await screen.findByLabelText(new RegExp(translations.vi.notifications.settings.os.slice(0, 12)));
     await waitFor(() => expect(desktopOs).toBeEnabled());
     fireEvent.click(desktopOs);
-    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(ALL, false));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith(ALL, false, undefined));
   });
 
   it('tells the user when saving fails', async () => {

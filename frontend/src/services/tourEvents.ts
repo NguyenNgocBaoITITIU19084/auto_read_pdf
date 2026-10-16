@@ -1,14 +1,21 @@
-const ONBOARDING_KEY = 'auto_read_pdf_onboarding_completed_v2';
+// Bumped with each new tour so everyone sees the welcome (and its tour) once more
+const ONBOARDING_KEY = 'auto_read_pdf_onboarding_completed_v3';
 
+/** UI state a tour step needs; the tab that owns it does the change. Never touches data. */
 export type TourActionType =
-  | 'openColorConfig'
-  | 'closeColorConfig'
-  | 'openImageModal'
-  | 'closeImageModal'
-  | 'openVesselWatchlist'
-  | 'closeVesselWatchlist'
-  | 'openContainerWatchlist'
-  | 'closeContainerWatchlist';
+  | 'showBookingTable'
+  | 'showBookingCalendar'
+  | 'openFirstBooking'
+  | 'closeBookingDetail'
+  | 'showVesselTable'
+  | 'showVesselCalendar'
+  /** Put back the views the tour changed and close what it opened */
+  | 'restoreViews';
+
+/** Tabs with a "this screen" tour (keep in step with TAB_TOURS in tourService). Lives here so the
+ * help menu can ask without loading driver.js. */
+const TAB_TOUR_TABS = new Set(['booking', 'vessel', 'container', 'dashboard']);
+export const hasTabTour = (tabId: string): boolean => TAB_TOUR_TABS.has(tabId);
 
 type TourEventListener = (action: TourActionType) => void;
 
@@ -35,12 +42,20 @@ export const emitTourAction = (action: TourActionType) => {
  * Checks if the user has completed onboarding before, returns boolean
  */
 export const hasCompletedOnboarding = (): boolean => {
-  return localStorage.getItem(ONBOARDING_KEY) === 'true';
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) === 'true';
+  } catch {
+    return false;
+  }
 };
 
 /**
  * Marks onboarding as completed or dismissed
  */
 export const setOnboardingCompleted = (completed: boolean = true) => {
-  localStorage.setItem(ONBOARDING_KEY, completed ? 'true' : 'false');
+  try {
+    localStorage.setItem(ONBOARDING_KEY, completed ? 'true' : 'false');
+  } catch {
+    // private window / blocked storage: the welcome just shows again next time
+  }
 };

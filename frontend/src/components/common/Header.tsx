@@ -11,10 +11,7 @@ import { CollectionSwitcher } from './CollectionSwitcher';
 import { UpdateButton } from './UpdateButton';
 import { NotificationBell } from './NotificationBell';
 import { describeAutoSyncSchedule, formatIntervalShort } from '../../services/autoSync';
-import {
-  hasCompletedOnboarding,
-  subscribeTourActions
-} from '../../services/tourEvents';
+import { hasCompletedOnboarding, hasTabTour } from '../../services/tourEvents';
 
 const BackupModal = lazy(() => import('./BackupModal').then((m) => ({ default: m.BackupModal })));
 const CollectionManagerModal = lazy(() => import('./CollectionManagerModal').then((m) => ({ default: m.CollectionManagerModal })));
@@ -50,18 +47,6 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, []);
-
-  // Listen to interactive tour triggers (open/close color config)
-  useEffect(() => {
-    const unsubscribe = subscribeTourActions((action) => {
-      if (action === 'openColorConfig') {
-        setIsColorConfigOpen(true);
-      } else if (action === 'closeColorConfig') {
-        setIsColorConfigOpen(false);
-      }
-    });
-    return unsubscribe;
   }, []);
 
   const syncTimes = autoSyncStatus?.mode === 'times' ? autoSyncStatus.times : null;
@@ -101,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
       {/* Left: Brand & Collection Selector */}
       <div className="flex items-center gap-4 shrink-0">
         {/* Brand */}
-        <div data-tour="brand" className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-primary-600 to-sky-400 flex items-center justify-center text-white shadow-md shadow-primary-500/20 shrink-0">
             <ShieldCheck className="w-4.5 h-4.5" />
           </div>
@@ -122,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
       {/* Right Controls */}
       <div className="flex items-center gap-2.5 shrink-0">
         {/* Auto Sync Toggle */}
-        <div data-tour="auto-sync">
+        <div>
           <Tooltip content={autoSyncEnabled ? `Tự động đồng bộ đang BẬT (${scheduleText}). Nhấp để tắt hoặc vào Cài đặt / Watchlist để đổi lịch` : `Tự động đồng bộ đang TẮT (${scheduleText}). Nhấp để bật hoặc vào Cài đặt / Watchlist để đổi lịch`} position="bottom">
             <button
               onClick={() => toggleAutoSync()}
@@ -139,7 +124,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
         </div>
 
         {/* Color Rules Configuration */}
-        <div data-tour="color-rules">
+        <div>
           <Tooltip content={t.common.colorConfig} position="bottom">
             <button
               onClick={() => setIsColorConfigOpen(true)}
@@ -184,7 +169,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
         <NotificationBell />
 
         {/* Language Switcher */}
-        <div data-tour="lang-toggle">
+        <div>
           <Tooltip content="Chuyển đổi ngôn ngữ Tiếng Việt / English" position="bottom">
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold shrink-0">
               <button
@@ -212,7 +197,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
         </div>
 
         {/* Dark / Light Toggle */}
-        <div data-tour="theme-toggle">
+        <div>
           <Tooltip content={isDark ? "Chuyển sang giao diện Sáng" : "Chuyển sang giao diện Tối"} position="bottom">
             <button
               onClick={() => setIsDark(!isDark)}
@@ -280,7 +265,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab = 'dashboard', onNavig
             activeTabName={activeTabName}
             t={t}
             onStartFullTour={handleStartFullTour}
-            onStartTabTour={handleStartTabTour}
+            onStartTabTour={hasTabTour(activeTab) ? handleStartTabTour : undefined}
           />
         </Suspense>
       )}

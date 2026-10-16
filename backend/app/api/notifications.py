@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.app.core.database import (
@@ -22,11 +22,14 @@ class MarkReadRequest(BaseModel):
 class NotificationSettingsRequest(BaseModel):
     kinds: List[str]
     os_enabled: bool = True
+    # 'HH:MM' of the morning brief; omitted = unchanged
+    brief_time: Optional[str] = None
 
 
 def _settings_payload() -> dict:
     s = get_notification_settings()
-    return {"kinds": [k for k in ALL_KINDS if k in s["kinds"]], "os_enabled": s["os_enabled"], "all_kinds": list(ALL_KINDS)}
+    return {"kinds": [k for k in ALL_KINDS if k in s["kinds"]], "os_enabled": s["os_enabled"], "all_kinds": list(ALL_KINDS),
+            "brief_time": s["brief_time"]}
 
 
 @router.get("")
@@ -64,5 +67,8 @@ def read_settings():
 
 @router.put("/settings")
 def write_settings(payload: NotificationSettingsRequest):
-    set_notification_settings(payload.kinds, payload.os_enabled)
+    try:
+        set_notification_settings(payload.kinds, payload.os_enabled, payload.brief_time)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Giờ bản tin không hợp lệ (cần dạng HH:MM)")
     return _settings_payload()

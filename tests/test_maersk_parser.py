@@ -188,3 +188,13 @@ def test_maersk_skips_barge_leg_and_reads_direct_route():
     assert r["Pre Carrier"] == "null"
     assert r["T/S Port"] == "null"
     assert r["Port of Discharging"] == "PELABUHAN TANJUNG PELEPAS TERMINAL"
+
+
+def test_maersk_feeder_leg_is_the_first_vessel():
+    # DB_aabhijfedgid0x081A.pdf: Cat Lai -> Tanjung Pelepas on a feeder (FEO), then the main vessel
+    words = _plan_words()
+    first_leg = min(w["top"] for w in words if w["text"] == "MVS")
+    words = [dict(w, text="FEO") if w["text"] == "MVS" and w["top"] == first_leg else w for w in words]
+    r = extract_booking_from_text(MAERSK_TEXT, "DB_aabhijfedgid0x081A.pdf", [words])
+    _assert_common(r)
+    assert r["T/S Port"] == "PELABUHAN TANJUNG PELEPAS TERMINAL"

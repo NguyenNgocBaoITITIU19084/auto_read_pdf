@@ -45,7 +45,7 @@ describe('NotificationDetailModal', () => {
     expect(screen.getByText('24/09/2026 09:30')).toBeInTheDocument();
     expect(screen.getByText('SGNGX2311600, SGNGX2311601')).toBeInTheDocument();
     expect(screen.getByText('Tự động đồng bộ')).toBeInTheDocument();
-    expect(screen.getByText('2026-09-30 10:00:00')).toBeInTheDocument();
+    expect(screen.getByText('10:00 · 30/09/2026')).toBeInTheDocument();
   });
 
   it('lists every changed time of a grouped vessel notification', () => {
@@ -78,5 +78,63 @@ describe('NotificationDetailModal', () => {
     fireEvent.click(screen.getByRole('button', { name: translations.vi.notifications.detail.openVessel }));
     expect(closeDetail).toHaveBeenCalled();
     expect(onNavigateTab).toHaveBeenCalledWith('vessel', 'HMM HOPE');
+  });
+
+  it('shows a cut-off reminder with its bookings and opens the booking tab', () => {
+    const reminder: AppNotification = {
+      id: 5, collection_id: 1, kind: 'booking_cutoff', title: 'x', old_value: '', new_value: 'Cut-off 16/10/2026 14:00 · còn 5 giờ',
+      detail: { hours: 6, cutoff: '16/10/2026 14:00', booking_no: '2 booking', bookings: ['A1', 'A2'], vessel_name: 'WAN HAI 286', count: 2 },
+      nav_tab: 'booking', nav_query: 'WAN HAI 286', source: 'auto_sync', created_at: '2026-10-16 08:00:00', read: false,
+    };
+    state = { items: [reminder], detailId: 5 };
+    const onNavigateTab = vi.fn();
+    render(<NotificationDetailModal onNavigateTab={onNavigateTab} />);
+    expect(screen.getByText('Cut-off còn 6 giờ: 2 booking')).toBeInTheDocument();
+    expect(screen.getByText('A1')).toBeInTheDocument();
+    expect(screen.getByText('A2')).toBeInTheDocument();
+    expect(screen.getByText('16/10/2026 14:00')).toBeInTheDocument();
+    expect(screen.getByText('WAN HAI 286')).toBeInTheDocument();
+    fireEvent.click(screen.getByText(translations.vi.notifications.detail.openBooking));
+    expect(onNavigateTab).toHaveBeenCalledWith('booking', 'WAN HAI 286');
+  });
+
+  it('shows the morning brief counts and the bookings due today', () => {
+    const brief: AppNotification = {
+      id: 6, collection_id: null, kind: 'morning_brief', title: 'x', old_value: '', new_value: '2 cut-off hôm nay',
+      detail: {
+        date: '16/10/2026', today: 3, late: 1, tomorrow: 4, vessels_today: 2,
+        items: [{ booking_no: 'BK1', time: '10:00', vessel: 'EVER OATH', collection: 'Test' },
+                { booking_no: 'BK2', time: '14:00', vessel: 'WAN HAI', collection: 'Test' }],
+        collections: [],
+      },
+      nav_tab: 'booking', nav_query: null, source: 'auto_sync', created_at: '2026-10-16 07:30:00', read: false,
+    };
+    state = { items: [brief], detailId: 6 };
+    render(<NotificationDetailModal onNavigateTab={vi.fn()} />);
+    const r = translations.vi.notifications.reminder;
+    expect(screen.getByText('Bản tin sáng 16/10')).toBeInTheDocument();
+    expect(screen.getByText(r.tileToday).previousSibling?.textContent).toBe('3');
+    expect(screen.getByText(r.tileLate).previousSibling?.textContent).toBe('1');
+    expect(screen.getByText('BK1')).toBeInTheDocument();
+    expect(screen.getByText('và 1 booking khác')).toBeInTheDocument();
+  });
+});
+
+import { groupBookingNumbers, remainingText, formatStamp } from './ReminderViews';
+
+describe('reminder helpers', () => {
+  const t = translations.vi;
+  it('groups repeated booking numbers', () => {
+    expect(groupBookingNumbers(['2339911210', '2339911210', 'A1'])).toBe('2339911210 ×2, A1');
+  });
+  it('says how long is left until a cut-off', () => {
+    const now = new Date(2026, 9, 16, 10, 41);
+    expect(remainingText('16/10/2026 14:00', t, now)).toBe('còn 3 giờ 19 phút');
+    expect(remainingText('17/10/2026 08:00', t, now)).toBe('còn 21 giờ');
+    expect(remainingText('16/10/2026 11:00', t, now)).toBe('còn 19 phút');
+    expect(remainingText('16/10/2026 10:00', t, now)).toBe('đã qua cut-off');
+  });
+  it('formats the stored time for reading', () => {
+    expect(formatStamp('2026-10-16 10:40:46')).toBe('10:40 · 16/10/2026');
   });
 });

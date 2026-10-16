@@ -145,6 +145,7 @@ export const translations = {
         time: "Thời gian",
         openVessel: "Xem trong tab Tàu",
         openContainer: "Xem trong tab Container",
+        openBooking: "Xem trong tab Booking",
         close: "Đóng",
       },
       kinds: {
@@ -156,6 +157,34 @@ export const translations = {
         vessel_open_gate: "Tàu đổi giờ mở cổng hạ",
         vessel_eta: "Tàu đổi lịch cập bến (ETA)",
         vessel_etd: "Tàu đổi lịch rời bến (ETD)",
+        booking_cutoff: "Nhắc cut-off booking (còn 24 giờ, 6 giờ, 2 giờ)",
+        morning_brief: "Bản tin buổi sáng",
+      },
+      reminder: {
+        bookingCount: "{count} booking",
+        cutoff: "Cut-off",
+        hoursLeft: "Còn",
+        today: "Cut-off hôm nay",
+        late: "Đang trễ",
+        tomorrow: "Ngày mai",
+        vesselsToday: "Tàu cắt máng hôm nay",
+        dueToday: "Cần xong hôm nay",
+        more: "và {count} booking khác",
+        perCollection: "Theo bộ sưu tập",
+        allCollections: "Tính trên tất cả bộ sưu tập · chỉ các booking chưa hạ bãi",
+        nothingToday: "Hôm nay không có booking nào tới hạn cut-off.",
+        passed: "đã qua cut-off",
+        leftMinutes: "còn {m} phút",
+        leftHours: "còn {h} giờ",
+        leftHoursMinutes: "còn {h} giờ {m} phút",
+        tileToday: "Cut-off hôm nay",
+        tileLate: "Đang trễ",
+        tileTomorrow: "Cut-off ngày mai",
+        tileVessels: "Tàu cắt máng hôm nay",
+        chipToday: "{count} hôm nay",
+        chipLate: "{count} trễ",
+        chipTomorrow: "{count} ngày mai",
+        chipVessels: "{count} tàu cắt máng",
       },
       titles: {
         container_customs: "Cont {name} đã thông quan",
@@ -167,6 +196,8 @@ export const translations = {
         vessel_eta: "Tàu {name}: đổi lịch cập bến (ETA)",
         vessel_etd: "Tàu {name}: đổi lịch rời bến (ETD)",
         vessel_schedule: "{name} đã đổi",
+        booking_cutoff: "Cut-off còn {hours} giờ: {name}",
+        morning_brief: "Bản tin sáng {date}",
       },
       changeLabels: {
         vessel_etd: "ETD",
@@ -181,9 +212,12 @@ export const translations = {
         desc: "Chọn những thay đổi bạn muốn được báo.",
         groupContainer: "Container",
         groupVessel: "Tàu",
+        groupReminder: "Nhắc việc",
+        briefTime: "Giờ gửi bản tin",
+        briefTimeHint: "Nếu lúc đó app đang tắt, bản tin vẫn được gửi khi mở app trong vòng 5 giờ sau.",
         os: "Hiện popup của hệ điều hành (kể cả khi app thu nhỏ xuống khay)",
         osBrowser: "Popup hệ điều hành chỉ có trong app desktop.",
-        requirement: "Thông báo tự động chỉ hoạt động khi bật Tự động đồng bộ và tàu/cont đã nằm trong Watchlist.",
+        requirement: "Báo thay đổi của tàu/cont chỉ hoạt động khi bật Tự động đồng bộ và tàu/cont đã nằm trong Watchlist. Nhắc việc chạy khi app đang mở.",
         saveFailed: "Không lưu được cài đặt thông báo",
         test: "Gửi thử thông báo",
         testDone: "Đã gửi thử: chuông báo ngay, popup hiện trong vài giây",
@@ -207,6 +241,74 @@ export const translations = {
       error: "Không kiểm tra được bản mới: {error}. Bấm để thử lại",
       openReleases: "Bấm để mở trang tải bản mới",
       notPackaged: "Tự động cập nhật chỉ có trên bản Windows đã cài. Bấm để mở trang tải về.",
+    },
+    exportManager: {
+      title: "Xuất Excel",
+      managerTitle: "Quản lý mẫu xuất Excel",
+      chooseTemplate: "Chọn mẫu xuất",
+      manage: "Quản lý mẫu",
+      edit: "Sửa mẫu",
+      close: "Đóng",
+      noTemplates: "Chưa có mẫu nào.",
+      noTemplatesHint: "Chưa có mẫu riêng. Bấm \"Mẫu mới\" để tạo mẫu với cột, thứ tự, tên và màu theo ý bạn.",
+      defaultFilename: "Tên file mặc định",
+      dragHint: "Kéo ⠿ để đổi vị trí",
+      dragHandle: "Kéo để đổi vị trí (hoặc dùng phím ↑ ↓)",
+      customColor: "Màu tùy chọn",
+      colorSlider: "Chọn màu",
+      hexCode: "Mã màu",
+      apply: "Dùng",
+      templates: "Mẫu xuất",
+      builtIn: "Tất cả cột",
+      builtInHint: "Mẫu có sẵn, không sửa tên được",
+      newTemplate: "Mẫu mới",
+      newName: "Mẫu mới",
+      columnsCount: "{count} cột",
+      name: "Tên mẫu",
+      namePlaceholder: "VD: Kế hoạch đội xe",
+      unsaved: "Chưa lưu",
+      duplicate: "Nhân bản",
+      copySuffix: "(bản sao)",
+      delete: "Xóa mẫu",
+      deleteConfirm: "Xóa mẫu xuất \"{name}\"? Không thể hoàn tác.",
+      deleted: "Đã xóa mẫu \"{name}\"",
+      discardConfirm: "Mẫu đang có thay đổi chưa lưu. Bỏ các thay đổi đó?",
+      discard: "Bỏ thay đổi",
+      columns: "Cột xuất",
+      selectedCount: "Đã chọn {count}/{total} cột",
+      selectAll: "Chọn tất cả",
+      selectNone: "Bỏ chọn",
+      moveUp: "Đưa lên",
+      moveDown: "Đưa xuống",
+      renamePlaceholder: "Giữ tên gốc",
+      colorTitle: "Màu cột",
+      noColor: "Không màu",
+      fillHeader: "Header",
+      fillColumn: "Cả cột",
+      fillHint: "Tô màu chỉ ô tiêu đề hoặc cả cột",
+      preview: "Xem trước",
+      previewRows: "{count} dòng đầu",
+      filePreview: "Xem trước file",
+      filePreviewInfo: "{shown} / {rows} dòng đầu · {columns} cột",
+      noColumns: "Chọn ít nhất một cột để xuất",
+      filename: "Tên file",
+      filenameHint: "Bấm để chèn:",
+      tokenDateValue: "Ngày: {value}",
+      tokenCollectionValue: "Bộ sưu tập: {value}",
+      tokenTitle: "Chèn {token} vào vị trí con trỏ",
+      filenameResult: "Tên file:",
+      tokenDate: "ngày",
+      tokenCollection: "bộ sưu tập",
+      rows: "Xuất {count} dòng",
+      save: "Lưu mẫu",
+      saveAsNew: "Lưu thành mẫu mới",
+      saved: "Đã lưu mẫu \"{name}\"",
+      savedPartially: "Máy chủ chưa lưu đủ thay đổi (thường do app cần khởi động lại sau khi cập nhật). Các thay đổi vẫn đang hiện trên màn hình, hãy khởi động lại app rồi bấm Lưu lần nữa.",
+      export: "Xuất Excel",
+      exporting: "Đang xuất...",
+      exported: "Đã xuất {file}",
+      noData: "Không có dòng nào để xuất",
+      loadFailed: "Không tải được danh sách mẫu",
     },
     common: {
       relativeTime: { justNow: "Vừa xong", minutes: "{n} phút trước", hours: "{n} giờ trước", days: "{n} ngày trước" },
@@ -252,6 +354,21 @@ export const translations = {
       deleteConfirm: "Bạn có chắc chắn muốn xóa không?",
       clearConfirm: "Bạn có chắc chắn muốn xóa toàn bộ dữ liệu trong bộ sưu tập này không?",
       stt: "STT",
+      columnFilter: {
+        button: "Lọc theo {col}",
+        active: "Đang lọc {n} giá trị",
+        search: "Tìm...",
+        all: "Chọn tất cả",
+        clear: "Bỏ lọc",
+        empty: "(Trống)",
+        none: "Không có giá trị nào",
+        loading: "Đang tải..."
+      },
+      sort: {
+        none: "Sắp xếp",
+        asc: "Đang sắp xếp tăng dần",
+        desc: "Đang sắp xếp giảm dần"
+      },
       total: "Tổng số",
       items: "dòng",
       selected: "đã chọn",
@@ -466,8 +583,8 @@ export const translations = {
     booking: {
       dropzoneTitle: "Kéo thả file PDF hoặc Ảnh chụp Booking vào đây (hoặc dán Ctrl+V)",
       dropzoneSubtitle: "Hỗ trợ trích xuất tự động PDF và Ảnh chụp booking từ các hãng tàu (Dongjin, PIL, CULINES, ONE, SITC, Cosco, Maersk...)",
-      scanImage: "Quét / Dán ảnh (OCR)",
-      scanImageTooltip: "Nhận diện dữ liệu Booking từ ảnh chụp hoặc ảnh màn hình",
+      scanImage: "Hàng đợi ảnh",
+      scanImageTooltip: "Mở lại hàng đợi đọc ảnh để xem kết quả và lưu booking",
       imageModal: {
         title: "Đọc & Kiểm Tra Booking (PDF · Ảnh chụp)",
         subtitle: "Nhận diện tự động 14 trường dữ liệu từ ảnh chụp điện thoại hoặc ảnh chụp màn hình",
@@ -524,7 +641,54 @@ export const translations = {
         "Vessel": "Tên tàu / Số chuyến",
         "ETD": "Ngày tàu chạy (ETD)",
         "Ghi chú": "Ghi chú",
-        "Thời gian thêm": "Thời gian thêm"
+        "Thời gian thêm": "Thời gian thêm",
+        "Trạng thái": "Trạng thái"
+      },
+      status: {
+        labels: {
+          new: "Mới",
+          dispatched: "Đã điều xe lấy rỗng",
+          stuffed: "Đã đóng hàng",
+          gated_in: "Đã hạ bãi",
+          done: "Hoàn tất",
+          cancelled: "Huỷ"
+        },
+        overdue: "Trễ",
+        overdueTooltip: "Trễ cut-off: đã quá giờ cắt máng mà booking chưa hạ bãi",
+        change: "Đổi trạng thái",
+        changeTitle: "Đổi trạng thái {count} booking",
+        changeSuccess: "Đã chuyển {count} booking sang \"{status}\"",
+        hideClosed: "Ẩn Hoàn tất / Huỷ",
+        hideClosedTooltip: "Đang ẩn các booking Hoàn tất và Huỷ. Bấm để hiện lại.",
+        showClosedTooltip: "Đang hiện cả booking Hoàn tất và Huỷ. Bấm để ẩn.",
+        autoHint: "Booking tự chuyển sang \"Đã hạ bãi\" khi tra cứu container trên ePort thấy đủ số cont đã INGATE (hàng xuất, cont đầy)."
+      },
+      calendar: {
+        viewTable: "Bảng",
+        viewCalendar: "Lịch",
+        viewTooltip: "Xem dạng bảng hoặc lịch tuần theo giờ cắt máng",
+        prevWeek: "Tuần trước",
+        nextWeek: "Tuần sau",
+        weekNumber: "Tuần {n}",
+        pickDate: "Chọn ngày để xem tuần đó",
+        thisWeek: "Tuần này",
+        lastWeek: "Tuần trước",
+        followingWeek: "Tuần sau",
+        weeksAgo: "{n} tuần trước",
+        weeksAhead: "{n} tuần tới",
+        backToThisWeek: "Về tuần này",
+        weekdays: ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"],
+        summary: "{count} booking trong tuần",
+        lateSummary: "{count} trễ cut-off",
+        undated: "{count} booking chưa có giờ cắt máng (không hiện trên lịch)",
+        empty: "Không có cut-off",
+        allDay: "Cả ngày",
+        error: "Không tải được lịch",
+        filterCarrier: "Hãng tàu",
+        filterStatus: "Trạng thái",
+        onlyLate: "Chỉ booking trễ",
+        filtersActive: "Đang lọc {count} điều kiện",
+        clearFilters: "Xóa lọc"
       },
       noteQuick: {
         title: "Thêm ghi chú",
@@ -745,9 +909,67 @@ export const translations = {
         save: "Lưu vào tab Tàu",
         saved: "Đã lưu",
         saveSuccess: "Đã lưu {count} lịch tàu vào tab Tàu"
+      },
+      links: {
+        vesselTitle: "Lịch tàu (ePort)",
+        vesselEmpty: "Chưa có lịch tàu khớp tàu + chuyến của booking này.",
+        vesselEmptyHint: "Bấm \"Tra tàu\" để tra trên ePort.",
+        noVessel: "Booking chưa có tên tàu.",
+        estimated: "DK",
+        estimatedTooltip: "Giờ cắt máng dự kiến (EST) trên ePort, có thể còn thay đổi",
+        berth: "Cập cảng",
+        departure: "Rời cảng",
+        closing: "Cắt máng",
+        openTs: "Mở cổng",
+        updated: "Cập nhật {time}",
+        containerTitle: "Container",
+        gatedIn: "{gated}/{qty} đã hạ bãi",
+        gatedInNoQty: "{gated} đã hạ bãi",
+        containerEmpty: "Chưa có container nào mang số booking này trong tab Container.",
+        noBookingNo: "Booking chưa có số booking.",
+        gatedBadge: "Đã hạ bãi",
+        openVesselTab: "Mở tab Tàu",
+        openContainerTab: "Mở tab Container",
+        loadError: "Không tải được lịch tàu / container"
       }
     },
     vessel: {
+      calendar: {
+        viewTable: "Bảng",
+        viewCalendar: "Lịch",
+        viewTooltip: "Xem dạng bảng hoặc lịch tuần theo giờ cắt máng",
+        prevWeek: "Tuần trước",
+        nextWeek: "Tuần sau",
+        weekNumber: "Tuần {n}",
+        pickDate: "Chọn ngày để xem tuần đó",
+        thisWeek: "Tuần này",
+        lastWeek: "Tuần trước",
+        followingWeek: "Tuần sau",
+        weeksAgo: "{n} tuần trước",
+        weeksAhead: "{n} tuần tới",
+        backToThisWeek: "Về tuần này",
+        weekdays: ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"],
+        empty: "Không có tàu cắt máng",
+        summary: "{count} tàu cắt máng trong tuần",
+        soonSummary: "{count} sắp cắt máng (< 24h)",
+        undated: "{count} tàu chưa có giờ cắt máng (không hiện trên lịch)",
+        estimated: "DK",
+        estimatedTooltip: "Giờ cắt máng dự kiến (EST) trên ePort, có thể còn thay đổi",
+        closed: "Đã cắt máng",
+        soon: "Sắp cắt máng",
+        etd: "ETD",
+        hoursLeft: "còn {h} giờ",
+        minutesLeft: "còn {m} phút",
+        bookings: "{count} booking",
+        bookingsOpen: "{count} chưa hạ bãi",
+        bookingsTooltip: "Xem các booking đi tàu này ở tab Booking",
+        error: "Không tải được lịch tàu",
+        filterSite: "Cảng",
+        filterAgent: "Đại lý",
+        onlySoon: "Chỉ tàu sắp cắt máng",
+        filtersActive: "Đang lọc {count} điều kiện",
+        clearFilters: "Xóa lọc"
+      },
       trash: {
         button: "Thùng rác",
         tooltip: "Lịch tàu đã xoá, giữ lại {days} ngày",
@@ -1000,12 +1222,12 @@ export const translations = {
     tour: {
       helpBtnTooltip: "Hướng dẫn sử dụng & Khám phá tính năng",
       helpMenuTitle: "Hướng Dẫn & Trợ Giúp",
-      fullTourTitle: "🚀 Hướng dẫn Tổng quan (Toàn bộ App)",
-      fullTourSubtitle: "Tìm hiểu toàn diện quy trình làm việc và các tính năng",
-      tabTourTitle: "💡 Hướng dẫn Màn hình này",
-      tabTourSubtitle: "Khám phá chi tiết các công cụ trên tab hiện tại",
-      welcomeModalTitle: "Chào mừng bạn đến với Auto Read PDF Pro v2.0!",
-      welcomeModalDesc: "Bạn có muốn tham gia một chuyến tham quan nhanh (2 phút) để khám phá các tính năng và cách sử dụng hiệu quả không?",
+      fullTourTitle: "✨ Có gì mới (toàn bộ tính năng mới)",
+      fullTourSubtitle: "Lịch booking & lịch tàu, trạng thái xử lý, liên kết tàu – container, mẫu xuất Excel, nhắc việc",
+      tabTourTitle: "💡 Tính năng mới ở màn hình này",
+      tabTourSubtitle: "Chỉ xem các tính năng mới của tab đang mở",
+      welcomeModalTitle: "Auto Read PDF Pro có tính năng mới!",
+      welcomeModalDesc: "Lịch booking theo cut-off, trạng thái xử lý, xem lịch tàu và container ngay trong booking, mẫu xuất Excel, nhắc cut-off và bản tin sáng. Xem nhanh trong khoảng 1 phút nhé?",
       startTourBtn: "Bắt đầu khám phá ngay",
       skipTourBtn: "Để sau",
       dontShowAgain: "Không hiện lại thông báo này",
@@ -1015,157 +1237,69 @@ export const translations = {
       btnSkip: "Bỏ qua",
       progressText: "{current} trên {total}",
       steps: {
-        brand: {
-          title: "Auto Read PDF Pro v2.0",
-          desc: "Hệ thống quản lý dữ liệu xuất nhập khẩu & logistics thông minh: trích xuất Booking PDF/Ảnh chụp bằng AI OCR và theo dõi Lịch tàu, Container ePort Tân Cảng tự động."
+        welcome: {
+          title: "✨ Có gì mới",
+          desc: "Chuyến tham quan ngắn các tính năng mới: lịch booking theo cut-off, trạng thái xử lý, liên kết booking với tàu và container, lịch tàu theo giờ cắt máng, mẫu xuất Excel và nhắc việc. Màn hình sẽ tự chuyển tab theo từng bước, kết thúc sẽ trả lại như cũ."
         },
-        collection: {
-          title: "Quản Lý Bộ Sưu Tập",
-          desc: "Tạo và chuyển đổi linh hoạt giữa các Bộ sưu tập riêng biệt cho từng dự án, lô hàng hoặc theo từng tháng. Dữ liệu booking, lịch tàu, container được lưu trữ riêng theo từng BST."
+        bookingViewToggle: {
+          title: "Bảng hoặc Lịch",
+          desc: "Chuyển danh sách booking giữa dạng bảng và dạng lịch tuần. App nhớ lựa chọn của bạn cho lần mở sau."
         },
-        autoSync: {
-          title: "Tự Động Đồng Bộ Dữ Liệu",
-          desc: "Bật/Tắt chế độ tự động cập nhật dữ liệu lịch tàu và container trong danh sách theo dõi (Watchlist) định kỳ (mặc định mỗi 10 phút) hoàn toàn tự động."
+        bookingCalendar: {
+          title: "Lịch booking theo cut-off",
+          desc: "Mỗi booking nằm ở ngày cut-off của nó (giờ ePort nếu đã có). Dùng ‹ › để đổi tuần, bấm vào ô tuần để chọn ngày bất kỳ. Bấm đúp một thẻ để mở chi tiết, chọn trạng thái ngay trên thẻ."
         },
-        colorRules: {
-          title: "Cấu Hình Màu Sắc Dữ Liệu",
-          desc: "Tùy biến luật đổi màu trực quan cho các trạng thái thông quan, tình trạng nợ phí CSHT, hạn cut-off, tác nghiệp bãi cảng... giúp phát hiện ngay các sự cố vận hành."
+        bookingCalendarSummary: {
+          title: "Tổng quan tuần",
+          desc: "Số booking trong tuần, số booking đã trễ cut-off (⚠ đỏ) và số booking chưa có giờ cắt máng nên không hiện trên lịch."
         },
-        colorTarget: {
-          title: "1. Chọn Bảng & Cột Áp Dụng",
-          desc: "Chọn bảng cần đổi màu (Container, Booking PDF, Lịch tàu ePort) và chọn cột dữ liệu mục tiêu (hoặc áp dụng cho 'Tất cả các cột')."
+        bookingCalendarFilters: {
+          title: "Thanh lọc của lịch",
+          desc: "Lọc theo Hãng tàu và Trạng thái (dùng chung với dạng bảng), hoặc bật \"Chỉ booking trễ\". Bấm \"Xóa lọc\" để bỏ hết."
         },
-        colorCondition: {
-          title: "2. Thiết Lập Điều Kiện So Khớp",
-          desc: "Hỗ trợ 5 kiểu khớp: 'Khớp chính xác', 'Chứa từ khóa', 'Bắt đầu bằng', 'Kết thúc bằng' hoặc 'Toàn bộ cột (mọi ô có dữ liệu)'. Nhập từ khóa bạn muốn làm nổi bật (VD: UNLOAD, Chưa duyệt, GNL...)."
+        vesselCalendarFilters: {
+          title: "Thanh lọc của lịch tàu",
+          desc: "Lọc theo Cảng và Đại lý, hoặc bật \"Chỉ tàu sắp cắt máng\" để chỉ xem tàu cắt máng trong 24 giờ tới. Bấm \"Xóa lọc\" để bỏ hết."
         },
-        colorPalette: {
-          title: "3. Chọn Bảng Màu & Xem Trước",
-          desc: "Chọn nhanh từ các bộ màu thiết kế sẵn (Xanh lá, Đỏ/Hồng cảnh báo, Vàng cam, Xanh dương...) hoặc tự nhập mã màu HEX riêng (Màu nền, Màu viền, Màu chữ). Hệ thống hỗ trợ xem trước trực tiếp trước khi lưu."
+        bookingHideClosed: {
+          title: "Ẩn Hoàn tất / Huỷ",
+          desc: "Mặc định ẩn các booking đã Hoàn tất hoặc Huỷ để danh sách chỉ còn việc đang làm. Bấm để hiện lại."
         },
-        settings: {
-          title: "Cài Đặt & Sao Lưu Dữ Liệu",
-          desc: "Nơi cấu hình Google Gemini API Key để nhận diện ảnh chụp siêu tốc, tải file sao lưu JSON an toàn hoặc khôi phục dữ liệu khi cần."
+        bookingStatus: {
+          title: "Trạng thái xử lý",
+          desc: "Mỗi booking có trạng thái: Mới → Đã điều xe lấy rỗng → Đã đóng hàng → Đã hạ bãi → Hoàn tất (hoặc Huỷ). Đổi ngay trong ô của từng dòng; lọc theo trạng thái ở nút lọc trên tiêu đề cột. Khi ePort ghi nhận đủ cont hạ bãi, booking tự chuyển sang \"Đã hạ bãi\"."
         },
-        langSwitch: {
-          title: "Chuyển Đổi Ngôn Ngữ",
-          desc: "Chuyển đổi giao diện tức thì giữa Tiếng Việt (VI) và Tiếng Anh (EN)."
+        bookingCutoff: {
+          title: "Giờ cắt máng ePort & cảnh báo trễ",
+          desc: "Khi tàu đã có lịch trên ePort, cột này hiện giờ cắt máng mới của ePort (nhãn ePort), giờ gốc của booking vẫn xem được khi rê chuột. Booking chưa hạ bãi mà quá giờ sẽ có nhãn ⚠ Trễ. Copy dòng cũng lấy giờ mới này."
         },
-        themeToggle: {
-          title: "Giao Diện Sáng / Tối",
-          desc: "Chuyển đổi nhanh chóng giữa chế độ nền sáng hoặc nền tối (Dark Mode) êm dịu cho mắt khi làm việc ban đêm."
+        bookingLinks: {
+          title: "Lịch tàu & container của booking",
+          desc: "Bấm đúp một booking để mở chi tiết: bên dưới có lịch tàu ePort khớp đúng tàu + chuyến, và các container mang số booking này kèm số đã hạ bãi trên tổng Q'ty. Bấm \"Mở tab Tàu\" / \"Mở tab Container\" để xem đầy đủ."
         },
-        navTabs: {
-          title: "Thanh Điều Hướng Phân Hệ",
-          desc: "Chuyển đổi linh hoạt giữa 4 phân hệ chính: Bảng điều hành tổng quan, Quản lý Booking PDF/Ảnh, Lịch tàu ePort và Tra cứu Container."
+        exportTemplates: {
+          title: "Mẫu xuất Excel",
+          desc: "Bấm Xuất Excel để chọn mẫu xuất: tự đặt tên mẫu, chọn cột, kéo đổi thứ tự, đổi tên và màu cột, đặt tên file mặc định, rồi xem trước file trước khi tải về. Mẫu dùng lại được cho lần sau."
+        },
+        vesselViewToggle: {
+          title: "Lịch tàu dạng lịch tuần",
+          desc: "Tab Tàu cũng có dạng Lịch: các tàu xếp theo ngày giờ cắt máng."
+        },
+        vesselCalendar: {
+          title: "Lịch theo giờ cắt máng",
+          desc: "Mỗi thẻ là một tàu: giờ cắt máng (DK = giờ dự kiến), tàu sắp cắt máng trong 24 giờ được đánh dấu, kèm số booking của bạn trên tàu đó. Bấm vào số booking để xem các booking ấy."
+        },
+        reminders: {
+          title: "Nhắc cut-off & bản tin sáng",
+          desc: "Chuông thông báo nhắc booking sắp tới cut-off (còn 24 giờ, 6 giờ, 2 giờ) và gửi bản tin buổi sáng: cut-off hôm nay, booking đang trễ, cut-off ngày mai và tàu cắt máng hôm nay."
+        },
+        reminderSettings: {
+          title: "Cài đặt nhắc việc",
+          desc: "Trong Cài đặt & Sao lưu, mục Thông báo thay đổi → Nhắc việc: bật/tắt nhắc cut-off, bản tin sáng và chọn giờ gửi bản tin. Nhắc việc chạy khi app đang mở."
         },
         helpTour: {
-          title: "Nút Trợ Giúp & Hướng Dẫn",
-          desc: "Bất cứ lúc nào cần hỗ trợ hoặc muốn xem lại hướng dẫn từng tính năng, bạn chỉ cần nhấp vào biểu tượng dấu chấm hỏi (?) này!"
-        },
-        // Dashboard Tab
-        dashboardScope: {
-          title: "Phạm Vi Dữ Liệu",
-          desc: "Chuyển đổi giữa xem dữ liệu tổng hợp toàn hệ thống (tất cả các bộ sưu tập) hoặc chỉ riêng bộ sưu tập đang chọn."
-        },
-        dashboardKPIs: {
-          title: "Các Chỉ Số Vận Hành (KPIs)",
-          desc: "Theo dõi nhanh tổng sản lượng TEUs, số lượng container chưa duyệt hải quan và số lượng container đang nằm tại bãi."
-        },
-        dashboardResources: {
-          title: "Tài Nguyên Hệ Thống",
-          desc: "Theo dõi CPU và RAM của ứng dụng và cả máy theo thời gian thực. Khi máy chậm, bấm 'Giải phóng bộ nhớ' hoặc 'Khởi động lại dịch vụ nền' để giải phóng RAM."
-        },
-        dashboardAlerts: {
-          title: "Cảnh Báo Vận Hành Khẩn Cấp",
-          desc: "Tự động phát hiện các booking sắp đến giờ cắt máng (cut-off) và container tồn bãi có nguy cơ trễ hạn để bấm 'Chuyển tới' xử lý ngay."
-        },
-        dashboardCharts: {
-          title: "Biểu Đồ Phân Bổ Trực Quan",
-          desc: "Phân tích cơ cấu hãng tàu, phân bổ sản lượng theo các cảng/ICD (Cát Lái, Hiệp Phước, Sóng Thần...) và các sự kiện tác nghiệp bãi."
-        },
-        // Booking Tab
-        bookingDropzone: {
-          title: "Kéo Thả File Booking & Ảnh Chụp",
-          desc: "Kéo thả nhiều file PDF hoặc ảnh chụp booking vào đây (hỗ trợ dán trực tiếp phím tắt Ctrl+V / Cmd+V từ ảnh chụp màn hình). Hệ thống sẽ tự động trích xuất 14 trường dữ liệu tức thì!"
-        },
-        bookingSearch: {
-          title: "Tìm Kiếm & Lọc Dữ Liệu",
-          desc: "Tìm kiếm nhanh theo số Booking, hãng tàu, cảng đích, bãi cấp rỗng hoặc nơi hạ bãi theo từng cột cụ thể."
-        },
-        bookingAiOCR: {
-          title: "Quét & Nhận Diện Ảnh (AI Vision OCR)",
-          desc: "Tính năng bóc tách dữ liệu từ ảnh chụp thông minh bằng mô hình Google Gemini Vision AI, xử lý được ảnh chụp nghiêng, mờ, màn hình điện thoại hoặc file scan PDF."
-        },
-        ocrDropzone: {
-          title: "Vùng Tải Ảnh & Dán Clipboard (Ctrl+V)",
-          desc: "Kéo thả ảnh hoặc dán trực tiếp từ clipboard (Ctrl+V / Cmd+V). Bạn cũng có thể bấm chọn ảnh khác bất cứ lúc nào."
-        },
-        ocrControls: {
-          title: "Công Cụ Xoay, Phóng To & AI Model",
-          desc: "Dễ dàng xoay ảnh 90°, phóng to/thu nhỏ để đối chiếu văn bản gốc. Hỗ trợ cấu hình khóa API Gemini AI riêng để đạt tốc độ xử lý cao nhất."
-        },
-        ocrFields: {
-          title: "Kiểm Tra & Lưu 14 Trường Dữ Liệu",
-          desc: "Hệ thống tự động điền sẵn 14 trường: Số Booking, Hãng tàu, Cảng đích, Điểm giao, Loại cont, Số lượng, Bãi cấp rỗng, Nơi hạ bãi, Giờ cắt máng, Tên tàu, Ngày chạy... Bạn có thể chỉnh sửa trực tiếp và bấm 'Lưu vào Bộ sưu tập'."
-        },
-        bookingColumns: {
-          title: "Tùy Biến Cột Hiển Thị",
-          desc: "Bật/tắt ẩn hiện, kéo thả sắp xếp lại thứ tự cột hoặc đổi tên hiển thị các cột dữ liệu theo thói quen của bạn."
-        },
-        bookingExport: {
-          title: "Xuất Báo Cáo Excel",
-          desc: "Xuất toàn bộ hoặc các dòng booking đã chọn ra file Excel định dạng chuẩn chỉ với 1 cú click."
-        },
-        bookingTable: {
-          title: "Bảng Dữ Liệu & Thao Tác Nhanh",
-          desc: "Nhấp đúp chuột vào bất kỳ dòng nào để xem chi tiết đầy đủ, hoặc dùng các nút thao tác nhanh để sao chép dữ liệu dòng vào clipboard."
-        },
-        // Vessel Tab
-        vesselQuery: {
-          title: "Tra Cứu Lịch Tàu ePort Tân Cảng",
-          desc: "Chọn mã cảng (CTL, GNL, THP, CMS, IST, TNT), nhập tên tàu và số chuyến để tra cứu thời gian cập bến (ETA), rời bến (ETD), giờ mở cổng và hạn đóng máng."
-        },
-        vesselWatchlistBtn: {
-          title: "Quản Lý Watchlist Lịch Tàu",
-          desc: "Mở danh sách giám sát lịch tàu trọng điểm. Khi bật Auto-Sync, hệ thống sẽ tự động tra cứu lại định kỳ trên hệ thống ePort SNP để cập nhật thay đổi giờ tàu chạy và giờ đóng máng."
-        },
-        vesselWatchlistForm: {
-          title: "Thêm Chuyến Tàu Vào Theo Dõi",
-          desc: "Chọn bến cảng, nhập tên tàu và số chuyến để thêm vào danh sách theo dõi tự động."
-        },
-        vesselWatchlistSync: {
-          title: "Đồng Bộ & Quản Lý Tàu Giám Sát",
-          desc: "Bấm 'Đồng bộ Watchlist' để cập nhật tức thì dữ liệu của toàn bộ các tàu đang theo dõi, hoặc xóa các tàu đã hoàn tất chuyến."
-        },
-        vesselTable: {
-          title: "Danh Sách Lịch Tàu & Bookmark",
-          desc: "Xem kết quả tra cứu với nhãn thời gian cập nhật gần nhất. Nhấp vào icon dấu sao/bookmark ở cột Thao tác để thêm/bỏ tàu vào danh sách theo dõi."
-        },
-        // Container Tab
-        containerQuery: {
-          title: "Tra Cứu Container ePort",
-          desc: "Nhập danh sách nhiều số Container (ngăn cách bằng dấu phẩy, khoảng trắng hoặc dòng mới), tùy chọn 'Chỉ vòng luân chuyển cuối' hoặc 'Tìm kiếm theo lô'."
-        },
-        containerEventPills: {
-          title: "Lọc Nhanh Theo Tác Nghiệp Bãi",
-          desc: "Lọc nhanh danh sách container theo từng loại tác nghiệp: UNLOAD (Dỡ tàu), INGATE (Vào bãi), STACKING (Xếp bãi), OUTGATE (Xuất bãi), LOAD (Lên tàu)."
-        },
-        containerWatchlistBtn: {
-          title: "Quản Lý Watchlist Container",
-          desc: "Giám sát liên tục các container quan trọng để nhận thông tin cập nhật tức thì về vị trí bãi, biến động tác nghiệp và trạng thái tờ khai Hải quan."
-        },
-        containerWatchlistForm: {
-          title: "Thêm Container Vào Giám Sát",
-          desc: "Chọn mã cảng, nhập số container và chọn loại tác nghiệp cần theo dõi sát sao."
-        },
-        containerWatchlistList: {
-          title: "Theo Dõi Trạng Thái & Đồng Bộ",
-          desc: "Xem toàn bộ container trong danh sách giám sát và đồng bộ dữ liệu nhanh từ ePort SNP."
-        },
-        containerTable: {
-          title: "Bảng Thông Tin Container & Hải Quan",
-          desc: "Theo dõi chi tiết vị trí bãi, xe/tàu vận chuyển, trạng thái tờ khai Hải quan và tình trạng đóng phí Cơ sở hạ tầng cảng biển."
+          title: "Xem lại bất cứ lúc nào",
+          desc: "Bấm Hướng dẫn để chạy lại chuyến tham quan này, hoặc chỉ xem tính năng mới của màn hình đang mở."
         }
       }
     }
@@ -1314,6 +1448,7 @@ export const translations = {
         time: "Time",
         openVessel: "View in the Vessel tab",
         openContainer: "View in the Container tab",
+        openBooking: "View in the Booking tab",
         close: "Close",
       },
       kinds: {
@@ -1325,6 +1460,34 @@ export const translations = {
         vessel_open_gate: "Vessel gate-open time changed",
         vessel_eta: "Vessel ETA changed",
         vessel_etd: "Vessel ETD changed",
+        booking_cutoff: "Booking cut-off reminders (24h, 6h, 2h before)",
+        morning_brief: "Morning brief",
+      },
+      reminder: {
+        bookingCount: "{count} bookings",
+        cutoff: "Cut-off",
+        hoursLeft: "Left",
+        today: "Cut-offs today",
+        late: "Late",
+        tomorrow: "Tomorrow",
+        vesselsToday: "Vessels closing today",
+        dueToday: "Due today",
+        more: "and {count} more",
+        perCollection: "By collection",
+        allCollections: "Across all collections · only bookings not gated in yet",
+        nothingToday: "No booking reaches its cut-off today.",
+        passed: "cut-off passed",
+        leftMinutes: "{m} min left",
+        leftHours: "{h}h left",
+        leftHoursMinutes: "{h}h {m}m left",
+        tileToday: "Cut-offs today",
+        tileLate: "Late",
+        tileTomorrow: "Cut-offs tomorrow",
+        tileVessels: "Vessels closing today",
+        chipToday: "{count} today",
+        chipLate: "{count} late",
+        chipTomorrow: "{count} tomorrow",
+        chipVessels: "{count} vessels closing",
       },
       titles: {
         container_customs: "Container {name} cleared by customs",
@@ -1336,6 +1499,8 @@ export const translations = {
         vessel_eta: "Vessel {name}: ETA changed",
         vessel_etd: "Vessel {name}: ETD changed",
         vessel_schedule: "{name} changed",
+        booking_cutoff: "Cut-off in {hours}h: {name}",
+        morning_brief: "Morning brief {date}",
       },
       changeLabels: {
         vessel_etd: "ETD",
@@ -1350,9 +1515,12 @@ export const translations = {
         desc: "Choose which changes you want to be told about.",
         groupContainer: "Containers",
         groupVessel: "Vessels",
+        groupReminder: "Reminders",
+        briefTime: "Brief time",
+        briefTimeHint: "If the app is closed then, the brief still goes out when it opens within the next 5 hours.",
         os: "Show operating-system popups (also while the app is minimized to the tray)",
         osBrowser: "System popups are only available in the desktop app.",
-        requirement: "Automatic alerts only work while Auto-sync is on and the vessel / container is on the Watchlist.",
+        requirement: "Vessel / container change alerts only work while Auto-sync is on and the vessel / container is on the Watchlist. Reminders run while the app is open.",
         saveFailed: "Could not save the notification settings",
         test: "Send a test notification",
         testDone: "Test sent: the bell updates right away, the popup shows within seconds",
@@ -1376,6 +1544,74 @@ export const translations = {
       error: "Could not check for updates: {error}. Click to retry",
       openReleases: "Click to open the download page",
       notPackaged: "Auto-update is only available in the installed Windows app. Click to open the download page.",
+    },
+    exportManager: {
+      title: "Export to Excel",
+      managerTitle: "Excel export templates",
+      chooseTemplate: "Choose a template",
+      manage: "Manage templates",
+      edit: "Edit template",
+      close: "Close",
+      noTemplates: "No templates yet.",
+      noTemplatesHint: "No templates of your own yet. Click \"New template\" to pick the columns, order, names and colours you want.",
+      defaultFilename: "Default file name",
+      dragHint: "Drag ⠿ to reorder",
+      dragHandle: "Drag to reorder (or use the ↑ ↓ keys)",
+      customColor: "Custom colour",
+      colorSlider: "Pick a colour",
+      hexCode: "Colour code",
+      apply: "Use",
+      templates: "Export templates",
+      builtIn: "All columns",
+      builtInHint: "Built-in, cannot be renamed",
+      newTemplate: "New template",
+      newName: "New template",
+      columnsCount: "{count} columns",
+      name: "Template name",
+      namePlaceholder: "e.g. Fleet plan",
+      unsaved: "Unsaved",
+      duplicate: "Duplicate",
+      copySuffix: "(copy)",
+      delete: "Delete template",
+      deleteConfirm: "Delete the export template \"{name}\"? This cannot be undone.",
+      deleted: "Deleted template \"{name}\"",
+      discardConfirm: "This template has unsaved changes. Discard them?",
+      discard: "Discard",
+      columns: "Columns",
+      selectedCount: "{count}/{total} columns selected",
+      selectAll: "Select all",
+      selectNone: "Clear",
+      moveUp: "Move up",
+      moveDown: "Move down",
+      renamePlaceholder: "Keep original name",
+      colorTitle: "Column colour",
+      noColor: "No colour",
+      fillHeader: "Header",
+      fillColumn: "Column",
+      fillHint: "Colour the header only or the whole column",
+      preview: "Preview",
+      previewRows: "first {count} rows",
+      filePreview: "File preview",
+      filePreviewInfo: "first {shown} of {rows} rows · {columns} columns",
+      noColumns: "Pick at least one column to export",
+      filename: "File name",
+      filenameHint: "Click to insert:",
+      tokenDateValue: "Date: {value}",
+      tokenCollectionValue: "Collection: {value}",
+      tokenTitle: "Insert {token} at the cursor",
+      filenameResult: "File name:",
+      tokenDate: "date",
+      tokenCollection: "collection",
+      rows: "Export {count} rows",
+      save: "Save template",
+      saveAsNew: "Save as new template",
+      saved: "Saved template \"{name}\"",
+      savedPartially: "The server did not keep every change (usually the app needs a restart after an update). Your changes are still on screen: restart the app and save again.",
+      export: "Export Excel",
+      exporting: "Exporting...",
+      exported: "Exported {file}",
+      noData: "There are no rows to export",
+      loadFailed: "Could not load the templates",
     },
     common: {
       relativeTime: { justNow: "Just now", minutes: "{n} min ago", hours: "{n} h ago", days: "{n} days ago" },
@@ -1421,6 +1657,21 @@ export const translations = {
       deleteConfirm: "Are you sure you want to delete this?",
       clearConfirm: "Are you sure you want to clear all data in this collection?",
       stt: "No.",
+      columnFilter: {
+        button: "Filter by {col}",
+        active: "Filtering {n} values",
+        search: "Find...",
+        all: "Select all",
+        clear: "Clear filter",
+        empty: "(Blank)",
+        none: "No values",
+        loading: "Loading..."
+      },
+      sort: {
+        none: "Sort",
+        asc: "Sorted ascending",
+        desc: "Sorted descending"
+      },
       total: "Total",
       items: "rows",
       selected: "selected",
@@ -1635,8 +1886,8 @@ export const translations = {
     booking: {
       dropzoneTitle: "Drag & drop PDF or Booking Images here (or paste Ctrl+V)",
       dropzoneSubtitle: "Supports automatic extraction for PDFs and booking photos from Dongjin, PIL, CULINES, ONE, SITC, Cosco, Maersk and more",
-      scanImage: "Scan / Paste Image (OCR)",
-      scanImageTooltip: "Extract booking data from photo, scan, or screenshot",
+      scanImage: "Image queue",
+      scanImageTooltip: "Reopen the image reading queue to review results and save bookings",
       imageModal: {
         title: "Read & Check Bookings (PDF · Photo)",
         subtitle: "Automatically extract 14 booking fields from photos, documents, and screenshots",
@@ -1693,7 +1944,54 @@ export const translations = {
         "Vessel": "Vessel / Voyage",
         "ETD": "ETD",
         "Ghi chú": "Note",
-        "Thời gian thêm": "Added"
+        "Thời gian thêm": "Added",
+        "Trạng thái": "Status"
+      },
+      status: {
+        labels: {
+          new: "New",
+          dispatched: "Empty pickup dispatched",
+          stuffed: "Stuffed",
+          gated_in: "Gated in",
+          done: "Done",
+          cancelled: "Cancelled"
+        },
+        overdue: "Late",
+        overdueTooltip: "Late cut-off: the cut-off has passed and the booking is not gated in yet",
+        change: "Change status",
+        changeTitle: "Change status of {count} booking(s)",
+        changeSuccess: "Moved {count} booking(s) to \"{status}\"",
+        hideClosed: "Hide Done / Cancelled",
+        hideClosedTooltip: "Done and Cancelled bookings are hidden. Click to show them.",
+        showClosedTooltip: "Done and Cancelled bookings are shown. Click to hide them.",
+        autoHint: "A booking moves to \"Gated in\" by itself once an ePort container lookup shows all its containers gated in (export, full)."
+      },
+      calendar: {
+        viewTable: "Table",
+        viewCalendar: "Calendar",
+        viewTooltip: "Show a table or a week calendar by cut-off",
+        prevWeek: "Previous week",
+        nextWeek: "Next week",
+        weekNumber: "Week {n}",
+        pickDate: "Pick a day to show its week",
+        thisWeek: "This week",
+        lastWeek: "Last week",
+        followingWeek: "Next week",
+        weeksAgo: "{n} weeks ago",
+        weeksAhead: "In {n} weeks",
+        backToThisWeek: "Back to this week",
+        weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        summary: "{count} booking(s) this week",
+        lateSummary: "{count} late cut-off",
+        undated: "{count} booking(s) without a cut-off (not on the calendar)",
+        empty: "No cut-off",
+        allDay: "All day",
+        error: "Could not load the calendar",
+        filterCarrier: "Shipping line",
+        filterStatus: "Status",
+        onlyLate: "Late only",
+        filtersActive: "{count} filter(s) on",
+        clearFilters: "Clear filters"
       },
       noteQuick: {
         title: "Add note",
@@ -1914,9 +2212,67 @@ export const translations = {
         save: "Save to Vessels tab",
         saved: "Saved",
         saveSuccess: "Saved {count} schedule(s) to the Vessels tab"
+      },
+      links: {
+        vesselTitle: "Vessel schedule (ePort)",
+        vesselEmpty: "No schedule matches this booking's vessel + voyage yet.",
+        vesselEmptyHint: "Click \"Look up vessel\" to search ePort.",
+        noVessel: "This booking has no vessel.",
+        estimated: "EST",
+        estimatedTooltip: "Estimated (EST) cut-off on ePort, may still change",
+        berth: "Berthing",
+        departure: "Departure",
+        closing: "Cut-off",
+        openTs: "Gate open",
+        updated: "Updated {time}",
+        containerTitle: "Containers",
+        gatedIn: "{gated}/{qty} gated in",
+        gatedInNoQty: "{gated} gated in",
+        containerEmpty: "No container in the Containers tab carries this booking number yet.",
+        noBookingNo: "This booking has no booking number.",
+        gatedBadge: "Gated in",
+        openVesselTab: "Open Vessels tab",
+        openContainerTab: "Open Containers tab",
+        loadError: "Could not load vessel / container info"
       }
     },
     vessel: {
+      calendar: {
+        viewTable: "Table",
+        viewCalendar: "Calendar",
+        viewTooltip: "Show a table or a week calendar by closing time",
+        prevWeek: "Previous week",
+        nextWeek: "Next week",
+        weekNumber: "Week {n}",
+        pickDate: "Pick a day to show its week",
+        thisWeek: "This week",
+        lastWeek: "Last week",
+        followingWeek: "Next week",
+        weeksAgo: "{n} weeks ago",
+        weeksAhead: "In {n} weeks",
+        backToThisWeek: "Back to this week",
+        weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        empty: "No closing",
+        summary: "{count} vessel(s) closing this week",
+        soonSummary: "{count} closing soon (< 24h)",
+        undated: "{count} vessel(s) without a closing time (not on the calendar)",
+        estimated: "EST",
+        estimatedTooltip: "Estimated closing time on ePort, may still change",
+        closed: "Closed",
+        soon: "Closing soon",
+        etd: "ETD",
+        hoursLeft: "{h}h left",
+        minutesLeft: "{m} min left",
+        bookings: "{count} booking(s)",
+        bookingsOpen: "{count} not gated in",
+        bookingsTooltip: "Show the bookings on this vessel in the Booking tab",
+        error: "Could not load the vessel calendar",
+        filterSite: "Terminal",
+        filterAgent: "Agent",
+        onlySoon: "Closing soon only",
+        filtersActive: "{count} filter(s) on",
+        clearFilters: "Clear filters"
+      },
       trash: {
         button: "Trash",
         tooltip: "Deleted vessel schedule rows, kept for {days} days",
@@ -2169,12 +2525,12 @@ export const translations = {
     tour: {
       helpBtnTooltip: "User Guide & Feature Walkthrough",
       helpMenuTitle: "Help & Interactive Guide",
-      fullTourTitle: "🚀 Full App Tour (Overview)",
-      fullTourSubtitle: "Learn the end-to-end workflow and core features",
-      tabTourTitle: "💡 Current Tab Guide",
-      tabTourSubtitle: "Explore detailed tools on the active screen",
-      welcomeModalTitle: "Welcome to Auto Read PDF Pro v2.0!",
-      welcomeModalDesc: "Would you like to take a quick interactive tour (2 minutes) to explore key features and best practices?",
+      fullTourTitle: "✨ What's new (all new features)",
+      fullTourSubtitle: "Booking & vessel calendars, workflow status, vessel – container links, Excel templates, reminders",
+      tabTourTitle: "💡 New on this screen",
+      tabTourSubtitle: "Only the new features of the active tab",
+      welcomeModalTitle: "Auto Read PDF Pro has new features!",
+      welcomeModalDesc: "Bookings by cut-off on a calendar, workflow status, a booking's vessel and containers in its detail, Excel export templates, cut-off reminders and a morning brief. Take a one-minute look?",
       startTourBtn: "Start Tour Now",
       skipTourBtn: "Maybe Later",
       dontShowAgain: "Don't show this again",
@@ -2184,157 +2540,69 @@ export const translations = {
       btnSkip: "Skip",
       progressText: "{current} of {total}",
       steps: {
-        brand: {
-          title: "Auto Read PDF Pro v2.0",
-          desc: "Intelligent logistics and import/export data workspace: AI OCR extraction for PDF/images and automated tracking for SNP ePort vessel schedules & containers."
+        welcome: {
+          title: "✨ What's new",
+          desc: "A short tour of the new features: the booking calendar by cut-off, workflow status, booking links to vessels and containers, the vessel calendar by closing time, Excel export templates and reminders. The tour switches tabs as it goes and puts everything back when it ends."
         },
-        collection: {
-          title: "Collections Management",
-          desc: "Create and switch between isolated collections for different projects, shipments, or months. All booking, vessel, and container records are segregated per collection."
+        bookingViewToggle: {
+          title: "Table or calendar",
+          desc: "Switch the booking list between a table and a week calendar. The app remembers your choice."
         },
-        autoSync: {
-          title: "Automated Data Sync",
-          desc: "Toggle automatic background polling for all vessels and containers in your Watchlist (default every 10 minutes) without manual intervention."
+        bookingCalendar: {
+          title: "Bookings by cut-off",
+          desc: "Each booking sits on its cut-off day (ePort's time when known). Use ‹ › to change week or click the week to pick any date. Double-click a card to open it; change its status right on the card."
         },
-        colorRules: {
-          title: "Visual Color Rules",
-          desc: "Set up customizable color highlights for customs clearance statuses, unpaid infrastructure fees, closing cut-offs, and yard events to quickly spot operational risks."
+        bookingCalendarSummary: {
+          title: "The week at a glance",
+          desc: "Bookings this week, how many are past their cut-off (red ⚠), and how many have no cut-off time and so are not on the calendar."
         },
-        colorTarget: {
-          title: "1. Select Target Table & Column",
-          desc: "Choose target table (Container, Booking PDF, Vessel Schedule) and target column (or apply across 'All Columns')."
+        bookingCalendarFilters: {
+          title: "Calendar filters",
+          desc: "Filter by Carrier and Status (shared with the table), or turn on \"Late only\". Click \"Clear filters\" to drop them all."
         },
-        colorCondition: {
-          title: "2. Set Match Condition & Keyword",
-          desc: "Supports 5 match types: 'Exact Match', 'Contains Keyword', 'Starts With', 'Ends With', or 'Entire Column (any non-empty value)'. Enter the value you want highlighted."
+        vesselCalendarFilters: {
+          title: "Vessel calendar filters",
+          desc: "Filter by Terminal and Agent, or turn on \"Closing soon only\" to see vessels closing within 24 hours. Click \"Clear filters\" to drop them all."
         },
-        colorPalette: {
-          title: "3. Choose Color Palette & Preview",
-          desc: "Select from curated presets (Emerald, Rose, Amber, Sky, Purple) or specify custom HEX colors (Background, Border, Text). Live preview is rendered in real time."
+        bookingHideClosed: {
+          title: "Hide done / cancelled",
+          desc: "Done and cancelled bookings are hidden by default so the list shows only open work. Click to show them again."
         },
-        settings: {
-          title: "Settings & DB Backup",
-          desc: "Configure your Google Gemini API Key for high-speed AI image OCR, export safe JSON backups, or restore database state anytime."
+        bookingStatus: {
+          title: "Workflow status",
+          desc: "Each booking has a status: New → Empty pickup dispatched → Stuffed → Gated in → Done (or Cancelled). Change it in the row; filter by status from the column header. When ePort shows all containers gated in, the booking moves to \"Gated in\" by itself."
         },
-        langSwitch: {
-          title: "Language Switcher",
-          desc: "Instantly switch the interface language between Vietnamese (VI) and English (EN)."
+        bookingCutoff: {
+          title: "ePort cut-off & late warning",
+          desc: "Once the vessel has an ePort schedule, this column shows ePort's newer closing time (ePort badge); hover to see the booking's own time. An open booking past its cut-off gets a ⚠ Late mark. Copying a row takes this newer time too."
         },
-        themeToggle: {
-          title: "Dark / Light Mode",
-          desc: "Toggle between bright day mode and eye-friendly Dark Mode for late-night shifts."
+        bookingLinks: {
+          title: "A booking's vessel & containers",
+          desc: "Double-click a booking to open it: below the fields are the ePort schedule matching its vessel + voyage, and the containers carrying this booking number with how many are gated in out of the Q'ty. Use \"Open Vessels tab\" / \"Open Containers tab\" for the full view."
         },
-        navTabs: {
-          title: "Navigation Tabs",
-          desc: "Seamlessly navigate between 4 core modules: Overview Dashboard, Booking Manager (PDF/OCR), ePort Vessel Schedule, and Container Tracking."
+        exportTemplates: {
+          title: "Excel export templates",
+          desc: "Click Export Excel to pick a template: name it, choose columns, drag to reorder, rename and colour columns, set a default file name, and preview the file before downloading. Templates are kept for next time."
+        },
+        vesselViewToggle: {
+          title: "Vessels as a week calendar",
+          desc: "The Vessels tab has a calendar too: vessels laid out by closing time."
+        },
+        vesselCalendar: {
+          title: "By closing time",
+          desc: "Each card is a vessel: its closing time (EST = estimated), a mark when it closes within 24 hours, and how many of your bookings are on it. Click the booking count to see them."
+        },
+        reminders: {
+          title: "Cut-off reminders & morning brief",
+          desc: "The bell reminds you of bookings nearing cut-off (24h, 6h, 2h before) and sends a morning brief: today's cut-offs, late bookings, tomorrow's cut-offs and vessels closing today."
+        },
+        reminderSettings: {
+          title: "Reminder settings",
+          desc: "In Settings & Backup, Change notifications → Reminders: turn cut-off reminders and the morning brief on or off and pick the brief time. Reminders run while the app is open."
         },
         helpTour: {
-          title: "Help & Guided Tours",
-          desc: "Whenever you need assistance or want to review features, simply click this Help (?) button anytime!"
-        },
-        // Dashboard Tab
-        dashboardScope: {
-          title: "Data Scope",
-          desc: "Toggle between viewing aggregate system-wide metrics across all collections or focusing only on the current collection."
-        },
-        dashboardKPIs: {
-          title: "Key Performance Indicators (KPIs)",
-          desc: "Quickly track total estimated TEUs volume, uncleared customs count, and containers currently in the yard."
-        },
-        dashboardResources: {
-          title: "System Resources",
-          desc: "Live CPU and RAM usage of the app and the whole machine. When things slow down, use 'Free memory' or 'Restart background service' to release RAM."
-        },
-        dashboardAlerts: {
-          title: "Critical Operations Alerts",
-          desc: "Automated warnings for bookings approaching cut-off deadlines and uncleared containers in the yard, with 1-click 'Jump to' actions."
-        },
-        dashboardCharts: {
-          title: "Visual Breakdown & Analytics",
-          desc: "Analyze carrier distribution, volume breakdown across terminal sites (Cat Lai, Hiep Phuoc, Song Than...), and port yard event breakdown."
-        },
-        // Booking Tab
-        bookingDropzone: {
-          title: "Drag & Drop PDFs & Images",
-          desc: "Drop multiple PDF files or booking photos here (supports direct clipboard paste Ctrl+V / Cmd+V from screenshots). The system automatically extracts 14 fields instantly!"
-        },
-        bookingSearch: {
-          title: "Search & Filter Data",
-          desc: "Search quickly across Booking No, Carrier, Discharging Port, Empty CY, or Return CY with specific column filtering."
-        },
-        bookingAiOCR: {
-          title: "AI Vision & OCR Scanner",
-          desc: "Intelligent data extraction powered by Google Gemini Vision AI model, handling skewed phone photos, mobile screenshots, and scanned PDFs."
-        },
-        ocrDropzone: {
-          title: "Image Upload & Clipboard Paste (Ctrl+V)",
-          desc: "Drag & drop booking photos or paste directly from clipboard (Ctrl+V / Cmd+V). You can switch or re-upload images anytime."
-        },
-        ocrControls: {
-          title: "Rotate 90°, Zoom & AI Model Setup",
-          desc: "Easily rotate image 90° or zoom in/out to compare with original text. Configure custom Gemini API Key for high concurrency."
-        },
-        ocrFields: {
-          title: "Review & Save 14 Extracted Fields",
-          desc: "System auto-fills 14 fields: Booking No, Carrier, Discharging Port, Delivery CY, Equipment, Qty, Cut-off time, Vessel, ETD... Edit inline and click 'Save to Collection'."
-        },
-        bookingColumns: {
-          title: "Customize Columns",
-          desc: "Show, hide, reorder, or rename table columns according to your team's workflow."
-        },
-        bookingExport: {
-          title: "Export to Excel",
-          desc: "Export selected or all booking records to standardized Excel spreadsheets with 1 click."
-        },
-        bookingTable: {
-          title: "Data Grid & Row Actions",
-          desc: "Double click any row for full detail inspection, or use quick action buttons to copy rows directly to your clipboard."
-        },
-        // Vessel Tab
-        vesselQuery: {
-          title: "SNP ePort Vessel Schedule Lookup",
-          desc: "Select port site (CTL, GNL, THP, CMS, IST, TNT), enter vessel name and voyage to check ETA berth time, ETD departure, gate open, and cut-off deadlines."
-        },
-        vesselWatchlistBtn: {
-          title: "Manage Vessel Watchlist",
-          desc: "Open monitored vessel schedules list. When Auto-Sync is ON, schedules are periodically polled from SNP ePort to automatically update departure & cut-off times."
-        },
-        vesselWatchlistForm: {
-          title: "Add Vessel to Watchlist",
-          desc: "Select port terminal, enter vessel name and voyage to monitor automatically."
-        },
-        vesselWatchlistSync: {
-          title: "Sync & Monitor Tracked Vessels",
-          desc: "Click 'Sync Watchlist' to immediately refresh real-time statuses from SNP ePort, or remove completed voyages."
-        },
-        vesselTable: {
-          title: "Vessel Schedules & Bookmark",
-          desc: "View queried schedules with recent update badges. Click the bookmark icon in the Actions column to add or remove vessels from the Watchlist."
-        },
-        // Container Tab
-        containerQuery: {
-          title: "Container Tracking Lookup",
-          desc: "Enter batch container numbers (comma, space, or newline separated), with options for 'Last Cycle Only' or 'Batch search'."
-        },
-        containerEventPills: {
-          title: "Quick Event Filters",
-          desc: "Filter containers instantly by yard event: UNLOAD, INGATE, STACKING, OUTGATE, and LOAD."
-        },
-        containerWatchlistBtn: {
-          title: "Manage Container Watchlist",
-          desc: "Continuously monitor priority containers to receive instant notifications on yard movements and customs status."
-        },
-        containerWatchlistForm: {
-          title: "Add Container to Watchlist",
-          desc: "Select port terminal, enter container number and specify target yard event."
-        },
-        containerWatchlistList: {
-          title: "Status Monitoring & Quick Sync",
-          desc: "View all tracked containers in watchlist and trigger instant polling from SNP ePort."
-        },
-        containerTable: {
-          title: "Container Grid & Customs Status",
-          desc: "Monitor detailed yard locations, truck/vessel transport, Customs clearance status, and Port Infrastructure fee payment status."
+          title: "Replay any time",
+          desc: "Click Help to replay this tour, or just the new features of the screen you are on."
         }
       }
     }

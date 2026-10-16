@@ -66,7 +66,31 @@ def get_connection() -> ManagedConnection:
                 except sqlite3.OperationalError as e:
                     logger.warning(f"Could not enable WAL journal mode: {e}")
     conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.create_function("sort_key", 1, _sort_key, deterministic=True)
     return conn
+
+
+_SORT_DMY = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+_SORT_YMD = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+_SORT_TIME = re.compile(r"(?<![\d/])(\d{1,2}):(\d{2})(?::(\d{2}))?")
+_SORT_NUMBER = re.compile(r"\s*(-?\d+(?:[.,]\d+)?)\s*[A-Za-z%°]*\s*")
+
+
+def _sort_key(value) -> str:
+    """Table sort value: dates ('19/10/2026 10:00', 'EST: 14:00 16/10/2026', '2026-10-15 08:50:56') by
+    date and time, numbers ('18900 KGM', '-18') by value, anything else as upper-case text."""
+    text = str(value or "").strip()
+    date = _SORT_DMY.search(text)
+    ymd = (date.group(3), date.group(2), date.group(1)) if date else None
+    if not ymd and (iso := _SORT_YMD.search(text)):
+        ymd = iso.groups()
+    if ymd:
+        t = _SORT_TIME.search(text)
+        hms = (t.group(1), t.group(2), t.group(3) or "0") if t else ("0", "0", "0")
+        return "1" + "".join(f"{int(v):02d}" for v in (*ymd, *hms))
+    if number := _SORT_NUMBER.fullmatch(text):
+        return f"0{float(number.group(1).replace(',', '.')) + 1e12:024.6f}"
+    return "2" + text.upper()
 
 
 def _clean_ids(ids) -> list[int]:
@@ -345,7 +369,7 @@ def init_db():
             );
         """)
         _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT"), ("created_at", "TEXT"),
-                                           ("eport_cutoff", "TEXT"), ("eport_cutoff_at", "TEXT")])
+                                           ("eport_cutoff", "TEXT"), ("eport_cutoff_at", "TEXT"), ("status", "TEXT")])
 
         # Legacy vessel_schedules without collection_id are dropped and recreated
         vs_exists = conn.execute(
@@ -480,6 +504,30 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vessel_schedules_col_queried ON vessel_schedules(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_queried ON containers(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_event ON containers(collection_id, event_type);")
+
+        # Excel export templates (per tab): ordered columns with their header, colour and fill
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS export_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tab TEXT NOT NULL,
+                name TEXT NOT NULL,
+                filename TEXT NOT NULL DEFAULT '',
+                columns TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+
+        # Reminders already sent (kept apart from notifications, which the user may clear)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS booking_reminders (
+                booking_id INTEGER NOT NULL,
+                deadline TEXT NOT NULL,
+                threshold INTEGER NOT NULL,
+                sent_at TEXT NOT NULL,
+                PRIMARY KEY (booking_id, deadline, threshold)
+            );
+        """)
 
         # Change notifications (see the "Change notifications" section)
         conn.execute("""
@@ -620,13 +668,105 @@ def update_collection_settings(col_id: int, settings_str: str):
 # ---------------------------------------------------------------------------
 # Bookings
 # ---------------------------------------------------------------------------
+# Booking workflow status, stored as a stable code (labels live in the frontend translations)
+BOOKING_STATUSES = ("new", "dispatched", "stuffed", "gated_in", "done", "cancelled")
+BOOKING_STATUS_DEFAULT = "new"
+# Still being worked on: a passed cut-off is late, and ePort gate-ins can move them on to "gated_in"
+_BOOKING_OPEN_STATUSES = ("new", "dispatched", "stuffed")
+_BOOKING_CLOSED_STATUSES = ("done", "cancelled")
+_STATUS_EXPR = f"COALESCE(NULLIF(TRIM(status), ''), '{BOOKING_STATUS_DEFAULT}')"
+
+
+def _clean_status(value) -> str:
+    v = str(value or "").strip().lower()
+    return v if v in BOOKING_STATUSES else BOOKING_STATUS_DEFAULT
+
+
+def _cutoff_deadline(text) -> datetime | None:
+    """'19/10/2026 10:00' / '2026-10-19 10:00:00' -> aware datetime; a date without a time means the end of that day."""
+    text = str(text or "").strip()
+    date = _SORT_DMY.search(text)
+    ymd = (date.group(3), date.group(2), date.group(1)) if date else None
+    if not ymd and (iso := _SORT_YMD.search(text)):
+        ymd = iso.groups()
+    if not ymd:
+        return None
+    t = _SORT_TIME.search(text)
+    hm = (int(t.group(1)), int(t.group(2))) if t else (23, 59)
+    try:
+        return datetime(int(ymd[0]), int(ymd[1]), int(ymd[2]), *hm, tzinfo=VN_TZ)
+    except ValueError:
+        return None
+
+
+def _is_cutoff_overdue(row: dict, now: datetime | None = None) -> bool:
+    """An open booking whose cut-off (ePort's when known, else its own) has passed."""
+    if _clean_status(row.get("status")) not in _BOOKING_OPEN_STATUSES:
+        return False
+    deadline = _cutoff_deadline(row.get("eport_cutoff") or row.get("cutoff_time"))
+    return deadline is not None and deadline < (now or datetime.now(VN_TZ))
+
+
+_QTY_NUMBER = re.compile(r"\d+")
+
+
+def _gated_in_sql(alias: str) -> str:
+    """SQL test for a container event that is a full export container gated in at the port."""
+    event = f"REPLACE(UPPER({alias}.event_type), ' ', '')"
+    return (f"(UPPER(TRIM({alias}.fel)) = 'F' AND UPPER({alias}.im_exp) LIKE '%EXPORT%' "
+            f"AND ({event} LIKE '%INGATE%' OR {event} LIKE '%GATEIN%'))")
+
+
+def _sync_booking_gate_status(conn: sqlite3.Connection, col_id: int) -> int:
+    """Move open bookings to "gated_in" once ePort shows all their containers gated in full for export.
+
+    A container belongs to a booking when its BILL_BOOK is the booking number. Q'ty containers are needed
+    (1 when Q'ty is not a number). Status only ever moves forward; done / cancelled bookings are left alone.
+    Returns the number of bookings changed.
+    """
+    open_list = ",".join(f"'{s}'" for s in _BOOKING_OPEN_STATUSES)
+    rows = conn.execute(f"""
+        SELECT b.id, b.qty, COUNT(DISTINCT UPPER(TRIM(c.containerno)))
+        FROM bookings b
+        JOIN containers c ON c.collection_id = b.collection_id
+            AND UPPER(TRIM(c.bill_book)) = UPPER(TRIM(b.booking_no))
+        WHERE b.collection_id = ? AND TRIM(COALESCE(b.booking_no, '')) NOT IN ('', 'null')
+            AND {_STATUS_EXPR} IN ({open_list})
+            AND {_gated_in_sql("c")}
+        GROUP BY b.id;
+    """, (col_id,)).fetchall()
+    changed = 0
+    for booking_id, qty, gated in rows:
+        m = _QTY_NUMBER.search(str(qty or ""))
+        needed = max(int(m.group()), 1) if m else 1
+        if gated >= needed:
+            conn.execute("UPDATE bookings SET status = 'gated_in' WHERE id = ?;", (booking_id,))
+            changed += 1
+    if changed:
+        logger.info(f"{changed} booking(s) of collection {col_id} moved to gated_in from ePort gate-ins")
+    return changed
+
+
+def set_booking_status(ids: list[int], status: str) -> int:
+    if status not in BOOKING_STATUSES:
+        raise ValueError(f"Invalid booking status: {status}")
+    clean = _clean_ids(ids)
+    changed = 0
+    with get_connection() as conn:
+        for chunk in _chunks(clean):
+            placeholders = ",".join(["?"] * len(chunk))
+            cur = conn.execute(f"UPDATE bookings SET status = ? WHERE id IN ({placeholders});", (status, *chunk))
+            changed += max(cur.rowcount, 0)
+    return changed
+
+
 def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
     cursor.execute("""
         INSERT INTO bookings (
             collection_id, pdf_name, booking_no, carrier, port_of_discharging, place_of_delivery, block_val,
             ts_port, equipment_type, qty, empty_pickup_cy, full_return_cy,
-            cutoff_time, vessel, etd, note, created_at, eport_cutoff, eport_cutoff_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            cutoff_time, vessel, etd, note, created_at, eport_cutoff, eport_cutoff_at, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, (
         col_id,
         data.get("Tên file PDF", data.get("pdf_name", "")),
@@ -649,6 +789,8 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         # ePort cut-off is derived data; only restored backups carry it in (new bookings get it from _sync_...)
         data.get("Cut-off ePort", data.get("eport_cutoff")) or "",
         data.get("Cut-off ePort cập nhật", data.get("eport_cutoff_at")) or "",
+        # restored backups keep their status; everything else starts as "new"
+        _clean_status(data.get("Trạng thái", data.get("status"))),
     ))
     return cursor.lastrowid
 
@@ -690,6 +832,8 @@ def insert_booking(col_id: int, data: dict) -> int:
         booking_id = _insert_booking_row(conn.cursor(), col_id, data)
         # a vessel looked up earlier already knows its cut-off
         _sync_booking_eport_cutoffs(conn, col_id, [booking_id])
+        # its containers may already have been looked up
+        _sync_booking_gate_status(conn, col_id)
         return booking_id
 
 
@@ -751,9 +895,20 @@ _BOOKING_ALL_FIELDS = ("pdf_name", "booking_no", "carrier", "port_of_discharging
                        "ts_port", "equipment_type", "empty_pickup_cy", "full_return_cy", "vessel", "etd", "note")
 
 
-def _booking_where(col_id: int, search_query: str = None, search_field: str = None) -> tuple[str, list]:
+def _booking_where(col_id: int, search_query: str = None, search_field: str = None,
+                   carriers: list[str] = None, statuses: list[str] = None,
+                   hide_closed: bool = False) -> tuple[str, list]:
     where = "collection_id = ?"
     params: list = [col_id]
+    extra, extra_params = _values_filter("carrier", carriers)  # '' picks bookings without a carrier
+    where += extra
+    params.extend(extra_params)
+    if statuses:
+        where += f" AND {_STATUS_EXPR} IN ({','.join('?' * len(statuses))})"
+        params.extend(statuses)
+    if hide_closed and not statuses:  # statuses picked in the column filter win over the toolbar toggle
+        where += f" AND {_STATUS_EXPR} NOT IN ({','.join('?' * len(_BOOKING_CLOSED_STATUSES))})"
+        params.extend(_BOOKING_CLOSED_STATUSES)
     if search_query:
         q = f"%{search_query}%"
         if search_field and search_field != "all" and search_field in BOOKING_SEARCH_COLUMNS:
@@ -807,11 +962,62 @@ def _booking_row_to_api(row: dict) -> dict:
         "Thời gian thêm": row.get("created_at") or "",
         "Cut-off ePort": row.get("eport_cutoff") or "",
         "Cut-off ePort cập nhật": row.get("eport_cutoff_at") or "",
+        "Trạng thái": _clean_status(row.get("status")),
+        "Trễ cut-off": _is_cutoff_overdue(row),
     }
 
 
 # Newest bookings first in every list the UI shows
 _BOOKING_ORDER = "ORDER BY id DESC"
+
+
+# Table column (API key) -> stored column
+_BOOKING_SORT_COLUMNS = {
+    "Tên file PDF": "pdf_name", "Booking No": "booking_no", "Carrier": "carrier",
+    "Port of Discharging": "port_of_discharging", "Place of Delivery": "place_of_delivery", "Block": "block_val",
+    "T/S Port": "ts_port", "Equipment Type": "equipment_type", "Q'ty": "qty", "Empty Pick Up CY": "empty_pickup_cy",
+    "Full return CY": "full_return_cy", "Port Cargo Cut-off": "cutoff_time", "Vessel": "vessel", "ETD": "etd",
+    "Ghi chú": "note", "Thời gian thêm": "created_at",
+}
+
+
+def _sort_order(col: str, sort_dir: str = None, tiebreak: str = "id DESC") -> str:
+    """ORDER BY a stored column via sort_key(); blank / 'null' values stay last in both directions."""
+    direction = "DESC" if (sort_dir or "").lower() == "desc" else "ASC"
+    blank = f"({col} IS NULL OR TRIM({col}) IN ('', 'null'))"
+    return f"ORDER BY {blank}, sort_key({col}) {direction}, {tiebreak}"
+
+
+def _blank_as_empty(col: str) -> str:
+    return f"COALESCE(NULLIF(TRIM({col}), 'null'), '')"
+
+
+def _values_filter(col: str, values: list[str] = None) -> tuple[str, list]:
+    """' AND col IN (...)' for a column filter ('' picks blank / 'null' values)."""
+    if not values:
+        return "", []
+    return f" AND {_blank_as_empty(col)} IN ({','.join('?' * len(values))})", list(values)
+
+
+def _value_counts(table: str, col: str, col_id: int) -> list[dict]:
+    """Distinct values of a column in a collection with their row counts ('' = blank), for a column filter."""
+    expr = _blank_as_empty(col)
+    with get_connection() as conn:
+        rows = conn.execute(f"SELECT {expr} AS v, COUNT(*) FROM {table} WHERE collection_id = ? GROUP BY v ORDER BY v;",
+                            (col_id,)).fetchall()
+    return [{"carrier": v, "count": n} for v, n in rows]
+
+
+def _booking_order(sort_by: str = None, sort_dir: str = None) -> str:
+    """ORDER BY for a table column; blank / 'null' values stay last in both directions."""
+    if sort_by == "Trạng thái":
+        # workflow order, not alphabetical
+        rank = " ".join(f"WHEN '{s}' THEN {i}" for i, s in enumerate(BOOKING_STATUSES))
+        direction = "DESC" if (sort_dir or "").lower() == "desc" else "ASC"
+        return f"ORDER BY CASE {_STATUS_EXPR} {rank} END {direction}, id DESC"
+    if sort_by not in _BOOKING_SORT_COLUMNS:
+        return _BOOKING_ORDER
+    return _sort_order(_BOOKING_SORT_COLUMNS[sort_by], sort_dir)
 
 
 def get_bookings(col_id: int, search_query: str = None, search_field: str = None, newest_first: bool = True) -> list[dict]:
@@ -823,21 +1029,81 @@ def get_bookings(col_id: int, search_query: str = None, search_field: str = None
 
 
 def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
-                      search_query: str = None, search_field: str = None) -> dict:
+                      search_query: str = None, search_field: str = None,
+                      sort_by: str = None, sort_dir: str = None, carriers: list[str] = None,
+                      statuses: list[str] = None, hide_closed: bool = False) -> dict:
     limit, offset = _page_bounds(limit, offset)
-    where, params = _booking_where(col_id, search_query, search_field)
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+    order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
-        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {_BOOKING_ORDER} LIMIT ? OFFSET ?;",
+        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {order} LIMIT ? OFFSET ?;",
                              (*params, limit, offset))
     return {"items": [_booking_row_to_api(r) for r in rows], "total": total}
 
 
-def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
-    where, params = _booking_where(col_id, search_query, search_field)
+def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None,
+                    sort_by: str = None, sort_dir: str = None, carriers: list[str] = None,
+                    statuses: list[str] = None, hide_closed: bool = False) -> list[int]:
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+    order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
-        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {_BOOKING_ORDER};",
+        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {order};",
                                            tuple(params)).fetchall()]
+
+
+def get_booking_carriers(col_id: int) -> list[dict]:
+    """Carriers of a collection with their booking counts ('' = no carrier), for the column filter."""
+    return _value_counts("bookings", "carrier", col_id)
+
+
+# The cut-off a booking is planned by: ePort's closing time when known, else the booking's own
+_DEADLINE_EXPR = ("CASE WHEN TRIM(COALESCE(eport_cutoff, '')) NOT IN ('', 'null') "
+                  "THEN eport_cutoff ELSE cutoff_time END")
+
+
+def _calendar_day_key(day: str) -> str:
+    """'2026-10-19' -> the sort_key() prefix of that date ('120261019')."""
+    return "1" + datetime.strptime(day, "%Y-%m-%d").strftime("%Y%m%d")
+
+
+def get_bookings_calendar(col_id: int, date_from: str, date_to: str, search_query: str = None,
+                          search_field: str = None, carriers: list[str] = None, statuses: list[str] = None,
+                          hide_closed: bool = False) -> dict:
+    """Bookings whose cut-off falls between two days (inclusive, 'YYYY-MM-DD'), earliest first, with the same
+    filters as the table. Each item carries "Hạn cut-off" ('YYYY-MM-DD HH:MM') and "Cut-off cả ngày" (no time
+    given: due by the end of the day). `undated` counts the matching bookings that have no readable cut-off."""
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+    day = f"substr(sort_key({_DEADLINE_EXPR}), 1, 9)"
+    with get_connection() as conn:
+        rows = _select_dicts(
+            conn, f"SELECT * FROM bookings WHERE {where} AND {day} BETWEEN ? AND ? "
+                  f"ORDER BY sort_key({_DEADLINE_EXPR}), id;",
+            (*params, _calendar_day_key(date_from), _calendar_day_key(date_to)))
+        undated = conn.execute(
+            f"SELECT COUNT(*) FROM bookings WHERE {where} AND sort_key({_DEADLINE_EXPR}) NOT LIKE '1%';",
+            tuple(params)).fetchone()[0]
+    items = []
+    for r in rows:
+        text = r.get("eport_cutoff") or r.get("cutoff_time")
+        deadline = _cutoff_deadline(text)
+        if deadline is None:
+            continue
+        item = _booking_row_to_api(r)
+        item["Hạn cut-off"] = deadline.strftime("%Y-%m-%d %H:%M")
+        item["Cut-off cả ngày"] = not _SORT_TIME.search(str(text or ""))
+        items.append(item)
+    # date-only cut-offs count as 23:59: keep the list in deadline order
+    items.sort(key=lambda i: (i["Hạn cut-off"], -i["id"]))
+    return {"items": items, "undated": undated}
+
+
+def get_booking_status_counts(col_id: int) -> list[dict]:
+    """Statuses used in a collection with their booking counts, in workflow order, for the column filter."""
+    with get_connection() as conn:
+        counts = dict(conn.execute(f"SELECT {_STATUS_EXPR} AS s, COUNT(*) FROM bookings WHERE collection_id = ? GROUP BY s;",
+                                   (col_id,)).fetchall())
+    return [{"status": s, "count": counts[s]} for s in BOOKING_STATUSES if counts.get(s)]
 
 
 def get_bookings_by_ids(ids: list[int]) -> list[dict]:
@@ -1323,23 +1589,119 @@ def get_vessel_schedules(col_id: int, search_query: str = None, search_field: st
         return _select_dicts(conn, f"SELECT * FROM vessel_schedules WHERE {where} {_VESSEL_ORDER};", tuple(params))
 
 
+def _vessel_order(sort_by: str = None, sort_dir: str = None) -> str:
+    if sort_by not in VESSEL_SEARCH_COLUMNS:
+        return _VESSEL_ORDER
+    return _sort_order(sort_by, sort_dir, "queried_at DESC, id ASC")
+
+
 def get_vessel_schedules_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
-                              search_query: str = None, search_field: str = None) -> dict:
+                              search_query: str = None, search_field: str = None,
+                              sort_by: str = None, sort_dir: str = None) -> dict:
     limit, offset = _page_bounds(limit, offset)
     where, params = _vessel_where(col_id, search_query, search_field)
+    order = _vessel_order(sort_by, sort_dir)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM vessel_schedules WHERE {where};", tuple(params)).fetchone()[0]
         items = _select_dicts(
-            conn, f"SELECT * FROM vessel_schedules WHERE {where} {_VESSEL_ORDER} LIMIT ? OFFSET ?;",
+            conn, f"SELECT * FROM vessel_schedules WHERE {where} {order} LIMIT ? OFFSET ?;",
             (*params, limit, offset))
     return {"items": items, "total": total}
 
 
-def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
+CLOSING_SOON_HOURS = 24
+
+
+def get_vessel_calendar(col_id: int, date_from: str, date_to: str, search_query: str = None,
+                        search_field: str = None, now: datetime | None = None) -> dict:
+    """Vessel schedules whose closing time (cắt máng) falls between two days (inclusive, 'YYYY-MM-DD'),
+    earliest first. Each item adds "calendar_deadline" ('YYYY-MM-DD HH:MM'), "closing_estimated" (ePort's
+    time is still an estimate), "closing_state" ('closed' | 'soon' | 'open'), and the collection's bookings
+    on that vessel + voyage: "booking_count" and "booking_open_count" (not gated in / done / cancelled yet).
+    `undated` counts the matching schedules without a readable closing time."""
+    where, params = _vessel_where(col_id, search_query, search_field)
+    day = "substr(sort_key(closing_time), 1, 9)"
+    with get_connection() as conn:
+        rows = _select_dicts(
+            conn, f"SELECT * FROM vessel_schedules WHERE {where} AND {day} BETWEEN ? AND ? "
+                  f"ORDER BY sort_key(closing_time), id;",
+            (*params, _calendar_day_key(date_from), _calendar_day_key(date_to)))
+        undated = conn.execute(
+            f"SELECT COUNT(*) FROM vessel_schedules WHERE {where} AND sort_key(closing_time) NOT LIKE '1%';",
+            tuple(params)).fetchone()[0]
+        bookings = conn.execute(
+            f"SELECT vessel, {_STATUS_EXPR} FROM bookings WHERE collection_id = ? "
+            "AND TRIM(COALESCE(vessel, '')) NOT IN ('', 'null');", (col_id,)).fetchall() if rows else []
+    now = now or datetime.now(VN_TZ)
+    items = []
+    for r in rows:
+        deadline = _cutoff_deadline(r.get("closing_time"))
+        if deadline is None:
+            continue
+        hours_left = (deadline - now).total_seconds() / 3600
+        mine = [status for vessel, status in bookings if text_matches_schedule(vessel, r)]
+        items.append({
+            **r,
+            "calendar_deadline": deadline.strftime("%Y-%m-%d %H:%M"),
+            "closing_estimated": "EST" in str(r.get("closing_time") or "").upper(),
+            "closing_state": "closed" if hours_left < 0 else "soon" if hours_left <= CLOSING_SOON_HOURS else "open",
+            "booking_count": len(mine),
+            "booking_open_count": sum(1 for status in mine if status in _BOOKING_OPEN_STATUSES),
+        })
+    return {"items": items, "undated": undated}
+
+
+def get_booking_links(booking_id: int) -> dict | None:
+    """The ePort vessel schedules and containers of one booking, or None when there is no such booking.
+
+    "vessels": the collection's schedules naming the booking's vessel + voyage (same strict match as the
+    ePort cut-off; one per port site). "containers": one row per container whose BILL_BOOK is the booking
+    number, its latest event first, with "gated_in" when any of its events is the export gate-in that moves
+    the booking to "gated_in". "gated_in" / "qty": how many are gated in, out of the booking's Q'ty.
+    """
+    with get_connection() as conn:
+        found = _select_dicts(conn, "SELECT collection_id, booking_no, vessel, qty FROM bookings WHERE id = ?;",
+                              (booking_id,))
+        if not found:
+            return None
+        b = found[0]
+        col_id, booking_no, vessel = b["collection_id"], _s(b.get("booking_no")), _s(b.get("vessel"))
+        vessels = []
+        if vessel and vessel.lower() != "null":
+            schedules = _select_dicts(conn, "SELECT * FROM vessel_schedules WHERE collection_id = ? "
+                                            "ORDER BY site_id, id;", (col_id,))
+            vessels = [s for s in schedules if text_matches_schedule(vessel, s)]
+        events = []
+        if booking_no and booking_no.lower() != "null":
+            events = _select_dicts(
+                conn, f"SELECT c.*, {_gated_in_sql('c')} AS gate_event FROM containers c "
+                      "WHERE c.collection_id = ? AND UPPER(TRIM(c.bill_book)) = UPPER(?) "
+                      "ORDER BY sort_key(c.event_time) DESC, c.id DESC;", (col_id, booking_no))
+    containers: dict[str, dict] = {}
+    for e in events:
+        gated = bool(e.pop("gate_event"))
+        latest = containers.get(e["containerno"])
+        if latest is None:
+            containers[e["containerno"]] = {**_enrich_container_row(e), "gated_in": gated}
+        elif gated:
+            latest["gated_in"] = True
+    rows = sorted(containers.values(), key=lambda c: c["containerno"])
+    m = _QTY_NUMBER.search(_s(b.get("qty")))
+    return {
+        "vessels": [{**s, "closing_estimated": "EST" in str(s.get("closing_time") or "").upper()} for s in vessels],
+        "containers": rows,
+        "gated_in": sum(1 for c in rows if c["gated_in"]),
+        "qty": int(m.group()) if m else None,
+    }
+
+
+def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None,
+                            sort_by: str = None, sort_dir: str = None) -> list[int]:
     where, params = _vessel_where(col_id, search_query, search_field)
     with get_connection() as conn:
         return [r[0] for r in conn.execute(
-            f"SELECT id FROM vessel_schedules WHERE {where} {_VESSEL_ORDER};", tuple(params)).fetchall()]
+            f"SELECT id FROM vessel_schedules WHERE {where} {_vessel_order(sort_by, sort_dir)};",
+            tuple(params)).fetchall()]
 
 
 def get_vessel_schedules_by_ids(ids: list[int]) -> list[dict]:
@@ -1546,6 +1908,7 @@ def insert_containers(col_id: int, containers: list[dict], source: str = "manual
         changes = _safely(_detect_container_changes, conn, col_id, containers, enabled)
         ids = _insert_container_rows(conn.cursor(), col_id, containers, _now_str())
         _safely(_record_notifications, conn, col_id, changes or [], source)
+        _safely(_sync_booking_gate_status, conn, col_id)
         return ids
 
 
@@ -1563,9 +1926,10 @@ _CONTAINER_ORDER = "ORDER BY queried_at DESC, id ASC"
 
 
 def _container_where(col_id: int, search_query: str = None, search_field: str = None,
-                     event_type: str = None) -> tuple[str, list]:
-    where = "collection_id = ?"
-    params: list = [col_id]
+                     event_type: str = None, line_opers: list[str] = None) -> tuple[str, list]:
+    where, params = _values_filter("line_oper", line_opers)
+    where = "collection_id = ?" + where
+    params: list = [col_id, *params]
     if search_query:
         q = f"%{search_query}%"
         if search_field and search_field != "all" and search_field in CONTAINER_SEARCH_COLUMNS:
@@ -1595,11 +1959,20 @@ def get_containers(col_id: int, search_query: str = None, search_field: str = No
     return [_enrich_container_row(r) for r in rows]
 
 
+def _container_order(sort_by: str = None, sort_dir: str = None) -> str:
+    if sort_by not in CONTAINER_SEARCH_COLUMNS:
+        return _CONTAINER_ORDER
+    col = CUSTOMS_STATUS_SQL if sort_by == "customs_status" else sort_by
+    return _sort_order(col, sort_dir, "queried_at DESC, id ASC")
+
+
 def get_containers_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0, search_query: str = None,
-                        search_field: str = None, event_type: str = None) -> dict:
+                        search_field: str = None, event_type: str = None,
+                        sort_by: str = None, sort_dir: str = None, line_opers: list[str] = None) -> dict:
     limit, offset = _page_bounds(limit, offset)
-    base_where, base_params = _container_where(col_id, search_query, search_field)
-    where, params = _container_where(col_id, search_query, search_field, event_type)
+    # event type counts follow every other filter, so the event tabs show what each would list
+    base_where, base_params = _container_where(col_id, search_query, search_field, None, line_opers)
+    where, params = _container_where(col_id, search_query, search_field, event_type, line_opers)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM containers WHERE {where};", tuple(params)).fetchone()[0]
         counts = {
@@ -1609,17 +1982,24 @@ def get_containers_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: in
             ).fetchall()
         }
         rows = _select_dicts(
-            conn, f"SELECT * FROM containers WHERE {where} {_CONTAINER_ORDER} LIMIT ? OFFSET ?;",
+            conn, f"SELECT * FROM containers WHERE {where} {_container_order(sort_by, sort_dir)} LIMIT ? OFFSET ?;",
             (*params, limit, offset))
     return {"items": [_enrich_container_row(r) for r in rows], "total": total, "event_type_counts": counts}
 
 
 def get_container_ids(col_id: int, search_query: str = None, search_field: str = None,
-                      event_type: str = None) -> list[int]:
-    where, params = _container_where(col_id, search_query, search_field, event_type)
+                      event_type: str = None, sort_by: str = None, sort_dir: str = None,
+                      line_opers: list[str] = None) -> list[int]:
+    where, params = _container_where(col_id, search_query, search_field, event_type, line_opers)
     with get_connection() as conn:
         return [r[0] for r in conn.execute(
-            f"SELECT id FROM containers WHERE {where} {_CONTAINER_ORDER};", tuple(params)).fetchall()]
+            f"SELECT id FROM containers WHERE {where} {_container_order(sort_by, sort_dir)};",
+            tuple(params)).fetchall()]
+
+
+def get_container_line_opers(col_id: int) -> list[dict]:
+    """Line operators of a collection's containers with their counts, for the column filter."""
+    return _value_counts("containers", "line_oper", col_id)
 
 
 def get_containers_by_ids(ids: list[int]) -> list[dict]:
@@ -1769,24 +2149,46 @@ def _safely(fn, *args):
         return None
 
 
+BRIEF_TIME_DEFAULT = "07:30"
+_HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _load_kind_list(key: str):
+    raw = get_system_setting(key, "")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
 def get_notification_settings() -> dict:
-    """{"kinds": set of enabled kinds (default: all), "os_enabled": bool}"""
+    """{"kinds": set of enabled kinds (default: all), "os_enabled": bool, "brief_time": "HH:MM"}
+
+    A kind the user has never been offered (added after their settings were saved) is on."""
     kinds = set(cd.ALL_KINDS)
-    raw = get_system_setting("notify_kinds", "")
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                kinds = {k for k in parsed if k in cd.ALL_KINDS}
-        except (TypeError, ValueError):
-            pass
-    return {"kinds": kinds, "os_enabled": get_system_setting("notify_os", "1") != "0"}
+    saved = _load_kind_list("notify_kinds")
+    if saved is not None:
+        known = set(_load_kind_list("notify_kinds_known") or cd.LEGACY_KINDS)
+        kinds = {k for k in cd.ALL_KINDS if k in saved or k not in known}
+    brief = get_system_setting("notify_brief_time", BRIEF_TIME_DEFAULT)
+    return {"kinds": kinds, "os_enabled": get_system_setting("notify_os", "1") != "0",
+            "brief_time": brief if _HHMM.match(brief or "") else BRIEF_TIME_DEFAULT}
 
 
-def set_notification_settings(kinds, os_enabled: bool) -> dict:
+def set_notification_settings(kinds, os_enabled: bool, brief_time: str | None = None) -> dict:
+    """`brief_time` None keeps the current one."""
     clean = [k for k in cd.ALL_KINDS if k in set(kinds or [])]
     set_system_setting("notify_kinds", json.dumps(clean))
+    set_system_setting("notify_kinds_known", json.dumps(list(cd.ALL_KINDS)))
     set_system_setting("notify_os", "1" if os_enabled else "0")
+    if brief_time is not None:
+        m = _HHMM.match(brief_time.strip())
+        if not m:
+            raise ValueError(f"Invalid brief time: {brief_time}")
+        set_system_setting("notify_brief_time", f"{int(m.group(1)):02d}:{m.group(2)}")
     return get_notification_settings()
 
 
@@ -1951,11 +2353,267 @@ def _record_notifications(conn: sqlite3.Connection, col_id: int, changes: list[d
         _insert_notification(conn, col_id, ch, source, stamp)
         added += 1
     if added:
-        old = (now - timedelta(days=NOTIFY_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute("DELETE FROM notifications WHERE created_at < ?;", (old,))
-        conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?);",
-                     (NOTIFY_KEEP_MAX,))
+        _trim_notifications(conn, now)
     return added
+
+
+def _trim_notifications(conn: sqlite3.Connection, now: datetime) -> None:
+    """Keep NOTIFY_KEEP_DAYS days and at most NOTIFY_KEEP_MAX notifications (`now` naive VN time)."""
+    old = (now - timedelta(days=NOTIFY_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM notifications WHERE created_at < ?;", (old,))
+    conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?);",
+                 (NOTIFY_KEEP_MAX,))
+
+
+# ---------------------------------------------------------------------------
+# Excel export templates
+# ---------------------------------------------------------------------------
+EXPORT_TABS = ("booking", "vessel", "container")
+EXPORT_NAME_MAX = 80
+
+
+def _clean_export_columns(columns) -> list[dict]:
+    """Ordered [{key, header, color, fill}]: fill "header" unless "column", keys unique. An unreadable colour is an
+    error (ValueError), not dropped."""
+    from backend.app.services.exporter import EXPORT_FILLS, normalize_export_color
+    out, seen = [], set()
+    for c in columns or []:
+        if not isinstance(c, dict):
+            continue
+        key = str(c.get("key") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        raw_color = c.get("color")
+        color = normalize_export_color(raw_color)
+        if raw_color not in (None, "") and color is None:
+            # never drop a colour silently: the user would see their change vanish after saving
+            raise ValueError(f"Màu không hợp lệ ở cột \"{key}\": {raw_color}")
+        fill = c.get("fill") if c.get("fill") in EXPORT_FILLS else "header"
+        out.append({"key": key, "header": str(c.get("header") or "").strip()[:120], "color": color, "fill": fill})
+    return out
+
+
+def _export_template_to_api(row: dict) -> dict:
+    try:
+        columns = json.loads(row["columns"] or "[]")
+    except (TypeError, ValueError):
+        columns = []
+    return {"id": row["id"], "tab": row["tab"], "name": row["name"], "filename": row["filename"] or "",
+            "columns": columns, "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+
+def _check_export_template(conn: sqlite3.Connection, tab: str, name: str, columns, exclude_id: int | None) -> tuple[str, list]:
+    if tab not in EXPORT_TABS:
+        raise ValueError("Tab không hợp lệ")
+    name = " ".join(str(name or "").split())[:EXPORT_NAME_MAX]
+    if not name:
+        raise ValueError("Cần đặt tên cho mẫu xuất")
+    clean = _clean_export_columns(columns)
+    if not clean:
+        raise ValueError("Mẫu xuất cần ít nhất một cột")
+    # compared in Python: SQLite's LOWER() leaves Vietnamese letters as they are
+    others = conn.execute("SELECT name FROM export_templates WHERE tab = ? AND id != ?;",
+                          (tab, exclude_id if exclude_id is not None else -1)).fetchall()
+    if any((n or "").casefold() == name.casefold() for (n,) in others):
+        raise ValueError(f"Đã có mẫu xuất tên \"{name}\"")
+    return name, clean
+
+
+def list_export_templates(tab: str) -> list[dict]:
+    with get_connection() as conn:
+        rows = _select_dicts(conn, "SELECT * FROM export_templates WHERE tab = ? ORDER BY id;", (tab,))
+    rows.sort(key=lambda r: ((r["name"] or "").casefold(), r["id"]))
+    return [_export_template_to_api(r) for r in rows]
+
+
+def create_export_template(tab: str, name: str, columns, filename: str = "") -> dict:
+    now = _now_str()
+    with get_connection() as conn:
+        name, clean = _check_export_template(conn, tab, name, columns, None)
+        cur = conn.execute(
+            "INSERT INTO export_templates (tab, name, filename, columns, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);",
+            (tab, name, str(filename or "").strip()[:200], json.dumps(clean, ensure_ascii=False), now, now))
+        row = _select_dicts(conn, "SELECT * FROM export_templates WHERE id = ?;", (cur.lastrowid,))[0]
+    return _export_template_to_api(row)
+
+
+def update_export_template(template_id: int, name: str, columns, filename: str = "") -> dict | None:
+    with get_connection() as conn:
+        current = conn.execute("SELECT tab FROM export_templates WHERE id = ?;", (template_id,)).fetchone()
+        if not current:
+            return None
+        name, clean = _check_export_template(conn, current[0], name, columns, template_id)
+        conn.execute("UPDATE export_templates SET name = ?, filename = ?, columns = ?, updated_at = ? WHERE id = ?;",
+                     (name, str(filename or "").strip()[:200], json.dumps(clean, ensure_ascii=False), _now_str(),
+                      template_id))
+        row = _select_dicts(conn, "SELECT * FROM export_templates WHERE id = ?;", (template_id,))[0]
+    return _export_template_to_api(row)
+
+
+def delete_export_template(template_id: int) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM export_templates WHERE id = ?;", (template_id,))
+        return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Reminders: cut-off coming up, morning brief
+# ---------------------------------------------------------------------------
+CUTOFF_REMINDER_HOURS = (24, 6, 2)
+BRIEF_WINDOW_HOURS = 5  # a brief missed while the app was closed still goes out this long after its time
+BRIEF_LIST_LIMIT = 10
+
+
+def _left_text(delta: timedelta) -> str:
+    minutes = max(0, int(delta.total_seconds() // 60))
+    if minutes < 60:
+        return f"{minutes} phút"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} giờ {rest} phút" if rest and hours < 6 else f"{hours} giờ"
+
+
+def _open_bookings_with_deadline(conn: sqlite3.Connection, col_ids: list[int] | None = None) -> list[dict]:
+    """Open bookings (new / dispatched / stuffed) with their cut-off as an aware datetime under "deadline"."""
+    open_list = ",".join(f"'{s}'" for s in _BOOKING_OPEN_STATUSES)
+    where = f"{_STATUS_EXPR} IN ({open_list})"
+    params: tuple = ()
+    if col_ids is not None:
+        clean = _clean_ids(col_ids) or [-1]
+        where += f" AND collection_id IN ({','.join('?' * len(clean))})"
+        params = tuple(clean)
+    rows = _select_dicts(conn, f"SELECT id, collection_id, booking_no, vessel, carrier, cutoff_time, eport_cutoff "
+                               f"FROM bookings WHERE {where} ORDER BY id;", params)
+    out = []
+    for r in rows:
+        deadline = _cutoff_deadline(r.get("eport_cutoff") or r.get("cutoff_time"))
+        if deadline is not None:
+            out.append({**r, "deadline": deadline})
+    return out
+
+
+def scan_cutoff_reminders(now: datetime | None = None, col_ids: list[int] | None = None) -> int:
+    """Remind of open bookings whose cut-off is 24h / 6h / 2h away. Only the tightest threshold crossed is sent
+    (a booking first seen 1h before its cut-off gets the 2h reminder only), once per booking, cut-off time and
+    threshold — a new ePort cut-off re-arms them. Bookings of one vessel crossing together share one notification.
+    Overdue bookings are left to the late flag. Returns the number of notifications created."""
+    if cd.BOOKING_CUTOFF not in get_notification_settings()["kinds"]:
+        return 0
+    now = now or datetime.now(VN_TZ)
+    stamp_now = now.astimezone(VN_TZ).replace(tzinfo=None)
+    groups: dict[tuple, list[dict]] = {}
+    with get_connection() as conn:
+        for b in _open_bookings_with_deadline(conn, col_ids):
+            left = b["deadline"] - now
+            if left.total_seconds() <= 0:
+                continue
+            hours = left.total_seconds() / 3600
+            crossed = [t for t in CUTOFF_REMINDER_HOURS if hours <= t]
+            if not crossed:
+                continue
+            threshold = min(crossed)
+            deadline_key = b["deadline"].strftime("%Y-%m-%d %H:%M")
+            if conn.execute("SELECT 1 FROM booking_reminders WHERE booking_id = ? AND deadline = ? AND threshold = ?;",
+                            (b["id"], deadline_key, threshold)).fetchone():
+                continue
+            vessel = " ".join(str(b.get("vessel") or "").upper().split())
+            groups.setdefault((b["collection_id"], deadline_key, threshold, vessel), []).append(b)
+
+        stamp = stamp_now.strftime("%Y-%m-%d %H:%M:%S")
+        created = 0
+        for (col_id, deadline_key, threshold, vessel), items in groups.items():
+            deadline = items[0]["deadline"]
+            nos = [str(b.get("booking_no") or "").strip() or f"#{b['id']}" for b in items]
+            subject = nos[0] if len(nos) == 1 else f"{len(nos)} booking"
+            _insert_notification(conn, col_id, {
+                "kind": cd.BOOKING_CUTOFF,
+                "entity_key": f"cutoff|{col_id}|{deadline_key}|{threshold}|{items[0]['id']}",
+                "title": f"Cut-off còn {threshold} giờ: {subject}",
+                "old": "",
+                "new": f"Cut-off {deadline.strftime('%d/%m/%Y %H:%M')} · còn {_left_text(deadline - now)}",
+                "nav_tab": "booking",
+                "nav_query": nos[0] if len(nos) == 1 else (vessel or None),
+                "detail": {"hours": threshold, "cutoff": deadline.strftime("%d/%m/%Y %H:%M"), "booking_no": subject,
+                           "bookings": nos, "vessel_name": vessel, "count": len(nos)},
+            }, NOTIFY_SOURCE_AUTO, stamp)
+            conn.executemany(
+                "INSERT OR IGNORE INTO booking_reminders (booking_id, deadline, threshold, sent_at) VALUES (?, ?, ?, ?);",
+                [(b["id"], deadline_key, threshold, stamp) for b in items])
+            created += 1
+        # reminders of cut-offs long gone are no longer needed to hold anything back
+        conn.execute("DELETE FROM booking_reminders WHERE deadline < ?;",
+                     ((now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),))
+        if created:
+            _trim_notifications(conn, stamp_now)
+    if created:
+        logger.info(f"Sent {created} cut-off reminder(s)")
+    return created
+
+
+def maybe_send_morning_brief(now: datetime | None = None, col_ids: list[int] | None = None) -> bool:
+    """Once a day, from the brief time (default 07:30) for BRIEF_WINDOW_HOURS: today's open cut-offs, the late ones,
+    tomorrow's and the vessels closing today, over every collection (broken down per collection when several have
+    work). Returns True when a brief was created."""
+    settings = get_notification_settings()
+    if cd.MORNING_BRIEF not in settings["kinds"]:
+        return False
+    now = (now or datetime.now(VN_TZ)).astimezone(VN_TZ)
+    hh, mm = (int(x) for x in settings["brief_time"].split(":"))
+    start = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if not (start <= now < start + timedelta(hours=BRIEF_WINDOW_HOURS)):
+        return False
+    today = now.date()
+    if get_system_setting("notify_last_brief_date", "") == today.isoformat():
+        return False
+    tomorrow = today + timedelta(days=1)
+
+    with get_connection() as conn:
+        bookings = _open_bookings_with_deadline(conn, col_ids)
+        names = {c_id: name for c_id, name in conn.execute("SELECT id, name FROM collections;").fetchall()}
+        vwhere, vparams = "", ()
+        if col_ids is not None:
+            clean = _clean_ids(col_ids) or [-1]
+            vwhere, vparams = f" AND collection_id IN ({','.join('?' * len(clean))})", tuple(clean)
+        vessels = conn.execute(
+            f"SELECT DISTINCT vessel_name, in_out_voyage, closing_time FROM vessel_schedules "
+            f"WHERE COALESCE(closing_time, '') != ''{vwhere};", vparams).fetchall()
+
+    todays = sorted((b for b in bookings if b["deadline"].date() == today), key=lambda b: b["deadline"])
+    late = [b for b in bookings if b["deadline"] < now]
+    tomorrows = [b for b in bookings if b["deadline"].date() == tomorrow]
+    closing_today = {(v[0], v[1]) for v in vessels if (d := _cutoff_deadline(v[2])) and d.date() == today}
+
+    per_col: dict[int, dict] = {}
+    for key, group in (("today", todays), ("late", late), ("tomorrow", tomorrows)):
+        for b in group:
+            per_col.setdefault(b["collection_id"], {"name": names.get(b["collection_id"], ""), "today": 0, "late": 0,
+                                                    "tomorrow": 0})[key] += 1
+    summary = (f"{len(todays)} cut-off hôm nay · {len(late)} trễ · {len(tomorrows)} ngày mai · "
+               f"{len(closing_today)} tàu cắt máng hôm nay")
+    detail = {
+        "date": today.strftime("%d/%m/%Y"), "today": len(todays), "late": len(late), "tomorrow": len(tomorrows),
+        "vessels_today": len(closing_today),
+        "items": [{"booking_no": b.get("booking_no") or "", "time": b["deadline"].strftime("%H:%M"),
+                   "vessel": b.get("vessel") or "", "collection": names.get(b["collection_id"], "")}
+                  for b in todays[:BRIEF_LIST_LIMIT]],
+        "collections": list(per_col.values()) if len(per_col) > 1 else [],
+    }
+    stamp_now = now.replace(tzinfo=None)
+    with get_connection() as conn:
+        _insert_notification(conn, None, {
+            "kind": cd.MORNING_BRIEF, "entity_key": f"brief|{today.isoformat()}",
+            "title": f"Bản tin sáng {today.strftime('%d/%m')}", "old": "", "new": summary,
+            "nav_tab": "booking", "nav_query": None, "detail": detail,
+        }, NOTIFY_SOURCE_AUTO, stamp_now.strftime("%Y-%m-%d %H:%M:%S"))
+        _trim_notifications(conn, stamp_now)
+    set_system_setting("notify_last_brief_date", today.isoformat())
+    logger.info(f"Morning brief sent: {summary}")
+    return True
+
+
+def run_reminders(now: datetime | None = None) -> dict:
+    """The periodic reminder pass: cut-off reminders, then the morning brief when it is due."""
+    return {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
 
 
 def record_test_notification() -> dict:
@@ -2035,10 +2693,12 @@ def _summarize_for_os(rows: list[dict]) -> dict:
         cd.VESSEL_CLOSING: "tàu đổi hạn đóng máng", cd.VESSEL_CLOSING_ICD: "tàu đổi giờ đóng ICD",
         cd.VESSEL_OPEN_GATE: "tàu đổi giờ mở cổng hạ", cd.VESSEL_ETA: "tàu đổi ETA", cd.VESSEL_ETD: "tàu đổi ETD",
         cd.VESSEL_SCHEDULE: "tàu đổi lịch",
+        cd.BOOKING_CUTOFF: "nhắc cut-off", cd.MORNING_BRIEF: "bản tin sáng",
     }
-    body = " · ".join(f"{counts[k]} {words[k]}" for k in (cd.VESSEL_SCHEDULE, *cd.ALL_KINDS) if k in counts)
+    body = " · ".join(f"{counts[k]} {words.get(k, k)}" for k in (cd.VESSEL_SCHEDULE, *cd.ALL_KINDS) if k in counts)
     first = rows[0]
-    return {"title": f"{len(rows)} thay đổi mới", "body": body, "count": len(rows),
+    only_reminders = all(r["kind"] in cd.REMINDER_KINDS for r in rows)
+    return {"title": f"{len(rows)} {'nhắc việc' if only_reminders else 'thay đổi mới'}", "body": body, "count": len(rows),
             "nav_tab": first["nav_tab"], "nav_query": first["nav_query"], "notification_id": first["id"]}
 
 

@@ -9,7 +9,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { ContainerInfo, ContainerWatchlist, ContainerWatchlistBatchItem, PageResult, ContainerPageResult, TableQuery } from '../../types';
 import {
-  getContainers, getContainersPage, getContainerIds, getContainersByIds, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
+  getContainers, getContainersPage, getContainerIds, getContainersByIds, getContainerLineOpers, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
   addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist,
   addContainerWatchlistBatch, removeContainerWatchlistBatch, resyncContainersApi,
   containerTrashApi,
@@ -29,12 +29,13 @@ import { extractClipboardFiles, isEditableTarget, isImageFile } from '../booking
 import { ContainerWatchlistModal } from './ContainerWatchlistModal';
 import { ContainerRow } from './ContainerRow';
 import { ResizableTh } from '../common/ResizableTh';
+import { ColumnValueFilter } from '../common/ColumnValueFilter';
+import { useTableSort } from '../../hooks/useTableSort';
 import { ColumnMigration, useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
 import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
-import { subscribeTourActions } from '../../services/tourEvents';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
@@ -116,18 +117,6 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const [trashCount, setTrashCount] = useState(0);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
 
-  // Listen to interactive tour triggers (open/close Container Watchlist modal)
-  useEffect(() => {
-    const unsubscribe = subscribeTourActions((action) => {
-      if (action === 'openContainerWatchlist') {
-        setIsWatchlistOpen(true);
-      } else if (action === 'closeContainerWatchlist') {
-        setIsWatchlistOpen(false);
-      }
-    });
-    return unsubscribe;
-  }, []);
-
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "site_id", label: t.container.columns["site_id"], visible: true },
     { key: "containerno", label: t.container.columns["containerno"], visible: true },
@@ -171,36 +160,36 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   ], [t]);
 
   const defaultWidths = useMemo(() => ({
-    "site_id": 75,
+    "site_id": 95,
     "containerno": 130,
     "event_type": 130,
     "event_time": 140,
-    "in_yard": 75,
-    "fel": 65,
-    "iso": 75,
-    "gross": 85,
-    "container_gross": 95,
-    "tare_wt": 80,
-    "manifest_wt": 85,
-    "gate_wt": 80,
-    "gate_gross_wt": 95,
-    "certified_weight": 90,
-    "vgm": 75,
-    "category": 85,
-    "cust": 75,
-    "location": 95,
-    "stack": 75,
-    "temp": 75,
+    "in_yard": 95,
+    "fel": 85,
+    "iso": 95,
+    "gross": 105,
+    "container_gross": 115,
+    "tare_wt": 100,
+    "manifest_wt": 105,
+    "gate_wt": 100,
+    "gate_gross_wt": 115,
+    "certified_weight": 110,
+    "vgm": 95,
+    "category": 105,
+    "cust": 95,
+    "location": 115,
+    "stack": 95,
+    "temp": 95,
     "haz": 110,
-    "load_to_vessel": 90,
-    "pod_destination": 95,
+    "load_to_vessel": 110,
+    "pod_destination": 115,
     "truck_vessel": 140,
     "trans_in": 140,
     "trans_out": 140,
     "cont_in_ts": 140,
     "cont_out_ts": 140,
-    "line_oper": 80,
-    "im_exp": 80,
+    "line_oper": 115,
+    "im_exp": 100,
     "bill_book": 125,
     "cust_approval_date": 140,
     "customs_status": 165,
@@ -208,7 +197,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     "infras_fee_status": 115,
     "item_seal_no": 105,
     "note": 180,
-    "item_key": 95,
+    "item_key": 115,
     "queried_at": 140,
   }), []);
 
@@ -244,13 +233,19 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   // Data loading (server-paged table + separate watchlist load)
   // ---------------------------------------------------------------------------
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  // Column sort (server side; default newest lookup first) and the line operator column filter
+  const { sort, toggleSort, sortDirOf } = useTableSort('container_sort');
+  const [valueFilter, setValueFilter] = useState<string[]>([]);
   const tableQuery = useMemo<TableQuery>(
     () => ({
       search_query: debouncedQuery,
       search_field: searchField,
       event_type: eventTypeFilter === 'ALL' ? undefined : eventTypeFilter,
+      sort_by: sort?.key,
+      sort_dir: sort?.dir,
+      carriers: valueFilter,
     }),
-    [debouncedQuery, searchField, eventTypeFilter]
+    [debouncedQuery, searchField, eventTypeFilter, sort, valueFilter]
   );
 
   const table = useServerTable<ContainerInfo, ContainerPageResult>({
@@ -296,6 +291,9 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCollection?.id]);
 
+  // Another collection has other line operators
+  useEffect(() => setValueFilter([]), [activeCollection?.id]);
+
   useEffect(() => {
     loadWatchlist();
   }, [activeCollection?.id, loadWatchlist]);
@@ -331,7 +329,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const selection = useRowSelection(
     pageRows,
     getRowId,
-    [activeCollection?.id, debouncedQuery, searchField, eventTypeFilter],
+    [activeCollection?.id, debouncedQuery, searchField, eventTypeFilter, valueFilter.join('\n')],
     { pruneMissing: false }
   );
   const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
@@ -721,7 +719,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Searcher Form */}
-      <div data-tour="container-query-form" className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
+      <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         <form onSubmit={handleQueryEport} className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="w-52 shrink-0">
@@ -765,7 +763,6 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
             <button
               type="button"
-              data-tour="container-ocr-btn"
               onClick={() => setIsImageOcrOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shrink-0"
             >
@@ -778,7 +775,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               )}
             </button>
 
-            <div data-tour="container-watchlist-btn" className="ml-auto shrink-0">
+            <div className="ml-auto shrink-0">
               <button
                 type="button"
                 onClick={() => setIsWatchlistOpen(true)}
@@ -855,7 +852,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
           </div>
 
           {/* Event Type Filter Dropdown */}
-          <div data-tour="container-event-pills" className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 shrink-0">
+          <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 shrink-0">
             <Filter className="w-3.5 h-3.5 text-primary-600 dark:text-primary-400 shrink-0" />
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
               {t.container.filterByEvent || 'Tác nghiệp'}:
@@ -892,6 +889,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
 
           <Tooltip content="Xuất danh sách Container ra file Excel">
             <button
+              data-tour="export"
               onClick={() => handleOpenExport('all')}
               disabled={total === 0}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
@@ -999,7 +997,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       )}
 
       {/* Container Table */}
-      <div data-tour="container-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
@@ -1024,6 +1022,18 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                     label={col.label}
                     width={columnWidths[col.key]}
                     onResize={startResize}
+                    sortDir={sortDirOf(col.key)}
+                    onSort={toggleSort}
+                    sortLabels={t.common.sort}
+                    extra={col.key === 'line_oper' && activeCollection ? (
+                      <ColumnValueFilter
+                        column={col.label}
+                        loadOptions={() => getContainerLineOpers(activeCollection.id)}
+                        value={valueFilter}
+                        onChange={setValueFilter}
+                        labels={t.common.columnFilter}
+                      />
+                    ) : undefined}
                   />
                 ))}
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">
@@ -1150,6 +1160,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         data={exportData}
         allColumns={exportColumns}
         filenamePrefix={exportScope === 'selected' ? 'containers_selected' : 'containers'}
+        tab="container"
+        collectionName={activeCollection?.name}
       />
 
       <MoveToCollectionModal

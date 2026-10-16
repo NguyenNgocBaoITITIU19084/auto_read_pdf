@@ -45,8 +45,8 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showOriginal, setShowOriginal] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(true);
   const [showAISettings, setShowAISettings] = useState(false);
   const [readingClipboard, setReadingClipboard] = useState(false);
   const [quickVesselBooking, setQuickVesselBooking] = useState<Partial<Booking> | null>(null);
@@ -218,7 +218,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
         )}
 
         {/* Preview */}
-        <div data-tour="ocr-controls" className="w-full md:flex-1 min-w-0 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">
+        <div className="w-full md:flex-1 min-w-0 flex flex-col bg-slate-950/90 rounded-xl overflow-hidden border border-slate-800 relative">
           {previewUrl || selectedIsPdf ? (
             <>
               <div className="absolute top-2 left-2 right-2 z-10 flex items-center justify-between bg-slate-900/80 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-slate-700/80 text-white shadow-lg">
@@ -297,7 +297,6 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
             </>
           ) : (
             <div
-              data-tour="ocr-dropzone"
               onClick={() => fileInputRef.current?.click()}
               className="flex-1 flex flex-col items-center justify-center p-6 text-center cursor-pointer border-2 border-dashed border-slate-700 hover:border-purple-500 transition-all rounded-xl m-3 bg-slate-900/40 hover:bg-slate-900/80"
             >
@@ -337,7 +336,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
         </div>
 
         {/* Result / form */}
-        <div data-tour="ocr-fields" className="w-full md:flex-1 min-w-0 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+        <div className="w-full md:flex-1 min-w-0 flex flex-col bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-800/50 shrink-0">
             <div className="flex flex-wrap items-center gap-2 min-w-0">
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{t.booking.imageModal.detectedCarrier}</span>

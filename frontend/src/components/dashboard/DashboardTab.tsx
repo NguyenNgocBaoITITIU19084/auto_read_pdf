@@ -104,7 +104,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
         </div>
 
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <div data-tour="dashboard-scope" className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-semibold">
+          <div className="flex items-center bg-slate-200/60 dark:bg-slate-800 p-0.5 rounded-lg text-xs font-semibold">
             <button type="button" onClick={() => setScopeMode('all')} className={scopeBtn(scopeMode === 'all')}>
               <Globe className="w-3.5 h-3.5" />
               <span>{t.dashboard.scopeAll}</span>
@@ -129,23 +129,23 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
       </div>
 
       {/* KPIs */}
-      <div data-tour="dashboard-kpis">
+      <div>
         <KPICards kpis={summary?.kpis || EMPTY_KPIS} loading={firstLoad} />
       </div>
 
       {/* Alerts (main) + system resources (side) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
-        <div data-tour="dashboard-alerts" className="lg:col-span-2 xl:col-span-3 min-w-0">
+        <div className="lg:col-span-2 xl:col-span-3 min-w-0">
           <AlertsSection alerts={summary?.alerts || EMPTY_ALERTS} onNavigateTab={onNavigateTab} loading={firstLoad} />
         </div>
         {/* Polls on its own, independent of the scope above */}
-        <div data-tour="dashboard-resources" className="min-w-0">
+        <div className="min-w-0">
           <ResourceMonitor onBackendRestarted={fetchSummary} />
         </div>
       </div>
 
       {/* Distributions */}
-      <div data-tour="dashboard-charts">
+      <div>
         <BreakdownCharts distributions={summary?.distributions || EMPTY_DISTRIBUTIONS} loading={firstLoad} />
       </div>
     </div>

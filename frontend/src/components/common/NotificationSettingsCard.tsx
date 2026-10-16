@@ -10,6 +10,7 @@ type SettingKind = Exclude<NotificationKind, 'test' | 'vessel_schedule'>;
 
 const CONTAINER_KINDS: SettingKind[] = ['container_customs', 'container_ingate', 'container_outgate'];
 const VESSEL_KINDS: SettingKind[] = ['vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd'];
+const REMINDER_KINDS: SettingKind[] = ['booking_cutoff', 'morning_brief'];
 
 /** Which changes raise a notification (and whether the OS may pop them up). Saved as soon as it is changed. */
 export const NotificationSettingsCard: React.FC = () => {
@@ -27,10 +28,10 @@ export const NotificationSettingsCard: React.FC = () => {
     return () => { alive = false; };
   }, []);
 
-  const save = async (kinds: NotificationKind[], osEnabled: boolean) => {
+  const save = async (kinds: NotificationKind[], osEnabled: boolean, briefTime?: string) => {
     setSaving(true);
     try {
-      setSettings(await saveNotificationSettingsApi(kinds, osEnabled));
+      setSettings(await saveNotificationSettingsApi(kinds, osEnabled, briefTime));
     } catch {
       addToast(s.saveFailed, 'error');
     } finally {
@@ -91,6 +92,21 @@ export const NotificationSettingsCard: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {group(s.groupContainer, CONTAINER_KINDS)}
         {group(s.groupVessel, VESSEL_KINDS)}
+      </div>
+
+      <div className="space-y-1.5">
+        {group(s.groupReminder, REMINDER_KINDS)}
+        <label className="flex flex-wrap items-center gap-2 pl-5 text-xs text-slate-600 dark:text-slate-300">
+          <span>{s.briefTime}</span>
+          <input
+            type="time"
+            value={settings?.brief_time || '07:30'}
+            disabled={!settings || saving || !settings.kinds.includes('morning_brief')}
+            onChange={(e) => settings && e.target.value && void save(settings.kinds, settings.os_enabled, e.target.value)}
+            className="px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs tabular-nums disabled:opacity-50"
+          />
+          <span className="basis-full text-[11px] text-slate-400 dark:text-slate-500">{s.briefTimeHint}</span>
+        </label>
       </div>
 
       <label className={`flex items-start gap-2 text-xs ${desktop ? 'text-slate-700 dark:text-slate-200 cursor-pointer' : 'text-slate-400 dark:text-slate-500'}`}>

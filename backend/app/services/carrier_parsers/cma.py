@@ -109,9 +109,12 @@ def _route_from_text(text: str) -> List[Dict[str, str]]:
         legs.append(row)
     if not legs:  # OCR prints the table column by column: see _route_from_ocr_columns
         return []
-    # The final place has no dates or mode: it is the last line of the table
+    # The final place has no dates or mode: it is the last line of the table. When the last leg already
+    # has no vessel ('LIVERPOOL 12-DEC-2026'), it is the final place and a trailing line is a wrapped
+    # terminal name ('SEAFORTH CONTAINER / TERMINAL')
     last = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
-    if last and not re.search(_DATE, last[-1]) and (not legs or last[-1] != legs[-1]["location"]):
+    if (last and not re.search(_DATE, last[-1]) and legs[-1]["vessel"]
+            and last[-1] != legs[-1]["location"]):
         if re.fullmatch(r"[A-Z][A-Z .'-]+", last[-1]):
             legs.append({"location": last[-1], "eta": "", "etd": "", "vessel": "", "voyage": "",
                          "service": "", "terminal": ""})

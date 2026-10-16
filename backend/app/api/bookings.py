@@ -8,10 +8,11 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from backend.app.core.database import (
     insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
-    get_bookings_page, get_booking_ids, get_bookings_by_ids,
+    get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers,
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
-    BOOKING_TRASH_KEEP_DAYS,
+    BOOKING_TRASH_KEEP_DAYS, BOOKING_STATUSES, set_booking_status, get_booking_status_counts,
+    get_bookings_calendar, get_booking_links,
 )
 from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
@@ -41,6 +42,10 @@ class BatchDeleteRequest(BaseModel):
 
 class UpdateBookingRequest(BaseModel):
     booking: Dict[str, Any]
+
+class SetStatusRequest(BaseModel):
+    ids: List[int] = []
+    status: str
 
 def _duplicate_warnings(col_id: int, booking_no: str, exclude_id: Optional[int]) -> List[str]:
     dups = find_duplicate_booking_ids(col_id, booking_no, exclude_id)
@@ -102,16 +107,69 @@ def list_bookings_page(
     offset: int = Query(0),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None, description="Table column to sort by, e.g. 'ETD'"),
+    sort_dir: Optional[str] = Query(None, description="'asc' or 'desc'"),
+    carriers: Optional[List[str]] = Query(None, description="Only these carriers ('' = no carrier)"),
+    statuses: Optional[List[str]] = Query(None, description="Only these statuses (new, dispatched, ...)"),
+    hide_closed: bool = Query(False, description="Leave out done and cancelled bookings"),
 ):
-    return get_bookings_page(collection_id, limit, offset, search_query, search_field)
+    return get_bookings_page(collection_id, limit, offset, search_query, search_field, sort_by, sort_dir, carriers,
+                             statuses, hide_closed)
 
 @router.get("/ids")
 def list_booking_ids(
     collection_id: int = Query(...),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
+    carriers: Optional[List[str]] = Query(None),
+    statuses: Optional[List[str]] = Query(None),
+    hide_closed: bool = Query(False),
 ):
-    return {"ids": get_booking_ids(collection_id, search_query, search_field)}
+    return {"ids": get_booking_ids(collection_id, search_query, search_field, sort_by, sort_dir, carriers,
+                                   statuses, hide_closed)}
+
+@router.get("/carriers")
+def list_booking_carriers(collection_id: int = Query(...)):
+    return get_booking_carriers(collection_id)
+
+@router.get("/calendar")
+def list_bookings_calendar(
+    collection_id: int = Query(...),
+    date_from: str = Query(..., description="First day, YYYY-MM-DD"),
+    date_to: str = Query(..., description="Last day, YYYY-MM-DD"),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+    carriers: Optional[List[str]] = Query(None),
+    statuses: Optional[List[str]] = Query(None),
+    hide_closed: bool = Query(False),
+):
+    try:
+        return get_bookings_calendar(collection_id, date_from, date_to, search_query, search_field, carriers,
+                                     statuses, hide_closed)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ngày không hợp lệ (cần dạng YYYY-MM-DD)")
+
+@router.get("/{booking_id}/links")
+def booking_links(booking_id: int):
+    """The booking's ePort vessel schedules and containers."""
+    links = get_booking_links(booking_id)
+    if links is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy booking")
+    return links
+
+@router.get("/statuses")
+def list_booking_statuses(collection_id: int = Query(...)):
+    return get_booking_status_counts(collection_id)
+
+@router.post("/status")
+def change_booking_status(req: SetStatusRequest):
+    if req.status not in BOOKING_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Trạng thái không hợp lệ: {req.status}")
+    updated = set_booking_status(list(req.ids or []), req.status)
+    logger.info(f"Set status={req.status} on {updated} booking(s)")
+    return {"status": "success", "updated": updated}
 
 @router.post("/by-ids")
 def list_bookings_by_ids(payload: BatchIdsRequest):

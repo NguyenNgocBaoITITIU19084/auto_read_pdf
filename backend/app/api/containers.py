@@ -1,13 +1,13 @@
 import asyncio
 import logging
 import os
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from backend.app.core.database import (
     get_containers, insert_containers, delete_container, delete_containers_batch, clear_containers,
     get_container_watchlist, add_to_container_watchlist, remove_from_container_watchlist,
     add_container_watchlist_batch, remove_container_watchlist_batch, get_containers_by_ids,
-    update_watchlist_sync_status, get_containers_page, get_container_ids
+    update_watchlist_sync_status, get_containers_page, get_container_ids, get_container_line_opers
 )
 from backend.app.api.trash import add_trash_routes
 from backend.app.services.eport_client import search_containers
@@ -45,8 +45,12 @@ def list_containers_page(
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
+    carriers: Optional[List[str]] = Query(None, description="Only these line operators ('' = blank)"),
 ):
-    return get_containers_page(collection_id, limit, offset, search_query, search_field, event_type)
+    return get_containers_page(collection_id, limit, offset, search_query, search_field, event_type,
+                               sort_by, sort_dir, carriers)
 
 @router.get("/ids")
 def list_container_ids(
@@ -54,8 +58,15 @@ def list_container_ids(
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
+    carriers: Optional[List[str]] = Query(None),
 ):
-    return {"ids": get_container_ids(collection_id, search_query, search_field, event_type)}
+    return {"ids": get_container_ids(collection_id, search_query, search_field, event_type, sort_by, sort_dir, carriers)}
+
+@router.get("/carriers")
+def list_container_line_opers(collection_id: int = Query(...)):
+    return get_container_line_opers(collection_id)
 
 @router.post("/by-ids")
 def list_containers_by_ids(payload: BatchIdsRequest):

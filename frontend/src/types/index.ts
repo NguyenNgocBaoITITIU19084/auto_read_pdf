@@ -9,6 +9,10 @@ export interface Collection {
   watchlist_count?: number;
 }
 
+/** Booking workflow status, in workflow order (stored as these codes; labels come from translations) */
+export const BOOKING_STATUSES = ['new', 'dispatched', 'stuffed', 'gated_in', 'done', 'cancelled'] as const;
+export type BookingStatus = typeof BOOKING_STATUSES[number];
+
 export interface Booking {
   id: number;
   "Tên file PDF"?: string;
@@ -33,6 +37,9 @@ export interface Booking {
   "ETD_Pre"?: string;
   "Trunk Vessel"?: string;
   "ETD_Trunk"?: string;
+  "Trạng thái"?: BookingStatus;
+  /** Open booking whose cut-off (ePort's when known) has passed (computed by the server) */
+  "Trễ cut-off"?: boolean;
   [key: string]: any;
 }
 
@@ -120,6 +127,17 @@ export interface ContainerInfo {
   item_key?: number;
   queried_at: string;
   [key: string]: any;
+}
+
+/** A booking's ePort vessel schedules and containers (GET /bookings/{id}/links). */
+export interface BookingLinks {
+  /** Schedules naming the booking's vessel + voyage, one per port site */
+  vessels: (VesselSchedule & { closing_estimated: boolean })[];
+  /** One row per container with this booking number, its latest event */
+  containers: (ContainerInfo & { gated_in: boolean })[];
+  /** Containers gated in for export, out of the booking's Q'ty (null when Q'ty has no number) */
+  gated_in: number;
+  qty: number | null;
 }
 
 export interface ContainerWatchlist extends WatchlistSyncFields {
@@ -455,6 +473,14 @@ export interface TableQuery {
   search_query?: string;
   search_field?: string;
   event_type?: string;
+  sort_by?: string;
+  sort_dir?: 'asc' | 'desc';
+  /** Filter column values to keep ('' = blank): booking carrier, container line operator */
+  carriers?: string[];
+  /** Booking statuses to keep */
+  statuses?: string[];
+  /** Leave out done / cancelled bookings */
+  hide_closed?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,8 +522,20 @@ export type NotificationKind =
   | 'vessel_closing' | 'vessel_closing_icd' | 'vessel_open_gate' | 'vessel_eta' | 'vessel_etd'
   /** every time of one vessel/voyage that changed in a lookup, listed in detail.changes */
   | 'vessel_schedule'
+  /** a booking's cut-off is 24h / 6h / 2h away (detail.hours, detail.bookings) */
+  | 'booking_cutoff'
+  /** the daily summary of today's cut-offs (detail.today / late / tomorrow / items) */
+  | 'morning_brief'
   /** the sample sent by the "send a test" button */
   | 'test';
+
+/** One booking due today, as listed in a morning brief */
+export interface BriefItem {
+  booking_no: string;
+  time: string;
+  vessel: string;
+  collection: string;
+}
 
 /** One changed time inside a 'vessel_schedule' notification (old/new as dd/mm/yyyy HH:MM) */
 export interface VesselTimeChange {
@@ -518,16 +556,51 @@ export interface AppNotification {
   detail: {
     site_id?: string; vessel?: string; voyage?: string; container?: string; event_type?: string; bookings?: string[];
     changes?: VesselTimeChange[];
+    // booking_cutoff
+    hours?: number; cutoff?: string; booking_no?: string; vessel_name?: string; count?: number;
+    // morning_brief
+    date?: string; today?: number; late?: number; tomorrow?: number; vessels_today?: number; items?: BriefItem[];
+    collections?: { name: string; today: number; late: number; tomorrow: number }[];
   };
-  nav_tab: 'vessel' | 'container' | null;
+  nav_tab: 'vessel' | 'container' | 'booking' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
   read: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Excel export templates
+// ---------------------------------------------------------------------------
+export type ExportTab = 'booking' | 'vessel' | 'container';
+export type ExportFill = 'header' | 'column';
+export type PaletteColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
+/** A palette colour, or a custom one as '#RRGGBB' */
+export type ExportColor = PaletteColor | `#${string}`;
+
+/** One exported column: its key in the row, the header written (blank = the table's label), colour and fill */
+export interface ExportColumn {
+  key: string;
+  header: string;
+  color: ExportColor | null;
+  fill: ExportFill;
+}
+
+export interface ExportTemplate {
+  id: number;
+  tab: ExportTab;
+  name: string;
+  /** File name pattern; {date} and {collection} are filled in */
+  filename: string;
+  columns: ExportColumn[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface NotificationSettings {
   kinds: NotificationKind[];
   os_enabled: boolean;
   all_kinds: NotificationKind[];
+  /** 'HH:MM' of the morning brief */
+  brief_time: string;
 }

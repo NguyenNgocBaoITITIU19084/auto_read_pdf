@@ -3,6 +3,7 @@ from typing import Optional
 import time
 from fastapi import APIRouter, HTTPException, Query
 from backend.app.core.database import (
+    get_vessel_calendar,
     get_vessel_schedules, insert_vessel_schedules, delete_vessel_schedule,
     delete_vessel_schedules_batch, clear_vessel_schedules, get_watchlist,
     add_to_watchlist, remove_from_watchlist, add_vessel_watchlist_batch,
@@ -42,16 +43,33 @@ def list_vessels_page(
     offset: int = Query(0),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
 ):
-    return get_vessel_schedules_page(collection_id, limit, offset, search_query, search_field)
+    return get_vessel_schedules_page(collection_id, limit, offset, search_query, search_field, sort_by, sort_dir)
+
+@router.get("/calendar")
+def list_vessels_calendar(
+    collection_id: int = Query(...),
+    date_from: str = Query(..., description="First day, YYYY-MM-DD"),
+    date_to: str = Query(..., description="Last day, YYYY-MM-DD"),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+):
+    try:
+        return get_vessel_calendar(collection_id, date_from, date_to, search_query, search_field)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ngày không hợp lệ (cần dạng YYYY-MM-DD)")
 
 @router.get("/ids")
 def list_vessel_ids(
     collection_id: int = Query(...),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
 ):
-    return {"ids": get_vessel_schedule_ids(collection_id, search_query, search_field)}
+    return {"ids": get_vessel_schedule_ids(collection_id, search_query, search_field, sort_by, sort_dir)}
 
 @router.post("/by-ids")
 def list_vessels_by_ids(payload: BatchIdsRequest):

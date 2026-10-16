@@ -1,6 +1,6 @@
 import axios from 'axios';
 import {
-  Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
+  Collection, Booking, BookingLinks, BookingStatus, ExportColumn, ExportTab, ExportTemplate, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
@@ -55,11 +55,27 @@ export const downloadLogsZipApi = async (): Promise<{ blob: Blob; filename: stri
   return { blob: res.data, filename: match?.[1] || 'auto-read-pdf-logs.zip' };
 };
 
+// Repeated keys ('carriers=A&carriers=B') as FastAPI reads lists, not axios' default 'carriers[]='
+const listParams = { indexes: null } as const;
+
+/** Distinct values of a table's filter column with their row counts ('' = blank). */
+export interface ColumnValueCount {
+  carrier: string;
+  count: number;
+}
+
 const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, number> = {}) => {
-  const params: Record<string, string | number> = { collection_id: collectionId, ...extra };
+  const params: Record<string, string | number | string[]> = { collection_id: collectionId, ...extra };
   if (q.search_query) params.search_query = q.search_query;
   if (q.search_field && q.search_field !== 'all') params.search_field = q.search_field;
   if (q.event_type && q.event_type !== 'ALL') params.event_type = q.event_type;
+  if (q.sort_by) {
+    params.sort_by = q.sort_by;
+    params.sort_dir = q.sort_dir || 'asc';
+  }
+  if (q.carriers?.length) params.carriers = q.carriers;
+  if (q.statuses?.length) params.statuses = q.statuses;
+  if (q.hide_closed) params.hide_closed = 'true';
   return params;
 };
 
@@ -94,10 +110,28 @@ export const getBookings = async (collectionId: number, query?: string, field?: 
   return res.data;
 };
 
+export const getBookingLinks = async (bookingId: number): Promise<BookingLinks> =>
+  (await apiClient.get<BookingLinks>(`/bookings/${bookingId}/links`)).data;
+
 export const getBookingsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<Booking>> =>
-  (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+  (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
 export const getBookingIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
-  (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q) })).data.ids;
+  (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
+export const getBookingCarriers = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<ColumnValueCount[]>('/bookings/carriers', { params: { collection_id: collectionId } })).data;
+/** Bookings whose cut-off falls between two days ('YYYY-MM-DD'), with the table's filters (its sort is ignored). */
+export const getBookingsCalendar = async (
+  collectionId: number, dateFrom: string, dateTo: string, q: TableQuery,
+): Promise<{ items: Booking[]; undated: number }> =>
+  (await apiClient.get<{ items: Booking[]; undated: number }>('/bookings/calendar', {
+    params: { ...tableParams(collectionId, { ...q, sort_by: undefined }), date_from: dateFrom, date_to: dateTo },
+    paramsSerializer: listParams,
+  })).data;
+export const getBookingStatuses = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<{ status: string; count: number }[]>('/bookings/statuses', { params: { collection_id: collectionId } }))
+    .data.map((s) => ({ carrier: s.status, count: s.count }));
+export const setBookingStatusApi = async (ids: number[], status: BookingStatus): Promise<number> =>
+  (await apiClient.post<{ updated: number }>('/bookings/status', { ids, status })).data.updated;
 export const getBookingsByIds = async (ids: number[]): Promise<Booking[]> =>
   (await apiClient.post<Booking[]>('/bookings/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
@@ -250,9 +284,17 @@ export const getVessels = async (collectionId: number, query?: string, field?: s
 };
 
 export const getVesselsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<VesselSchedule>> =>
-  (await apiClient.get<PageResult<VesselSchedule>>('/vessels/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+  (await apiClient.get<PageResult<VesselSchedule>>('/vessels/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
+/** Vessel schedules whose closing time falls between two days ('YYYY-MM-DD'), with the table's search. */
+export const getVesselsCalendar = async (
+  collectionId: number, dateFrom: string, dateTo: string, q: TableQuery,
+): Promise<{ items: VesselSchedule[]; undated: number }> =>
+  (await apiClient.get<{ items: VesselSchedule[]; undated: number }>('/vessels/calendar', {
+    params: { ...tableParams(collectionId, { ...q, sort_by: undefined }), date_from: dateFrom, date_to: dateTo },
+    paramsSerializer: listParams,
+  })).data;
 export const getVesselIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
-  (await apiClient.get<{ ids: number[] }>('/vessels/ids', { params: tableParams(collectionId, q) })).data.ids;
+  (await apiClient.get<{ ids: number[] }>('/vessels/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getVesselsByIds = async (ids: number[]): Promise<VesselSchedule[]> =>
   (await apiClient.post<VesselSchedule[]>('/vessels/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
@@ -340,9 +382,12 @@ export const getContainers = async (collectionId: number, query?: string, field?
 };
 
 export const getContainersPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<ContainerPageResult> =>
-  (await apiClient.get<ContainerPageResult>('/containers/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+  (await apiClient.get<ContainerPageResult>('/containers/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
 export const getContainerIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
-  (await apiClient.get<{ ids: number[] }>('/containers/ids', { params: tableParams(collectionId, q) })).data.ids;
+  (await apiClient.get<{ ids: number[] }>('/containers/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
+/** Line operators of the collection's containers (the container table's filter column). */
+export const getContainerLineOpers = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<ColumnValueCount[]>('/containers/carriers', { params: { collection_id: collectionId } })).data;
 export const getContainersByIds = async (ids: number[]): Promise<ContainerInfo[]> =>
   (await apiClient.post<ContainerInfo[]>('/containers/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
@@ -443,6 +488,23 @@ export const exportExcelApi = async (data: any[], selectedColumns: string[]): Pr
     selected_columns: selectedColumns,
   }, { responseType: 'blob' });
   return res.data;
+};
+
+/** Rows keyed by column key; each column's header, colour and fill in order. */
+export const exportColumnsExcelApi = async (data: Record<string, unknown>[], columns: ExportColumn[], filename: string): Promise<Blob> =>
+  (await apiClient.post('/export/excel', { data, columns, filename }, { responseType: 'blob', timeout: LONG_TIMEOUT })).data;
+
+type ExportTemplateInput = Pick<ExportTemplate, 'name' | 'filename' | 'columns'>;
+export const exportTemplatesApi = {
+  list: async (tab: ExportTab): Promise<ExportTemplate[]> =>
+    (await apiClient.get<ExportTemplate[]>('/export/templates', { params: { tab } })).data,
+  create: async (tab: ExportTab, input: ExportTemplateInput): Promise<ExportTemplate> =>
+    (await apiClient.post<ExportTemplate>('/export/templates', { tab, ...input })).data,
+  update: async (id: number, input: ExportTemplateInput): Promise<ExportTemplate> =>
+    (await apiClient.put<ExportTemplate>(`/export/templates/${id}`, input)).data,
+  remove: async (id: number): Promise<void> => {
+    await apiClient.delete(`/export/templates/${id}`);
+  },
 };
 
 export const getBackupDb = async (): Promise<any> => {
@@ -662,5 +724,8 @@ export const sendTestNotificationApi = async (): Promise<AppNotification> =>
 export const getNotificationSettingsApi = async (): Promise<NotificationSettings> =>
   (await apiClient.get<NotificationSettings>('/notifications/settings')).data;
 
-export const saveNotificationSettingsApi = async (kinds: string[], osEnabled: boolean): Promise<NotificationSettings> =>
-  (await apiClient.put<NotificationSettings>('/notifications/settings', { kinds, os_enabled: osEnabled })).data;
+/** `briefTime` omitted = left as it is */
+export const saveNotificationSettingsApi = async (kinds: string[], osEnabled: boolean, briefTime?: string): Promise<NotificationSettings> =>
+  (await apiClient.put<NotificationSettings>('/notifications/settings', {
+    kinds, os_enabled: osEnabled, ...(briefTime ? { brief_time: briefTime } : {}),
+  })).data;

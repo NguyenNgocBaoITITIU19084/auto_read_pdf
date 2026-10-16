@@ -14,6 +14,12 @@ export function notificationSubject(n: AppNotification): string {
 /** Localized headline; falls back to the backend's Vietnamese text for an unknown kind. */
 export function notificationTitle(n: AppNotification, t: Translations): string {
   if (n.kind === 'test') return t.notifications.testTitle;
+  const d = n.detail || {};
+  if (n.kind === 'booking_cutoff' && d.hours) {
+    const name = (d.count || 0) > 1 ? tf(t.notifications.reminder.bookingCount, { count: d.count || 0 }) : d.booking_no || '';
+    return tf(t.notifications.titles.booking_cutoff, { hours: d.hours, name });
+  }
+  if (n.kind === 'morning_brief' && d.date) return tf(t.notifications.titles.morning_brief, { date: d.date.slice(0, 5) });
   const template = (t.notifications.titles as Record<string, string>)[n.kind];
   const subject = notificationSubject(n);
   return template && subject ? tf(template, { name: subject }) : n.title;

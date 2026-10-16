@@ -66,9 +66,25 @@ class ContainerWatchlistAddRequest(BaseModel):
     container_no: str
     event_type: Optional[str] = ""
 
+class ExportColumn(BaseModel):
+    key: str
+    header: str = ""
+    color: Optional[str] = None
+    fill: str = "header"
+
 class ExportExcelRequest(BaseModel):
     data: List[dict]
-    selected_columns: List[str]
+    # older callers: rows keyed by header text
+    selected_columns: List[str] = []
+    # rows keyed by column key; each column's header text, colour and fill, in order
+    columns: Optional[List[ExportColumn]] = None
+    filename: Optional[str] = None
+
+class ExportTemplateRequest(BaseModel):
+    tab: Optional[str] = None
+    name: str
+    filename: str = ""
+    columns: List[ExportColumn]
 
 class AutoSyncToggleRequest(BaseModel):
     enable: bool
