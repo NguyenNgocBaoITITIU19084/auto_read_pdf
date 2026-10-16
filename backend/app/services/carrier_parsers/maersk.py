@@ -8,7 +8,7 @@ the first or the last page; its place names wrap onto the next row:
     Pelabuhan Tanjung Mindanao Container         MVS   AS SOPHIA(PT)         645N     2026-11-02  2026-11-18
     Pelepas Terminal  Terminal
 
-Barge / feeder / truck / rail / inland legs are skipped. The first vessel leg leaves Vietnam
+Barge / truck / rail / inland legs are skipped (feeder legs are vessel legs). The first vessel leg leaves Vietnam
 (vessel without its flag tag + voyage, ETD); with a second vessel leg, the first leg's 'To' is the
 transshipment port. The port of discharge is the 'To' of the last leg, the place of delivery the
 booking's 'To:'. Equipment rows read '2 40 DRY 9 6' (qty, size, type, height 9'6" = high cube).
@@ -26,8 +26,9 @@ from .layout import find_phrase, group_rows, row_text, row_top
 ISSUER = re.compile(r"\bMAERSK\b", re.IGNORECASE)
 PLAN = re.compile(r"Intended\s+Transport\s+Plan", re.IGNORECASE)
 
-# Legs that are not the ocean vessel leaving Vietnam
-_SKIP_MODES = re.compile(r"^(?:BAR|BARGE|FEF|FEO|FEEDER|TRK|TRUCK|RAIL|RCO|RAL|IWW|INL|INLAND)", re.IGNORECASE)
+# Legs that are not the ocean vessel leaving Vietnam. Feeder legs (FEF / FEO) are kept: they are real
+# vessels out of Cat Lai ('ARCHER(LR) 643S' to Tanjung Pelepas), so their 'To' is the T/S port
+_SKIP_MODES = re.compile(r"^(?:BAR|BARGE|TRK|TRUCK|RAIL|RCO|RAL|IWW|INL|INLAND)", re.IGNORECASE)
 _DATE = r"\d{4}-\d{2}-\d{2}"
 _FLAG = re.compile(r"\s*\([A-Z]{2}\)$")  # 'MAERSK NUSSFJORD(PA)' -> 'MAERSK NUSSFJORD'
 _EQ_ROW = re.compile(r"^\s*(\d+)\s+(\d{2})\s+(DRY|REEF|REEFER|OPEN\s+TOP|FLAT\s+RACK|TANK)\s+(\d)\s*(\d)\b",
