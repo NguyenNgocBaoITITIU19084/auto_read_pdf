@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../context/NotificationsContext';
 import { notificationChange, notificationChanges, notificationTitle } from '../../utils/notifications';
 import { Modal } from './Modal';
+import { CutoffReminderDetail, MorningBriefDetail, formatStamp } from './ReminderViews';
 import { VesselChangeList } from './VesselChangeList';
 import type { TabId } from './Tabs';
 
@@ -19,15 +20,19 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   if (!item) return null;
 
   const info = item.detail || {};
+  const r = t.notifications.reminder;
   const changes = notificationChanges(item, t);
+  const isBrief = item.kind === 'morning_brief';
+  const isCutoff = item.kind === 'booking_cutoff';
+  const isReminder = isBrief || isCutoff;
   const rows: [string, string | undefined][] = [
-    [d.vessel, info.vessel],
+    [d.vessel, isReminder ? undefined : info.vessel],
     [d.voyage, info.voyage],
     [d.container, info.container],
     [d.event, info.event_type],
-    [d.bookings, info.bookings && info.bookings.length > 0 ? info.bookings.join(', ') : undefined],
+    [d.bookings, !isReminder && info.bookings && info.bookings.length > 0 ? info.bookings.join(', ') : undefined],
     [d.source, item.source === 'auto_sync' ? t.notifications.sourceAuto : t.notifications.sourceManual],
-    [d.time, item.created_at],
+    [d.time, formatStamp(item.created_at)],
   ];
 
   const goToTab = () => {
@@ -36,11 +41,18 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   };
 
   return (
-    <Modal isOpen onClose={closeDetail} title={d.title} maxWidth={changes.length > 0 ? "max-w-xl" : "max-w-md"}>
+    <Modal isOpen onClose={closeDetail} title={d.title} maxWidth={changes.length > 0 || isBrief ? "max-w-xl" : "max-w-md"}>
       <div className="space-y-4" data-testid="notification-detail">
-        <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{notificationTitle(item, t)}</h4>
+        <div>
+          <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">{notificationTitle(item, t)}</h4>
+          {isBrief && <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{r.allCollections}</p>}
+        </div>
 
-        {changes.length > 0 ? (
+        {isBrief ? (
+          <MorningBriefDetail item={item} />
+        ) : isCutoff ? (
+          <CutoffReminderDetail item={item} />
+        ) : changes.length > 0 ? (
           <VesselChangeList item={item} variant="full" />
         ) : item.old_value ? (
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
@@ -60,7 +72,7 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           </div>
         )}
 
-        <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1.5 text-xs">
+        <dl className={`grid grid-cols-[auto,1fr] gap-x-4 gap-y-1.5 text-xs ${isReminder ? 'pt-3 border-t border-slate-100 dark:border-slate-800' : ''}`}>
           {rows.filter(([, value]) => value).map(([label, value]) => (
             <React.Fragment key={label}>
               <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
@@ -75,7 +87,7 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           </button>
           {item.nav_tab && (
             <button type="button" onClick={goToTab} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary-600 hover:bg-primary-700 text-white">
-              {item.nav_tab === 'vessel' ? d.openVessel : d.openContainer}
+              {item.nav_tab === 'vessel' ? d.openVessel : item.nav_tab === 'booking' ? d.openBooking : d.openContainer}
             </button>
           )}
         </div>
@@ -83,3 +95,4 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
     </Modal>
   );
 };
+

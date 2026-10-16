@@ -31,10 +31,17 @@ VESSEL_ETD = "vessel_etd"
 # One notification per vessel/voyage and lookup, listing every time that changed (detail["changes"])
 VESSEL_SCHEDULE = "vessel_schedule"
 
-ALL_KINDS = (
+# Reminders (not changes): a booking's cut-off coming up, and the daily morning brief
+BOOKING_CUTOFF = "booking_cutoff"
+MORNING_BRIEF = "morning_brief"
+REMINDER_KINDS = (BOOKING_CUTOFF, MORNING_BRIEF)
+
+# The kinds that existed before the reminders: a saved setting that does not list a newer kind leaves it on
+LEGACY_KINDS = (
     CONTAINER_CUSTOMS, CONTAINER_INGATE, CONTAINER_OUTGATE,
     VESSEL_CLOSING, VESSEL_CLOSING_ICD, VESSEL_OPEN_GATE, VESSEL_ETA, VESSEL_ETD,
 )
+ALL_KINDS = (*LEGACY_KINDS, *REMINDER_KINDS)
 
 # vessel_schedules column -> kind and its short label, in the order the changes are listed
 VESSEL_FIELDS = (

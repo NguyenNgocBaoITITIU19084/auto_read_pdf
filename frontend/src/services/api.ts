@@ -704,5 +704,8 @@ export const sendTestNotificationApi = async (): Promise<AppNotification> =>
 export const getNotificationSettingsApi = async (): Promise<NotificationSettings> =>
   (await apiClient.get<NotificationSettings>('/notifications/settings')).data;
 
-export const saveNotificationSettingsApi = async (kinds: string[], osEnabled: boolean): Promise<NotificationSettings> =>
-  (await apiClient.put<NotificationSettings>('/notifications/settings', { kinds, os_enabled: osEnabled })).data;
+/** `briefTime` omitted = left as it is */
+export const saveNotificationSettingsApi = async (kinds: string[], osEnabled: boolean, briefTime?: string): Promise<NotificationSettings> =>
+  (await apiClient.put<NotificationSettings>('/notifications/settings', {
+    kinds, os_enabled: osEnabled, ...(briefTime ? { brief_time: briefTime } : {}),
+  })).data;

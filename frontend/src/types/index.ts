@@ -511,8 +511,20 @@ export type NotificationKind =
   | 'vessel_closing' | 'vessel_closing_icd' | 'vessel_open_gate' | 'vessel_eta' | 'vessel_etd'
   /** every time of one vessel/voyage that changed in a lookup, listed in detail.changes */
   | 'vessel_schedule'
+  /** a booking's cut-off is 24h / 6h / 2h away (detail.hours, detail.bookings) */
+  | 'booking_cutoff'
+  /** the daily summary of today's cut-offs (detail.today / late / tomorrow / items) */
+  | 'morning_brief'
   /** the sample sent by the "send a test" button */
   | 'test';
+
+/** One booking due today, as listed in a morning brief */
+export interface BriefItem {
+  booking_no: string;
+  time: string;
+  vessel: string;
+  collection: string;
+}
 
 /** One changed time inside a 'vessel_schedule' notification (old/new as dd/mm/yyyy HH:MM) */
 export interface VesselTimeChange {
@@ -533,8 +545,13 @@ export interface AppNotification {
   detail: {
     site_id?: string; vessel?: string; voyage?: string; container?: string; event_type?: string; bookings?: string[];
     changes?: VesselTimeChange[];
+    // booking_cutoff
+    hours?: number; cutoff?: string; booking_no?: string; vessel_name?: string; count?: number;
+    // morning_brief
+    date?: string; today?: number; late?: number; tomorrow?: number; vessels_today?: number; items?: BriefItem[];
+    collections?: { name: string; today: number; late: number; tomorrow: number }[];
   };
-  nav_tab: 'vessel' | 'container' | null;
+  nav_tab: 'vessel' | 'container' | 'booking' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
@@ -545,4 +562,6 @@ export interface NotificationSettings {
   kinds: NotificationKind[];
   os_enabled: boolean;
   all_kinds: NotificationKind[];
+  /** 'HH:MM' of the morning brief */
+  brief_time: string;
 }

@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, BellOff, Box, CheckCheck, Clock, LogIn, LogOut, Ship, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlarmClock, Sunrise, Bell, BellOff, Box, CheckCheck, Clock, LogIn, LogOut, Ship, ShieldCheck, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../context/NotificationsContext';
 import { AppNotification, NotificationKind } from '../../types';
 import { formatTimeAgo } from '../../utils/formatters';
 import { notificationChange, notificationTitle } from '../../utils/notifications';
 import { VesselChangeList } from './VesselChangeList';
+import { ReminderSummary } from './ReminderViews';
 import { tf } from '../../services/i18nFormat';
 import { Tooltip } from './Tooltip';
 
@@ -19,8 +20,20 @@ const KIND_ICON: Record<NotificationKind, React.ReactNode> = {
   vessel_eta: <Clock className="w-4 h-4" />,
   vessel_etd: <Clock className="w-4 h-4" />,
   vessel_schedule: <Ship className="w-4 h-4" />,
+  booking_cutoff: <AlarmClock className="w-4 h-4" />,
+  morning_brief: <Sunrise className="w-4 h-4" />,
   test: <Bell className="w-4 h-4" />,
 };
+
+const isReminder = (item: AppNotification) => item.kind === 'booking_cutoff' || item.kind === 'morning_brief';
+
+/** Icon tile colour: containers teal, reminders amber, vessels (and the rest) sky. */
+const kindTone = (kind: string) =>
+  kind.startsWith('container_')
+    ? 'bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400'
+    : kind === 'booking_cutoff' || kind === 'morning_brief'
+    ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400'
+    : 'bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400';
 
 /** Header bell: unread badge + a panel with the latest vessel / container changes; a click opens its detail dialog. */
 export const NotificationBell: React.FC = () => {
@@ -135,11 +148,7 @@ export const NotificationBell: React.FC = () => {
                         }`}
                       >
                         <span
-                          className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
-                            item.kind.startsWith('container_')
-                              ? 'bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400'
-                              : 'bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400'
-                          }`}
+                          className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${kindTone(item.kind)}`}
                         >
                           {KIND_ICON[item.kind] || <Box className="w-4 h-4" />}
                         </span>
@@ -150,12 +159,14 @@ export const NotificationBell: React.FC = () => {
                             </span>
                             {!item.read && <span aria-label="unread" className="mt-1 w-2 h-2 rounded-full bg-primary-500 shrink-0" />}
                           </span>
-                          {item.detail?.changes?.length ? (
+                          {isReminder(item) ? (
+                            <ReminderSummary item={item} />
+                          ) : item.detail?.changes?.length ? (
                             <VesselChangeList item={item} variant="compact" />
                           ) : (
                             <span className="block text-[11px] font-mono text-slate-600 dark:text-slate-300 mt-0.5">{notificationChange(item)}</span>
                           )}
-                          {bookings.length > 0 && (
+                          {bookings.length > 0 && !isReminder(item) && (
                             <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">{tf(n.bookings, { list: bookings.join(', ') })}</span>
                           )}
                           <span className="block text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">

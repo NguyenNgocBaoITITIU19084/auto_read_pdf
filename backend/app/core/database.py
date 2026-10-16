@@ -505,6 +505,17 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_queried ON containers(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_event ON containers(collection_id, event_type);")
 
+        # Reminders already sent (kept apart from notifications, which the user may clear)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS booking_reminders (
+                booking_id INTEGER NOT NULL,
+                deadline TEXT NOT NULL,
+                threshold INTEGER NOT NULL,
+                sent_at TEXT NOT NULL,
+                PRIMARY KEY (booking_id, deadline, threshold)
+            );
+        """)
+
         # Change notifications (see the "Change notifications" section)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS notifications (
@@ -2076,24 +2087,46 @@ def _safely(fn, *args):
         return None
 
 
+BRIEF_TIME_DEFAULT = "07:30"
+_HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _load_kind_list(key: str):
+    raw = get_system_setting(key, "")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
 def get_notification_settings() -> dict:
-    """{"kinds": set of enabled kinds (default: all), "os_enabled": bool}"""
+    """{"kinds": set of enabled kinds (default: all), "os_enabled": bool, "brief_time": "HH:MM"}
+
+    A kind the user has never been offered (added after their settings were saved) is on."""
     kinds = set(cd.ALL_KINDS)
-    raw = get_system_setting("notify_kinds", "")
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                kinds = {k for k in parsed if k in cd.ALL_KINDS}
-        except (TypeError, ValueError):
-            pass
-    return {"kinds": kinds, "os_enabled": get_system_setting("notify_os", "1") != "0"}
+    saved = _load_kind_list("notify_kinds")
+    if saved is not None:
+        known = set(_load_kind_list("notify_kinds_known") or cd.LEGACY_KINDS)
+        kinds = {k for k in cd.ALL_KINDS if k in saved or k not in known}
+    brief = get_system_setting("notify_brief_time", BRIEF_TIME_DEFAULT)
+    return {"kinds": kinds, "os_enabled": get_system_setting("notify_os", "1") != "0",
+            "brief_time": brief if _HHMM.match(brief or "") else BRIEF_TIME_DEFAULT}
 
 
-def set_notification_settings(kinds, os_enabled: bool) -> dict:
+def set_notification_settings(kinds, os_enabled: bool, brief_time: str | None = None) -> dict:
+    """`brief_time` None keeps the current one."""
     clean = [k for k in cd.ALL_KINDS if k in set(kinds or [])]
     set_system_setting("notify_kinds", json.dumps(clean))
+    set_system_setting("notify_kinds_known", json.dumps(list(cd.ALL_KINDS)))
     set_system_setting("notify_os", "1" if os_enabled else "0")
+    if brief_time is not None:
+        m = _HHMM.match(brief_time.strip())
+        if not m:
+            raise ValueError(f"Invalid brief time: {brief_time}")
+        set_system_setting("notify_brief_time", f"{int(m.group(1)):02d}:{m.group(2)}")
     return get_notification_settings()
 
 
@@ -2258,11 +2291,175 @@ def _record_notifications(conn: sqlite3.Connection, col_id: int, changes: list[d
         _insert_notification(conn, col_id, ch, source, stamp)
         added += 1
     if added:
-        old = (now - timedelta(days=NOTIFY_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute("DELETE FROM notifications WHERE created_at < ?;", (old,))
-        conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?);",
-                     (NOTIFY_KEEP_MAX,))
+        _trim_notifications(conn, now)
     return added
+
+
+def _trim_notifications(conn: sqlite3.Connection, now: datetime) -> None:
+    """Keep NOTIFY_KEEP_DAYS days and at most NOTIFY_KEEP_MAX notifications (`now` naive VN time)."""
+    old = (now - timedelta(days=NOTIFY_KEEP_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM notifications WHERE created_at < ?;", (old,))
+    conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?);",
+                 (NOTIFY_KEEP_MAX,))
+
+
+# ---------------------------------------------------------------------------
+# Reminders: cut-off coming up, morning brief
+# ---------------------------------------------------------------------------
+CUTOFF_REMINDER_HOURS = (24, 6, 2)
+BRIEF_WINDOW_HOURS = 5  # a brief missed while the app was closed still goes out this long after its time
+BRIEF_LIST_LIMIT = 10
+
+
+def _left_text(delta: timedelta) -> str:
+    minutes = max(0, int(delta.total_seconds() // 60))
+    if minutes < 60:
+        return f"{minutes} phút"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} giờ {rest} phút" if rest and hours < 6 else f"{hours} giờ"
+
+
+def _open_bookings_with_deadline(conn: sqlite3.Connection, col_ids: list[int] | None = None) -> list[dict]:
+    """Open bookings (new / dispatched / stuffed) with their cut-off as an aware datetime under "deadline"."""
+    open_list = ",".join(f"'{s}'" for s in _BOOKING_OPEN_STATUSES)
+    where = f"{_STATUS_EXPR} IN ({open_list})"
+    params: tuple = ()
+    if col_ids is not None:
+        clean = _clean_ids(col_ids) or [-1]
+        where += f" AND collection_id IN ({','.join('?' * len(clean))})"
+        params = tuple(clean)
+    rows = _select_dicts(conn, f"SELECT id, collection_id, booking_no, vessel, carrier, cutoff_time, eport_cutoff "
+                               f"FROM bookings WHERE {where} ORDER BY id;", params)
+    out = []
+    for r in rows:
+        deadline = _cutoff_deadline(r.get("eport_cutoff") or r.get("cutoff_time"))
+        if deadline is not None:
+            out.append({**r, "deadline": deadline})
+    return out
+
+
+def scan_cutoff_reminders(now: datetime | None = None, col_ids: list[int] | None = None) -> int:
+    """Remind of open bookings whose cut-off is 24h / 6h / 2h away. Only the tightest threshold crossed is sent
+    (a booking first seen 1h before its cut-off gets the 2h reminder only), once per booking, cut-off time and
+    threshold — a new ePort cut-off re-arms them. Bookings of one vessel crossing together share one notification.
+    Overdue bookings are left to the late flag. Returns the number of notifications created."""
+    if cd.BOOKING_CUTOFF not in get_notification_settings()["kinds"]:
+        return 0
+    now = now or datetime.now(VN_TZ)
+    stamp_now = now.astimezone(VN_TZ).replace(tzinfo=None)
+    groups: dict[tuple, list[dict]] = {}
+    with get_connection() as conn:
+        for b in _open_bookings_with_deadline(conn, col_ids):
+            left = b["deadline"] - now
+            if left.total_seconds() <= 0:
+                continue
+            hours = left.total_seconds() / 3600
+            crossed = [t for t in CUTOFF_REMINDER_HOURS if hours <= t]
+            if not crossed:
+                continue
+            threshold = min(crossed)
+            deadline_key = b["deadline"].strftime("%Y-%m-%d %H:%M")
+            if conn.execute("SELECT 1 FROM booking_reminders WHERE booking_id = ? AND deadline = ? AND threshold = ?;",
+                            (b["id"], deadline_key, threshold)).fetchone():
+                continue
+            vessel = " ".join(str(b.get("vessel") or "").upper().split())
+            groups.setdefault((b["collection_id"], deadline_key, threshold, vessel), []).append(b)
+
+        stamp = stamp_now.strftime("%Y-%m-%d %H:%M:%S")
+        created = 0
+        for (col_id, deadline_key, threshold, vessel), items in groups.items():
+            deadline = items[0]["deadline"]
+            nos = [str(b.get("booking_no") or "").strip() or f"#{b['id']}" for b in items]
+            subject = nos[0] if len(nos) == 1 else f"{len(nos)} booking"
+            _insert_notification(conn, col_id, {
+                "kind": cd.BOOKING_CUTOFF,
+                "entity_key": f"cutoff|{col_id}|{deadline_key}|{threshold}|{items[0]['id']}",
+                "title": f"Cut-off còn {threshold} giờ: {subject}",
+                "old": "",
+                "new": f"Cut-off {deadline.strftime('%d/%m/%Y %H:%M')} · còn {_left_text(deadline - now)}",
+                "nav_tab": "booking",
+                "nav_query": nos[0] if len(nos) == 1 else (vessel or None),
+                "detail": {"hours": threshold, "cutoff": deadline.strftime("%d/%m/%Y %H:%M"), "booking_no": subject,
+                           "bookings": nos, "vessel_name": vessel, "count": len(nos)},
+            }, NOTIFY_SOURCE_AUTO, stamp)
+            conn.executemany(
+                "INSERT OR IGNORE INTO booking_reminders (booking_id, deadline, threshold, sent_at) VALUES (?, ?, ?, ?);",
+                [(b["id"], deadline_key, threshold, stamp) for b in items])
+            created += 1
+        # reminders of cut-offs long gone are no longer needed to hold anything back
+        conn.execute("DELETE FROM booking_reminders WHERE deadline < ?;",
+                     ((now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),))
+        if created:
+            _trim_notifications(conn, stamp_now)
+    if created:
+        logger.info(f"Sent {created} cut-off reminder(s)")
+    return created
+
+
+def maybe_send_morning_brief(now: datetime | None = None, col_ids: list[int] | None = None) -> bool:
+    """Once a day, from the brief time (default 07:30) for BRIEF_WINDOW_HOURS: today's open cut-offs, the late ones,
+    tomorrow's and the vessels closing today, over every collection (broken down per collection when several have
+    work). Returns True when a brief was created."""
+    settings = get_notification_settings()
+    if cd.MORNING_BRIEF not in settings["kinds"]:
+        return False
+    now = (now or datetime.now(VN_TZ)).astimezone(VN_TZ)
+    hh, mm = (int(x) for x in settings["brief_time"].split(":"))
+    start = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if not (start <= now < start + timedelta(hours=BRIEF_WINDOW_HOURS)):
+        return False
+    today = now.date()
+    if get_system_setting("notify_last_brief_date", "") == today.isoformat():
+        return False
+    tomorrow = today + timedelta(days=1)
+
+    with get_connection() as conn:
+        bookings = _open_bookings_with_deadline(conn, col_ids)
+        names = {c_id: name for c_id, name in conn.execute("SELECT id, name FROM collections;").fetchall()}
+        vwhere, vparams = "", ()
+        if col_ids is not None:
+            clean = _clean_ids(col_ids) or [-1]
+            vwhere, vparams = f" AND collection_id IN ({','.join('?' * len(clean))})", tuple(clean)
+        vessels = conn.execute(
+            f"SELECT DISTINCT vessel_name, in_out_voyage, closing_time FROM vessel_schedules "
+            f"WHERE COALESCE(closing_time, '') != ''{vwhere};", vparams).fetchall()
+
+    todays = sorted((b for b in bookings if b["deadline"].date() == today), key=lambda b: b["deadline"])
+    late = [b for b in bookings if b["deadline"] < now]
+    tomorrows = [b for b in bookings if b["deadline"].date() == tomorrow]
+    closing_today = {(v[0], v[1]) for v in vessels if (d := _cutoff_deadline(v[2])) and d.date() == today}
+
+    per_col: dict[int, dict] = {}
+    for key, group in (("today", todays), ("late", late), ("tomorrow", tomorrows)):
+        for b in group:
+            per_col.setdefault(b["collection_id"], {"name": names.get(b["collection_id"], ""), "today": 0, "late": 0,
+                                                    "tomorrow": 0})[key] += 1
+    summary = (f"{len(todays)} cut-off hôm nay · {len(late)} trễ · {len(tomorrows)} ngày mai · "
+               f"{len(closing_today)} tàu cắt máng hôm nay")
+    detail = {
+        "date": today.strftime("%d/%m/%Y"), "today": len(todays), "late": len(late), "tomorrow": len(tomorrows),
+        "vessels_today": len(closing_today),
+        "items": [{"booking_no": b.get("booking_no") or "", "time": b["deadline"].strftime("%H:%M"),
+                   "vessel": b.get("vessel") or "", "collection": names.get(b["collection_id"], "")}
+                  for b in todays[:BRIEF_LIST_LIMIT]],
+        "collections": list(per_col.values()) if len(per_col) > 1 else [],
+    }
+    stamp_now = now.replace(tzinfo=None)
+    with get_connection() as conn:
+        _insert_notification(conn, None, {
+            "kind": cd.MORNING_BRIEF, "entity_key": f"brief|{today.isoformat()}",
+            "title": f"Bản tin sáng {today.strftime('%d/%m')}", "old": "", "new": summary,
+            "nav_tab": "booking", "nav_query": None, "detail": detail,
+        }, NOTIFY_SOURCE_AUTO, stamp_now.strftime("%Y-%m-%d %H:%M:%S"))
+        _trim_notifications(conn, stamp_now)
+    set_system_setting("notify_last_brief_date", today.isoformat())
+    logger.info(f"Morning brief sent: {summary}")
+    return True
+
+
+def run_reminders(now: datetime | None = None) -> dict:
+    """The periodic reminder pass: cut-off reminders, then the morning brief when it is due."""
+    return {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
 
 
 def record_test_notification() -> dict:
@@ -2342,10 +2539,12 @@ def _summarize_for_os(rows: list[dict]) -> dict:
         cd.VESSEL_CLOSING: "tàu đổi hạn đóng máng", cd.VESSEL_CLOSING_ICD: "tàu đổi giờ đóng ICD",
         cd.VESSEL_OPEN_GATE: "tàu đổi giờ mở cổng hạ", cd.VESSEL_ETA: "tàu đổi ETA", cd.VESSEL_ETD: "tàu đổi ETD",
         cd.VESSEL_SCHEDULE: "tàu đổi lịch",
+        cd.BOOKING_CUTOFF: "nhắc cut-off", cd.MORNING_BRIEF: "bản tin sáng",
     }
-    body = " · ".join(f"{counts[k]} {words[k]}" for k in (cd.VESSEL_SCHEDULE, *cd.ALL_KINDS) if k in counts)
+    body = " · ".join(f"{counts[k]} {words.get(k, k)}" for k in (cd.VESSEL_SCHEDULE, *cd.ALL_KINDS) if k in counts)
     first = rows[0]
-    return {"title": f"{len(rows)} thay đổi mới", "body": body, "count": len(rows),
+    only_reminders = all(r["kind"] in cd.REMINDER_KINDS for r in rows)
+    return {"title": f"{len(rows)} {'nhắc việc' if only_reminders else 'thay đổi mới'}", "body": body, "count": len(rows),
             "nav_tab": first["nav_tab"], "nav_query": first["nav_query"], "notification_id": first["id"]}
 
 

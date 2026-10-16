@@ -16,7 +16,7 @@ from backend.app.core.database import (
     get_all_watchlists, get_all_container_watchlists,
     insert_vessel_schedules, insert_containers,
     get_system_setting, set_system_setting, get_notification_settings,
-    purge_expired_trash,
+    purge_expired_trash, run_reminders,
 )
 from backend.app.services.change_detection import extra_gate_rows
 from backend.app.services.eport_client import search_vessels_detailed, search_containers
@@ -29,6 +29,9 @@ AUTO_SYNC_KICK_JOB_ID = "auto_sync_kick"
 STARTUP_DELAY_SECONDS = 30
 LOG_RETENTION_JOB_ID = "log_retention"
 LOG_RETENTION_STARTUP_DELAY_SECONDS = 10
+REMINDER_JOB_ID = "reminders"
+REMINDER_INTERVAL_MINUTES = 5
+REMINDER_STARTUP_DELAY_SECONDS = 30
 DEFAULT_INTERVAL_MINUTES = 10
 MAX_INTERVAL_MINUTES = 10080  # 1 week
 VALID_MODES = ("interval", "times")
@@ -440,6 +443,27 @@ def register_log_retention_job(startup_delay_seconds: float = LOG_RETENTION_STAR
         run_at = datetime.now(VN_TZ) + timedelta(seconds=max(0, startup_delay_seconds))
         scheduler.add_job(_run_log_retention, DateTrigger(run_date=run_at, timezone=VN_TZ),
                           id="log_retention_kick", name="log_retention_kick", **JOB_OPTIONS)
+
+
+async def _run_reminders():
+    try:
+        await asyncio.to_thread(run_reminders)
+    except Exception:
+        logger.exception("Reminder job failed")
+
+
+def register_reminder_job(startup_delay_seconds: float = REMINDER_STARTUP_DELAY_SECONDS):
+    """Cut-off reminders and the morning brief: checked every REMINDER_INTERVAL_MINUTES (so a changed brief time
+    needs no rescheduling), plus a one-off run shortly after startup."""
+    setup_scheduler()
+    _remove_job(REMINDER_JOB_ID)
+    scheduler.add_job(_run_reminders, IntervalTrigger(minutes=REMINDER_INTERVAL_MINUTES, timezone=VN_TZ),
+                      id=REMINDER_JOB_ID, name="reminders", **JOB_OPTIONS)
+    if startup_delay_seconds is not None:
+        _remove_job("reminders_kick")
+        run_at = datetime.now(VN_TZ) + timedelta(seconds=max(0, startup_delay_seconds))
+        scheduler.add_job(_run_reminders, DateTrigger(run_date=run_at, timezone=VN_TZ),
+                          id="reminders_kick", name="reminders_kick", **JOB_OPTIONS)
 
 
 def shutdown_scheduler():
