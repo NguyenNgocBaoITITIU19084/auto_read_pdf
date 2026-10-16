@@ -258,7 +258,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Target Table & Column */}
-            <div data-tour="color-target-select" className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
                   {t.common.targetTable}
@@ -297,7 +297,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
             </div>
 
             {/* Match Type & Value */}
-            <div data-tour="color-condition" className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2 bg-white dark:bg-slate-900/60 rounded-xl border border-slate-200/80 dark:border-slate-700/80">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
                   {t.common.matchType}
@@ -353,7 +353,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
           </div>
 
           {/* Color Selection Mode & Palette */}
-          <div data-tour="color-palette" className="space-y-2 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
+          <div className="space-y-2 pt-1 border-t border-slate-200/60 dark:border-slate-700/60">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />

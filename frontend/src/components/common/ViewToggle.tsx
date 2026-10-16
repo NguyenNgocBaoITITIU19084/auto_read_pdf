@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { TourActionType, subscribeTourActions } from '../../services/tourEvents';
 import { CalendarDays, Table2 } from 'lucide-react';
 import { Tooltip } from './Tooltip';
 
@@ -23,6 +24,28 @@ export function useTableView(storageKey: string): [TableView, (view: TableView) 
   return [view, setView];
 }
 
+/** Lets a guided tour switch this tab between table and calendar; 'restoreViews' puts back the
+ * view the user had before the tour first switched it. */
+export function useTourView(
+  view: TableView,
+  setView: (view: TableView) => void,
+  actions: { table: TourActionType; calendar: TourActionType },
+) {
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const before = useRef<TableView | null>(null);
+  useEffect(() => subscribeTourActions((action) => {
+    const target = action === actions.table ? 'table' : action === actions.calendar ? 'calendar' : null;
+    if (target) {
+      if (before.current === null) before.current = viewRef.current;
+      setView(target);
+    } else if (action === 'restoreViews' && before.current !== null) {
+      setView(before.current);
+      before.current = null;
+    }
+  }), [setView, actions.table, actions.calendar]);
+}
+
 /** Segmented "Table | Calendar" switch. */
 export const ViewToggle: React.FC<{
   view: TableView;
@@ -30,7 +53,7 @@ export const ViewToggle: React.FC<{
   labels: { viewTable: string; viewCalendar: string; viewTooltip: string };
 }> = ({ view, onChange, labels }) => (
   <Tooltip content={labels.viewTooltip}>
-    <div role="group" className="shrink-0 inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
+    <div role="group" data-tour="view-toggle" className="shrink-0 inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
       {([
         ['table', Table2, labels.viewTable],
         ['calendar', CalendarDays, labels.viewCalendar],

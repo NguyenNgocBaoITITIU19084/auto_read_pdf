@@ -103,9 +103,9 @@ export const WeekCalendar: React.FC<WeekCalendarProps> = ({
   };
 
   return (
-    <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+    <div data-tour="calendar" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
       {/* Week navigation: ‹ [Tuần 42 · 12/10 – 18/10/2026 ▾] ›, where it sits relative to today, a way back */}
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
+      <div data-tour="calendar-week" className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
         <div className="inline-flex items-stretch rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xs overflow-hidden">
           <button
             type="button"
@@ -173,13 +173,13 @@ export const WeekCalendar: React.FC<WeekCalendarProps> = ({
           </button>
         )}
         {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
-        <span className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+        <span data-tour="calendar-summary" className="ml-auto flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
           {summary}
         </span>
       </div>
 
       {filters && (
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 shrink-0">
+        <div data-tour="calendar-filters" className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 shrink-0">
           {filters}
         </div>
       )}

@@ -42,7 +42,7 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab }) =
   ];
 
   return (
-    <div data-tour="nav-tabs" className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center gap-1 shrink-0">
+    <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center gap-1 shrink-0">
       {tabItems.map((tab) => {
         const isActive = activeTab === tab.id;
         return (

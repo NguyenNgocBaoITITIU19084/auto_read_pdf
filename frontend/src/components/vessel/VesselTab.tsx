@@ -26,7 +26,7 @@ import { VesselDetailModal } from './VesselDetailModal';
 import { VesselWatchlistModal } from './VesselWatchlistModal';
 import { VesselRow } from './VesselRow';
 import { VesselCalendar, VesselCalendarLabels } from './VesselCalendar';
-import { ViewToggle, useTableView } from '../common/ViewToggle';
+import { ViewToggle, useTableView, useTourView } from '../common/ViewToggle';
 import type { TabId } from '../common/Tabs';
 import { ResizableTh } from '../common/ResizableTh';
 import { useTableSort } from '../../hooks/useTableSort';
@@ -35,7 +35,6 @@ import { Tooltip } from '../common/Tooltip';
 import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
 import { Pagination } from '../common/Pagination';
 import { TableSkeleton } from '../common/TableSkeleton';
-import { subscribeTourActions } from '../../services/tourEvents';
 import { useServerTable, LoadMode } from '../../hooks/useServerTable';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
@@ -48,6 +47,7 @@ interface VesselTabProps {
   onNavigateTab?: (tab: TabId, query?: string) => void;
 }
 
+const VESSEL_TOUR_VIEWS = { table: 'showVesselTable', calendar: 'showVesselCalendar' } as const;
 const getRowId = (r: VesselSchedule) => r.id;
 const normalizeStr = (s?: string | null) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const normSite = (s?: string | null) => (s || '').trim().toUpperCase();
@@ -86,18 +86,6 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [trashCount, setTrashCount] = useState(0);
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
-
-  // Listen to interactive tour triggers (open/close Vessel Watchlist modal)
-  useEffect(() => {
-    const unsubscribe = subscribeTourActions((action) => {
-      if (action === 'openVesselWatchlist') {
-        setIsWatchlistOpen(true);
-      } else if (action === 'closeVesselWatchlist') {
-        setIsWatchlistOpen(false);
-      }
-    });
-    return unsubscribe;
-  }, []);
 
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "site_id", label: t.vessel.columns["site_id"], visible: true },
@@ -183,6 +171,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
   const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
   // Table or week calendar by closing time; the calendar refetches whenever the table reloads
   const [view, setView] = useTableView('vessel_view');
+  useTourView(view, setView, VESSEL_TOUR_VIEWS);
   const [calendarReloadKey, setCalendarReloadKey] = useState(0);
 
   const watchSigRef = useRef('');
@@ -581,7 +570,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Searcher Form */}
-      <div data-tour="vessel-query-form" className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
+      <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         <form onSubmit={handleQueryEport} className="flex flex-wrap items-center gap-2.5">
           <div className="w-52 shrink-0">
             <select
@@ -632,7 +621,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
             <span>{querying ? t.common.loading : t.vessel.queryBtn}</span>
           </button>
 
-          <div data-tour="vessel-watchlist-btn" className="ml-auto shrink-0">
+          <div className="ml-auto shrink-0">
             <button
               type="button"
               onClick={() => setIsWatchlistOpen(true)}
@@ -689,6 +678,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
 
           <Tooltip content="Xuất danh sách Lịch tàu ra file Excel">
             <button
+              data-tour="export"
               onClick={() => handleOpenExport('all')}
               disabled={total === 0}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white shadow-sm transition-all"
@@ -749,7 +739,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
           filterLabels={t.common.columnFilter}
         />
       ) : (
-      <div data-tour="vessel-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">

@@ -252,6 +252,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
         </div>
 
         {/* Its vessel schedule and containers on ePort */}
+        <div data-tour="booking-links">
         <BookingLinksPanel
           bookingId={booking.id}
           bookingNo={String(booking["Booking No"] ?? '')}
@@ -259,6 +260,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           labels={t.booking.links}
           onNavigateTab={onNavigateTab && ((tab, query) => { onClose(); onNavigateTab(tab, query); })}
         />
+        </div>
         </div>
 
         <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">

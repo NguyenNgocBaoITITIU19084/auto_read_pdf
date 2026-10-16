@@ -66,7 +66,7 @@ export const CollectionSwitcher: React.FC<{ onManage: () => void }> = ({ onManag
   };
 
   return (
-    <div ref={rootRef} className="relative" data-tour="collection-selector">
+    <div ref={rootRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

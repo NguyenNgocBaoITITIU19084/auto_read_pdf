@@ -151,7 +151,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
         <AutoSyncSettingsCard />
 
         {/* Form Add */}
-        <form data-tour="container-watchlist-form" onSubmit={handleAdd} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-3">
+        <form onSubmit={handleAdd} className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 uppercase mb-1">
@@ -215,7 +215,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
         </form>
 
         {/* Watchlist table & sync */}
-        <div data-tour="container-watchlist-list" className="space-y-2">
+        <div className="space-y-2">
           <div className="flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">
             <label className="inline-flex items-center gap-2 cursor-pointer select-none">
               <input

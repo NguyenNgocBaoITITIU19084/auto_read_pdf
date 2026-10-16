@@ -13,7 +13,8 @@ export interface HelpTourModalProps {
   activeTabName: string;
   t: TranslationType;
   onStartFullTour: () => void;
-  onStartTabTour: () => void;
+  /** Absent when this tab has no new features to show */
+  onStartTabTour?: () => void;
 }
 
 export const HelpTourModal: React.FC<HelpTourModalProps> = ({
@@ -56,6 +57,7 @@ export const HelpTourModal: React.FC<HelpTourModalProps> = ({
             </div>
           </button>
 
+          {onStartTabTour && (
           <button
             type="button"
             onClick={onStartTabTour}
@@ -74,6 +76,7 @@ export const HelpTourModal: React.FC<HelpTourModalProps> = ({
               </p>
             </div>
           </button>
+          )}
         </div>
 
         <div className="flex items-center justify-end pt-3 border-t border-slate-100 dark:border-slate-800">

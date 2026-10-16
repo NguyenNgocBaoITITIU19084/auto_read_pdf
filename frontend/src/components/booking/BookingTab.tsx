@@ -33,7 +33,7 @@ import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteH
 import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, effectiveCutoff, eportTooltip } from './EportCutoff';
 import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
 import { BookingCalendar, BookingCalendarLabels } from './BookingCalendar';
-import { ViewToggle, useTableView } from '../common/ViewToggle';
+import { ViewToggle, useTableView, useTourView } from '../common/ViewToggle';
 import { BookingStatusCell, BookingStatusLabels, BookingStatusPicker, OverdueMark, OVERDUE_KEY, STATUS_KEY, statusOf } from './BookingStatus';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
@@ -78,6 +78,7 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 const getBookingId = (b: Booking) => b.id;
 const HIDE_CLOSED_STORAGE_KEY = 'booking_hide_closed';
 const VIEW_STORAGE_KEY = 'booking_view';
+const BOOKING_TOUR_VIEWS = { table: 'showBookingTable', calendar: 'showBookingCalendar' } as const;
 const BOOKING_COLUMNS_MIGRATION = { version: 1, moveAfter: { [STATUS_KEY]: 'Booking No' } };
 
 interface BookingRowProps {
@@ -356,19 +357,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     };
   }, []);
 
-  // Listen to interactive tour triggers (open/close AI image OCR modal)
-  useEffect(() => {
-    const unsubscribe = subscribeTourActions((action) => {
-      if (action === 'openImageModal') {
-        setFocusImageId(null);
-        setIsImageModalOpen(true);
-      } else if (action === 'closeImageModal') {
-        setIsImageModalOpen(false);
-      }
-    });
-    return unsubscribe;
-  }, []);
-
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "Tên file PDF", label: t.booking.columns["Tên file PDF"], visible: true },
     { key: "Booking No", label: t.booking.columns["Booking No"], visible: true },
@@ -519,6 +507,15 @@ export const BookingTab: React.FC<BookingTabProps> = ({
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtual = useVirtualRows(pageRows.length, scrollRef);
+
+  // Guided tour: table / calendar, and the first booking's detail (its vessel + containers)
+  useTourView(view, setView, BOOKING_TOUR_VIEWS);
+  const firstRowRef = useRef<Booking | undefined>(undefined);
+  firstRowRef.current = pageRows[0];
+  useEffect(() => subscribeTourActions((action) => {
+    if (action === 'openFirstBooking' && firstRowRef.current) setSelectedBooking(firstRowRef.current);
+    else if (action === 'closeBookingDetail' || action === 'restoreViews') setSelectedBooking(null);
+  }), []);
   const colSpan = visibleColumns.length + 3;
 
   // Back to the top when the page or filters change
@@ -923,7 +920,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     <div className="flex-1 flex flex-col h-full overflow-hidden p-3.5 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
       {/* Top Dropzone */}
       <div
-        data-tour="booking-dropzone"
         onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
@@ -986,7 +982,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         {/* Search */}
         <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-        <div data-tour="booking-search" className="flex items-center gap-2 flex-1 min-w-[280px] max-w-md">
+        <div className="flex items-center gap-2 flex-1 min-w-[280px] max-w-md">
           <select
             value={searchField}
             onChange={(e) => setSearchField(e.target.value)}
@@ -1025,6 +1021,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             <button
               type="button"
               aria-pressed={hideClosed}
+              data-tour="booking-hide-closed"
               onClick={() => setHideClosed((v) => !v)}
               className={`shrink-0 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
                 hideClosed
@@ -1053,7 +1050,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             </button>
           </Tooltip>
 
-          <div data-tour="booking-phone-capture">
+          <div>
             <Tooltip content={t.booking.phone.scanHint}>
               <button
                 onClick={() => setIsPhoneCaptureOpen(true)}
@@ -1068,7 +1065,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             </Tooltip>
           </div>
 
-          <div data-tour="booking-col-config">
+          <div>
             <Tooltip content="Cấu hình hiển thị và sắp xếp thứ tự các cột">
               <button
                 onClick={() => setIsColumnConfigOpen(true)}
@@ -1080,7 +1077,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             </Tooltip>
           </div>
 
-          <div data-tour="booking-export">
+          <div data-tour="export">
             <Tooltip content="Xuất danh sách Booking ra file Excel">
               <button
                 onClick={() => handleOpenExport('all')}
@@ -1175,6 +1172,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                   <ResizableTh
                     key={col.key}
                     colKey={col.key}
+                    tourId={col.key === STATUS_KEY ? 'booking-status-col' : col.key === CUTOFF_KEY ? 'booking-cutoff-col' : undefined}
                     label={col.label}
                     width={columnWidths[col.key]}
                     onResize={startResize}

@@ -16,6 +16,8 @@ interface ResizableThProps {
   sortLabels?: { none: string; asc: string; desc: string };
   /** Extra header control after the sort button (e.g. a filter). */
   extra?: React.ReactNode;
+  /** data-tour anchor for the guided tour */
+  tourId?: string;
 }
 
 export const ResizableTh: React.FC<ResizableThProps> = ({
@@ -30,11 +32,13 @@ export const ResizableTh: React.FC<ResizableThProps> = ({
   onSort,
   sortLabels = { none: 'Sắp xếp', asc: 'Đang sắp xếp tăng dần', desc: 'Đang sắp xếp giảm dần' },
   extra,
+  tourId,
 }) => {
   const alignClass = align === 'center' ? 'text-center' : align === 'right' ? 'text-right' : 'text-left';
 
   return (
     <th
+      data-tour={tourId}
       style={{
         width: width ? `${width}px` : undefined,
         minWidth: `${minWidth}px`,
