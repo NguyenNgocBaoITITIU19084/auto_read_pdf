@@ -1028,6 +1028,47 @@ def get_booking_carriers(col_id: int) -> list[dict]:
     return _value_counts("bookings", "carrier", col_id)
 
 
+# The cut-off a booking is planned by: ePort's closing time when known, else the booking's own
+_DEADLINE_EXPR = ("CASE WHEN TRIM(COALESCE(eport_cutoff, '')) NOT IN ('', 'null') "
+                  "THEN eport_cutoff ELSE cutoff_time END")
+
+
+def _calendar_day_key(day: str) -> str:
+    """'2026-10-19' -> the sort_key() prefix of that date ('120261019')."""
+    return "1" + datetime.strptime(day, "%Y-%m-%d").strftime("%Y%m%d")
+
+
+def get_bookings_calendar(col_id: int, date_from: str, date_to: str, search_query: str = None,
+                          search_field: str = None, carriers: list[str] = None, statuses: list[str] = None,
+                          hide_closed: bool = False) -> dict:
+    """Bookings whose cut-off falls between two days (inclusive, 'YYYY-MM-DD'), earliest first, with the same
+    filters as the table. Each item carries "Hạn cut-off" ('YYYY-MM-DD HH:MM') and "Cut-off cả ngày" (no time
+    given: due by the end of the day). `undated` counts the matching bookings that have no readable cut-off."""
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+    day = f"substr(sort_key({_DEADLINE_EXPR}), 1, 9)"
+    with get_connection() as conn:
+        rows = _select_dicts(
+            conn, f"SELECT * FROM bookings WHERE {where} AND {day} BETWEEN ? AND ? "
+                  f"ORDER BY sort_key({_DEADLINE_EXPR}), id;",
+            (*params, _calendar_day_key(date_from), _calendar_day_key(date_to)))
+        undated = conn.execute(
+            f"SELECT COUNT(*) FROM bookings WHERE {where} AND sort_key({_DEADLINE_EXPR}) NOT LIKE '1%';",
+            tuple(params)).fetchone()[0]
+    items = []
+    for r in rows:
+        text = r.get("eport_cutoff") or r.get("cutoff_time")
+        deadline = _cutoff_deadline(text)
+        if deadline is None:
+            continue
+        item = _booking_row_to_api(r)
+        item["Hạn cut-off"] = deadline.strftime("%Y-%m-%d %H:%M")
+        item["Cut-off cả ngày"] = not _SORT_TIME.search(str(text or ""))
+        items.append(item)
+    # date-only cut-offs count as 23:59: keep the list in deadline order
+    items.sort(key=lambda i: (i["Hạn cut-off"], -i["id"]))
+    return {"items": items, "undated": undated}
+
+
 def get_booking_status_counts(col_id: int) -> list[dict]:
     """Statuses used in a collection with their booking counts, in workflow order, for the column filter."""
     with get_connection() as conn:

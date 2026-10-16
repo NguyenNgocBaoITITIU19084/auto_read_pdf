@@ -137,3 +137,33 @@ def test_status_api(col_id):
     assert page["total"] == 0
     assert client.get("/api/v1/bookings/statuses", params={"collection_id": col_id}).json() == [
         {"status": "done", "count": 1}]
+
+
+# --- calendar ------------------------------------------------------------------------------------------------
+def test_calendar_lists_bookings_by_cutoff_in_range(col_id):
+    _booking(col_id, "LATE", **{"Port Cargo Cut-off": "20/10/2026 18:00"})
+    _booking(col_id, "EARLY", **{"Port Cargo Cut-off": "2026-10-19 08:00:00"})
+    _booking(col_id, "DAYONLY", **{"Port Cargo Cut-off": "19/10/2026"})
+    _booking(col_id, "OUTSIDE", **{"Port Cargo Cut-off": "27/10/2026 10:00"})
+    _booking(col_id, "NONE", **{"Port Cargo Cut-off": "null"})
+    res = db.get_bookings_calendar(col_id, "2026-10-19", "2026-10-25")
+    assert [(i["Booking No"], i["Hạn cut-off"], i["Cut-off cả ngày"]) for i in res["items"]] == [
+        ("EARLY", "2026-10-19 08:00", False),
+        ("DAYONLY", "2026-10-19 23:59", True),
+        ("LATE", "2026-10-20 18:00", False),
+    ]
+    assert res["undated"] == 1
+
+
+def test_calendar_uses_eport_cutoff_and_table_filters(col_id):
+    a = _booking(col_id, "A1", **{"Port Cargo Cut-off": "19/10/2026 08:00", "Cut-off ePort": "22/10/2026 06:00"})
+    b = _booking(col_id, "B1", **{"Port Cargo Cut-off": "21/10/2026 08:00"})
+    db.set_booking_status([b], "done")
+    res = db.get_bookings_calendar(col_id, "2026-10-19", "2026-10-25", hide_closed=True)
+    assert [(i["id"], i["Hạn cut-off"]) for i in res["items"]] == [(a, "2026-10-22 06:00")]
+
+
+def test_calendar_api_rejects_bad_dates(col_id):
+    client = TestClient(app)
+    res = client.get("/api/v1/bookings/calendar", params={"collection_id": col_id, "date_from": "19/10", "date_to": "x"})
+    assert res.status_code == 400

@@ -12,6 +12,7 @@ from backend.app.core.database import (
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
     BOOKING_TRASH_KEEP_DAYS, BOOKING_STATUSES, set_booking_status, get_booking_status_counts,
+    get_bookings_calendar,
 )
 from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
@@ -132,6 +133,23 @@ def list_booking_ids(
 @router.get("/carriers")
 def list_booking_carriers(collection_id: int = Query(...)):
     return get_booking_carriers(collection_id)
+
+@router.get("/calendar")
+def list_bookings_calendar(
+    collection_id: int = Query(...),
+    date_from: str = Query(..., description="First day, YYYY-MM-DD"),
+    date_to: str = Query(..., description="Last day, YYYY-MM-DD"),
+    search_query: Optional[str] = Query(None),
+    search_field: Optional[str] = Query(None),
+    carriers: Optional[List[str]] = Query(None),
+    statuses: Optional[List[str]] = Query(None),
+    hide_closed: bool = Query(False),
+):
+    try:
+        return get_bookings_calendar(collection_id, date_from, date_to, search_query, search_field, carriers,
+                                     statuses, hide_closed)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ngày không hợp lệ (cần dạng YYYY-MM-DD)")
 
 @router.get("/statuses")
 def list_booking_statuses(collection_id: int = Query(...)):

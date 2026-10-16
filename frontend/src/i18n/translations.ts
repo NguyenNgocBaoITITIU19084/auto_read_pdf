@@ -481,8 +481,8 @@ export const translations = {
     booking: {
       dropzoneTitle: "Kéo thả file PDF hoặc Ảnh chụp Booking vào đây (hoặc dán Ctrl+V)",
       dropzoneSubtitle: "Hỗ trợ trích xuất tự động PDF và Ảnh chụp booking từ các hãng tàu (Dongjin, PIL, CULINES, ONE, SITC, Cosco, Maersk...)",
-      scanImage: "Quét / Dán ảnh (OCR)",
-      scanImageTooltip: "Nhận diện dữ liệu Booking từ ảnh chụp hoặc ảnh màn hình",
+      scanImage: "Hàng đợi ảnh",
+      scanImageTooltip: "Mở lại hàng đợi đọc ảnh để xem kết quả và lưu booking",
       imageModal: {
         title: "Đọc & Kiểm Tra Booking (PDF · Ảnh chụp)",
         subtitle: "Nhận diện tự động 14 trường dữ liệu từ ảnh chụp điện thoại hoặc ảnh chụp màn hình",
@@ -560,6 +560,28 @@ export const translations = {
         hideClosedTooltip: "Đang ẩn các booking Hoàn tất và Huỷ. Bấm để hiện lại.",
         showClosedTooltip: "Đang hiện cả booking Hoàn tất và Huỷ. Bấm để ẩn.",
         autoHint: "Booking tự chuyển sang \"Đã hạ bãi\" khi tra cứu container trên ePort thấy đủ số cont đã INGATE (hàng xuất, cont đầy)."
+      },
+      calendar: {
+        viewTable: "Bảng",
+        viewCalendar: "Lịch",
+        viewTooltip: "Xem dạng bảng hoặc lịch tuần theo giờ cắt máng",
+        prevWeek: "Tuần trước",
+        nextWeek: "Tuần sau",
+        weekNumber: "Tuần {n}",
+        pickDate: "Chọn ngày để xem tuần đó",
+        thisWeek: "Tuần này",
+        lastWeek: "Tuần trước",
+        followingWeek: "Tuần sau",
+        weeksAgo: "{n} tuần trước",
+        weeksAhead: "{n} tuần tới",
+        backToThisWeek: "Về tuần này",
+        weekdays: ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "CN"],
+        summary: "{count} booking trong tuần",
+        lateSummary: "{count} trễ cut-off",
+        undated: "{count} booking chưa có giờ cắt máng (không hiện trên lịch)",
+        empty: "Không có cut-off",
+        allDay: "Cả ngày",
+        error: "Không tải được lịch"
       },
       noteQuick: {
         title: "Thêm ghi chú",
@@ -1685,8 +1707,8 @@ export const translations = {
     booking: {
       dropzoneTitle: "Drag & drop PDF or Booking Images here (or paste Ctrl+V)",
       dropzoneSubtitle: "Supports automatic extraction for PDFs and booking photos from Dongjin, PIL, CULINES, ONE, SITC, Cosco, Maersk and more",
-      scanImage: "Scan / Paste Image (OCR)",
-      scanImageTooltip: "Extract booking data from photo, scan, or screenshot",
+      scanImage: "Image queue",
+      scanImageTooltip: "Reopen the image reading queue to review results and save bookings",
       imageModal: {
         title: "Read & Check Bookings (PDF · Photo)",
         subtitle: "Automatically extract 14 booking fields from photos, documents, and screenshots",
@@ -1764,6 +1786,28 @@ export const translations = {
         hideClosedTooltip: "Done and Cancelled bookings are hidden. Click to show them.",
         showClosedTooltip: "Done and Cancelled bookings are shown. Click to hide them.",
         autoHint: "A booking moves to \"Gated in\" by itself once an ePort container lookup shows all its containers gated in (export, full)."
+      },
+      calendar: {
+        viewTable: "Table",
+        viewCalendar: "Calendar",
+        viewTooltip: "Show a table or a week calendar by cut-off",
+        prevWeek: "Previous week",
+        nextWeek: "Next week",
+        weekNumber: "Week {n}",
+        pickDate: "Pick a day to show its week",
+        thisWeek: "This week",
+        lastWeek: "Last week",
+        followingWeek: "Next week",
+        weeksAgo: "{n} weeks ago",
+        weeksAhead: "In {n} weeks",
+        backToThisWeek: "Back to this week",
+        weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        summary: "{count} booking(s) this week",
+        lateSummary: "{count} late cut-off",
+        undated: "{count} booking(s) without a cut-off (not on the calendar)",
+        empty: "No cut-off",
+        allDay: "All day",
+        error: "Could not load the calendar"
       },
       noteQuick: {
         title: "Add note",

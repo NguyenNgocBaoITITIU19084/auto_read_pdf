@@ -279,9 +279,9 @@ export const startTabTour = (tabId: TabId, { t }: TourManagerOptions) => {
           align: 'start',
         },
       },
-      // 3. AI Vision OCR button
+      // 3. AI Vision OCR (dropped / pasted images open the reading window)
       {
-        element: '[data-tour="booking-ai-ocr"]',
+        element: '[data-tour="booking-dropzone"]',
         popover: {
           title: t.tour.steps.bookingAiOCR.title,
           description: t.tour.steps.bookingAiOCR.desc,

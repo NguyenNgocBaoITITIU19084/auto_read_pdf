@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
   SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2,
-  ArchiveRestore, ListChecks, EyeOff
+  ArchiveRestore, ListChecks, EyeOff, Table2, CalendarDays
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -32,6 +32,7 @@ import { Tooltip } from '../common/Tooltip';
 import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteHover';
 import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, eportTooltip } from './EportCutoff';
 import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
+import { BookingCalendar, BookingCalendarLabels } from './BookingCalendar';
 import { BookingStatusCell, BookingStatusLabels, BookingStatusPicker, OverdueMark, OVERDUE_KEY, STATUS_KEY, statusOf } from './BookingStatus';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
@@ -75,6 +76,8 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 
 const getBookingId = (b: Booking) => b.id;
 const HIDE_CLOSED_STORAGE_KEY = 'booking_hide_closed';
+const VIEW_STORAGE_KEY = 'booking_view';
+type BookingView = 'table' | 'calendar';
 const BOOKING_COLUMNS_MIGRATION = { version: 1, moveAfter: { [STATUS_KEY]: 'Booking No' } };
 
 interface BookingRowProps {
@@ -296,6 +299,23 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       return true;
     }
   });
+  // Table or week calendar, remembered like the toggle above
+  const [view, setView] = useState<BookingView>(() => {
+    try {
+      return localStorage.getItem(VIEW_STORAGE_KEY) === 'calendar' ? 'calendar' : 'table';
+    } catch {
+      return 'table';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, view);
+    } catch {
+      /* only a convenience */
+    }
+  }, [view]);
+  // Bumped on every reload so the calendar refetches too
+  const [calendarReloadKey, setCalendarReloadKey] = useState(0);
   useEffect(() => {
     try {
       localStorage.setItem(HIDE_CLOSED_STORAGE_KEY, hideClosed ? '1' : '0');
@@ -466,6 +486,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   });
 
   const loadData = useStableCallback(async (mode: LoadMode = 'refresh') => {
+    setCalendarReloadKey((k) => k + 1);
     await Promise.all([table.reload(mode), refreshTrashCount()]);
   });
 
@@ -660,6 +681,27 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     overdue: t.booking.status.overdue,
     overdueTooltip: t.booking.status.overdueTooltip,
   }), [t]);
+
+  const calendarLabels = useMemo<BookingCalendarLabels>(() => ({
+    prevWeek: t.booking.calendar.prevWeek,
+    nextWeek: t.booking.calendar.nextWeek,
+    weekNumber: t.booking.calendar.weekNumber,
+    pickDate: t.booking.calendar.pickDate,
+    thisWeek: t.booking.calendar.thisWeek,
+    lastWeek: t.booking.calendar.lastWeek,
+    followingWeek: t.booking.calendar.followingWeek,
+    weeksAgo: t.booking.calendar.weeksAgo,
+    weeksAhead: t.booking.calendar.weeksAhead,
+    backToThisWeek: t.booking.calendar.backToThisWeek,
+    weekdays: t.booking.calendar.weekdays,
+    summary: t.booking.calendar.summary,
+    lateSummary: t.booking.calendar.lateSummary,
+    undated: t.booking.calendar.undated,
+    empty: t.booking.calendar.empty,
+    allDay: t.booking.calendar.allDay,
+    error: t.booking.calendar.error,
+  }), [t]);
+  const showCalendarError = useStableCallback((message: string) => addToast(message, 'error'));
 
   const changeStatus = useStableCallback(async (ids: number[], status: BookingStatus) => {
     if (ids.length === 0) return;
@@ -910,21 +952,44 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         <div className="p-2 bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400 rounded-lg shrink-0">
           <UploadCloud className="w-5 h-5" />
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-bold text-slate-800 dark:text-slate-100">
+        <div className="flex items-center gap-2 text-xs min-w-0">
+          <span className="font-bold text-slate-800 dark:text-slate-100 truncate">
             {t.booking.dropzoneTitle}
           </span>
           <span className="text-slate-400 hidden sm:inline">•</span>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline truncate">
             (PDF, PNG, JPG, Screenshot Ctrl+V)
           </span>
         </div>
+        {/* Images still waiting in the reading queue: the way back to it once its window was closed */}
+        {imageQueue.stats.total > imageQueue.stats.saved && (
+          <Tooltip content={t.booking.scanImageTooltip}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setFocusImageId(null);
+                setIsImageModalOpen(true);
+              }}
+              className="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 dark:bg-violet-950/60 dark:text-violet-300 dark:border-violet-800 dark:hover:bg-violet-900/60 transition-colors"
+            >
+              {imageQueue.stats.queued + imageQueue.stats.reading > 0
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Sparkles className="w-3 h-3" />}
+              <span>{t.booking.scanImage}</span>
+              <span className="tabular-nums">
+                {imageQueue.stats.finished - imageQueue.stats.saved}/{imageQueue.stats.total - imageQueue.stats.saved}
+              </span>
+            </button>
+          </Tooltip>
+        )}
       </div>
 
       {/* Control Bar: Search & Action buttons */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm shrink-0">
         {/* Search */}
-        <div data-tour="booking-search" className="flex items-center gap-2 flex-1 max-w-md">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+        <div data-tour="booking-search" className="flex items-center gap-2 flex-1 min-w-[280px] max-w-md">
           <select
             value={searchField}
             onChange={(e) => setSearchField(e.target.value)}
@@ -944,7 +1009,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             <option value="note">{getColLabel(NOTE_KEY, t.booking.columns[NOTE_KEY])}</option>
           </select>
 
-          <div className="relative flex-1">
+          <div className="relative flex-1 min-w-[150px]">
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -954,6 +1019,33 @@ export const BookingTab: React.FC<BookingTabProps> = ({
               className="w-full pl-8 pr-3 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500"
             />
           </div>
+        </div>
+
+        {/* Table / calendar and the done-cancelled toggle, right after the search */}
+        <div className="flex items-center gap-2 shrink-0">
+          <Tooltip content={t.booking.calendar.viewTooltip}>
+            <div role="group" className="shrink-0 inline-flex rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-0.5">
+              {([
+                ['table', Table2, t.booking.calendar.viewTable],
+                ['calendar', CalendarDays, t.booking.calendar.viewCalendar],
+              ] as const).map(([v, Icon, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-colors ${
+                    view === v
+                      ? 'bg-white dark:bg-slate-900 text-primary-700 dark:text-primary-300 shadow-sm'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </Tooltip>
           <Tooltip content={hideClosed ? t.booking.status.hideClosedTooltip : t.booking.status.showClosedTooltip}>
             <button
               type="button"
@@ -970,6 +1062,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
             </button>
           </Tooltip>
         </div>
+        </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-1.5 shrink-0">
@@ -984,30 +1077,6 @@ export const BookingTab: React.FC<BookingTabProps> = ({
               <span>{t.booking.form.addButton}</span>
             </button>
           </Tooltip>
-
-          <div data-tour="booking-ai-ocr">
-            <Tooltip content={t.booking.scanImageTooltip}>
-              <button
-                onClick={() => {
-                  setFocusImageId(null);
-                  setIsImageModalOpen(true);
-                }}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-sm transition-all"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{t.booking.scanImage}</span>
-                {imageQueue.stats.total > imageQueue.stats.saved && (
-                  <span
-                    title={tf(t.booking.imageQueue.queuedBadge, { done: imageQueue.stats.finished, total: imageQueue.stats.total })}
-                    className="flex items-center gap-1 ml-0.5 px-1.5 py-px rounded-full bg-white/25 text-[10px] font-bold tabular-nums"
-                  >
-                    {imageQueue.stats.queued + imageQueue.stats.reading > 0 && <Loader2 className="w-3 h-3 animate-spin" />}
-                    {imageQueue.stats.finished - imageQueue.stats.saved}/{imageQueue.stats.total - imageQueue.stats.saved}
-                  </span>
-                )}
-              </button>
-            </Tooltip>
-          </div>
 
           <div data-tour="booking-phone-capture">
             <Tooltip content={t.booking.phone.scanHint}>
@@ -1087,6 +1156,19 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       </div>
 
       {/* Main Table */}
+      {view === 'calendar' && activeCollection ? (
+        <BookingCalendar
+          collectionId={activeCollection.id}
+          query={tableQuery}
+          reloadKey={calendarReloadKey}
+          labels={calendarLabels}
+          statusLabels={statusLabels}
+          onOpen={openBooking}
+          onContextMenu={handleRowContextMenu}
+          onChangeStatus={changeRowStatus}
+          onError={showCalendarError}
+        />
+      ) : (
       <div data-tour="booking-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
         <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
@@ -1218,6 +1300,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           onPageSizeChange={setPageSize}
         />
       </div>
+      )}
 
       <RowContextMenu
         position={rowMenu.state}

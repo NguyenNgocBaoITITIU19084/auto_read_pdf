@@ -116,6 +116,14 @@ export const getBookingIds = async (collectionId: number, q: TableQuery): Promis
   (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getBookingCarriers = async (collectionId: number): Promise<ColumnValueCount[]> =>
   (await apiClient.get<ColumnValueCount[]>('/bookings/carriers', { params: { collection_id: collectionId } })).data;
+/** Bookings whose cut-off falls between two days ('YYYY-MM-DD'), with the table's filters (its sort is ignored). */
+export const getBookingsCalendar = async (
+  collectionId: number, dateFrom: string, dateTo: string, q: TableQuery,
+): Promise<{ items: Booking[]; undated: number }> =>
+  (await apiClient.get<{ items: Booking[]; undated: number }>('/bookings/calendar', {
+    params: { ...tableParams(collectionId, { ...q, sort_by: undefined }), date_from: dateFrom, date_to: dateTo },
+    paramsSerializer: listParams,
+  })).data;
 export const getBookingStatuses = async (collectionId: number): Promise<ColumnValueCount[]> =>
   (await apiClient.get<{ status: string; count: number }[]>('/bookings/statuses', { params: { collection_id: collectionId } }))
     .data.map((s) => ({ carrier: s.status, count: s.count }));
