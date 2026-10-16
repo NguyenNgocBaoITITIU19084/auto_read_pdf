@@ -178,7 +178,7 @@ export const WeekCalendar: React.FC<WeekCalendarProps> = ({
 
       {/* One column per day */}
       <div className="flex-1 min-h-0 overflow-auto">
-        <div className="grid grid-cols-7 min-w-[900px] h-full divide-x divide-slate-200 dark:divide-slate-800">
+        <div className="grid grid-cols-7 min-w-[900px] min-h-full divide-x divide-slate-200 dark:divide-slate-800">
           {days.map((d, i) => {
             const key = dayKey(d);
             const list = itemsByDay.get(key) || [];
