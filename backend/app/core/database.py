@@ -369,7 +369,7 @@ def init_db():
             );
         """)
         _ensure_columns(conn, "bookings", [("carrier", "TEXT"), ("port_of_discharging", "TEXT"), ("note", "TEXT"), ("created_at", "TEXT"),
-                                           ("eport_cutoff", "TEXT"), ("eport_cutoff_at", "TEXT")])
+                                           ("eport_cutoff", "TEXT"), ("eport_cutoff_at", "TEXT"), ("status", "TEXT")])
 
         # Legacy vessel_schedules without collection_id are dropped and recreated
         vs_exists = conn.execute(
@@ -644,13 +644,100 @@ def update_collection_settings(col_id: int, settings_str: str):
 # ---------------------------------------------------------------------------
 # Bookings
 # ---------------------------------------------------------------------------
+# Booking workflow status, stored as a stable code (labels live in the frontend translations)
+BOOKING_STATUSES = ("new", "dispatched", "stuffed", "gated_in", "done", "cancelled")
+BOOKING_STATUS_DEFAULT = "new"
+# Still being worked on: a passed cut-off is late, and ePort gate-ins can move them on to "gated_in"
+_BOOKING_OPEN_STATUSES = ("new", "dispatched", "stuffed")
+_BOOKING_CLOSED_STATUSES = ("done", "cancelled")
+_STATUS_EXPR = f"COALESCE(NULLIF(TRIM(status), ''), '{BOOKING_STATUS_DEFAULT}')"
+
+
+def _clean_status(value) -> str:
+    v = str(value or "").strip().lower()
+    return v if v in BOOKING_STATUSES else BOOKING_STATUS_DEFAULT
+
+
+def _cutoff_deadline(text) -> datetime | None:
+    """'19/10/2026 10:00' / '2026-10-19 10:00:00' -> aware datetime; a date without a time means the end of that day."""
+    text = str(text or "").strip()
+    date = _SORT_DMY.search(text)
+    ymd = (date.group(3), date.group(2), date.group(1)) if date else None
+    if not ymd and (iso := _SORT_YMD.search(text)):
+        ymd = iso.groups()
+    if not ymd:
+        return None
+    t = _SORT_TIME.search(text)
+    hm = (int(t.group(1)), int(t.group(2))) if t else (23, 59)
+    try:
+        return datetime(int(ymd[0]), int(ymd[1]), int(ymd[2]), *hm, tzinfo=VN_TZ)
+    except ValueError:
+        return None
+
+
+def _is_cutoff_overdue(row: dict, now: datetime | None = None) -> bool:
+    """An open booking whose cut-off (ePort's when known, else its own) has passed."""
+    if _clean_status(row.get("status")) not in _BOOKING_OPEN_STATUSES:
+        return False
+    deadline = _cutoff_deadline(row.get("eport_cutoff") or row.get("cutoff_time"))
+    return deadline is not None and deadline < (now or datetime.now(VN_TZ))
+
+
+_QTY_NUMBER = re.compile(r"\d+")
+
+
+def _sync_booking_gate_status(conn: sqlite3.Connection, col_id: int) -> int:
+    """Move open bookings to "gated_in" once ePort shows all their containers gated in full for export.
+
+    A container belongs to a booking when its BILL_BOOK is the booking number. Q'ty containers are needed
+    (1 when Q'ty is not a number). Status only ever moves forward; done / cancelled bookings are left alone.
+    Returns the number of bookings changed.
+    """
+    open_list = ",".join(f"'{s}'" for s in _BOOKING_OPEN_STATUSES)
+    rows = conn.execute(f"""
+        SELECT b.id, b.qty, COUNT(DISTINCT UPPER(TRIM(c.containerno)))
+        FROM bookings b
+        JOIN containers c ON c.collection_id = b.collection_id
+            AND UPPER(TRIM(c.bill_book)) = UPPER(TRIM(b.booking_no))
+        WHERE b.collection_id = ? AND TRIM(COALESCE(b.booking_no, '')) NOT IN ('', 'null')
+            AND {_STATUS_EXPR} IN ({open_list})
+            AND UPPER(TRIM(c.fel)) = 'F' AND UPPER(c.im_exp) LIKE '%EXPORT%'
+            AND (REPLACE(UPPER(c.event_type), ' ', '') LIKE '%INGATE%'
+                 OR REPLACE(UPPER(c.event_type), ' ', '') LIKE '%GATEIN%')
+        GROUP BY b.id;
+    """, (col_id,)).fetchall()
+    changed = 0
+    for booking_id, qty, gated in rows:
+        m = _QTY_NUMBER.search(str(qty or ""))
+        needed = max(int(m.group()), 1) if m else 1
+        if gated >= needed:
+            conn.execute("UPDATE bookings SET status = 'gated_in' WHERE id = ?;", (booking_id,))
+            changed += 1
+    if changed:
+        logger.info(f"{changed} booking(s) of collection {col_id} moved to gated_in from ePort gate-ins")
+    return changed
+
+
+def set_booking_status(ids: list[int], status: str) -> int:
+    if status not in BOOKING_STATUSES:
+        raise ValueError(f"Invalid booking status: {status}")
+    clean = _clean_ids(ids)
+    changed = 0
+    with get_connection() as conn:
+        for chunk in _chunks(clean):
+            placeholders = ",".join(["?"] * len(chunk))
+            cur = conn.execute(f"UPDATE bookings SET status = ? WHERE id IN ({placeholders});", (status, *chunk))
+            changed += max(cur.rowcount, 0)
+    return changed
+
+
 def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
     cursor.execute("""
         INSERT INTO bookings (
             collection_id, pdf_name, booking_no, carrier, port_of_discharging, place_of_delivery, block_val,
             ts_port, equipment_type, qty, empty_pickup_cy, full_return_cy,
-            cutoff_time, vessel, etd, note, created_at, eport_cutoff, eport_cutoff_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            cutoff_time, vessel, etd, note, created_at, eport_cutoff, eport_cutoff_at, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     """, (
         col_id,
         data.get("Tên file PDF", data.get("pdf_name", "")),
@@ -673,6 +760,8 @@ def _insert_booking_row(cursor: sqlite3.Cursor, col_id: int, data: dict) -> int:
         # ePort cut-off is derived data; only restored backups carry it in (new bookings get it from _sync_...)
         data.get("Cut-off ePort", data.get("eport_cutoff")) or "",
         data.get("Cut-off ePort cập nhật", data.get("eport_cutoff_at")) or "",
+        # restored backups keep their status; everything else starts as "new"
+        _clean_status(data.get("Trạng thái", data.get("status"))),
     ))
     return cursor.lastrowid
 
@@ -714,6 +803,8 @@ def insert_booking(col_id: int, data: dict) -> int:
         booking_id = _insert_booking_row(conn.cursor(), col_id, data)
         # a vessel looked up earlier already knows its cut-off
         _sync_booking_eport_cutoffs(conn, col_id, [booking_id])
+        # its containers may already have been looked up
+        _sync_booking_gate_status(conn, col_id)
         return booking_id
 
 
@@ -776,12 +867,19 @@ _BOOKING_ALL_FIELDS = ("pdf_name", "booking_no", "carrier", "port_of_discharging
 
 
 def _booking_where(col_id: int, search_query: str = None, search_field: str = None,
-                   carriers: list[str] = None) -> tuple[str, list]:
+                   carriers: list[str] = None, statuses: list[str] = None,
+                   hide_closed: bool = False) -> tuple[str, list]:
     where = "collection_id = ?"
     params: list = [col_id]
     extra, extra_params = _values_filter("carrier", carriers)  # '' picks bookings without a carrier
     where += extra
     params.extend(extra_params)
+    if statuses:
+        where += f" AND {_STATUS_EXPR} IN ({','.join('?' * len(statuses))})"
+        params.extend(statuses)
+    if hide_closed and not statuses:  # statuses picked in the column filter win over the toolbar toggle
+        where += f" AND {_STATUS_EXPR} NOT IN ({','.join('?' * len(_BOOKING_CLOSED_STATUSES))})"
+        params.extend(_BOOKING_CLOSED_STATUSES)
     if search_query:
         q = f"%{search_query}%"
         if search_field and search_field != "all" and search_field in BOOKING_SEARCH_COLUMNS:
@@ -835,6 +933,8 @@ def _booking_row_to_api(row: dict) -> dict:
         "Thời gian thêm": row.get("created_at") or "",
         "Cut-off ePort": row.get("eport_cutoff") or "",
         "Cut-off ePort cập nhật": row.get("eport_cutoff_at") or "",
+        "Trạng thái": _clean_status(row.get("status")),
+        "Trễ cut-off": _is_cutoff_overdue(row),
     }
 
 
@@ -881,6 +981,11 @@ def _value_counts(table: str, col: str, col_id: int) -> list[dict]:
 
 def _booking_order(sort_by: str = None, sort_dir: str = None) -> str:
     """ORDER BY for a table column; blank / 'null' values stay last in both directions."""
+    if sort_by == "Trạng thái":
+        # workflow order, not alphabetical
+        rank = " ".join(f"WHEN '{s}' THEN {i}" for i, s in enumerate(BOOKING_STATUSES))
+        direction = "DESC" if (sort_dir or "").lower() == "desc" else "ASC"
+        return f"ORDER BY CASE {_STATUS_EXPR} {rank} END {direction}, id DESC"
     if sort_by not in _BOOKING_SORT_COLUMNS:
         return _BOOKING_ORDER
     return _sort_order(_BOOKING_SORT_COLUMNS[sort_by], sort_dir)
@@ -896,9 +1001,10 @@ def get_bookings(col_id: int, search_query: str = None, search_field: str = None
 
 def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
                       search_query: str = None, search_field: str = None,
-                      sort_by: str = None, sort_dir: str = None, carriers: list[str] = None) -> dict:
+                      sort_by: str = None, sort_dir: str = None, carriers: list[str] = None,
+                      statuses: list[str] = None, hide_closed: bool = False) -> dict:
     limit, offset = _page_bounds(limit, offset)
-    where, params = _booking_where(col_id, search_query, search_field, carriers)
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
     order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
@@ -908,8 +1014,9 @@ def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int 
 
 
 def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None,
-                    sort_by: str = None, sort_dir: str = None, carriers: list[str] = None) -> list[int]:
-    where, params = _booking_where(col_id, search_query, search_field, carriers)
+                    sort_by: str = None, sort_dir: str = None, carriers: list[str] = None,
+                    statuses: list[str] = None, hide_closed: bool = False) -> list[int]:
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
     order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
         return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {order};",
@@ -919,6 +1026,14 @@ def get_booking_ids(col_id: int, search_query: str = None, search_field: str = N
 def get_booking_carriers(col_id: int) -> list[dict]:
     """Carriers of a collection with their booking counts ('' = no carrier), for the column filter."""
     return _value_counts("bookings", "carrier", col_id)
+
+
+def get_booking_status_counts(col_id: int) -> list[dict]:
+    """Statuses used in a collection with their booking counts, in workflow order, for the column filter."""
+    with get_connection() as conn:
+        counts = dict(conn.execute(f"SELECT {_STATUS_EXPR} AS s, COUNT(*) FROM bookings WHERE collection_id = ? GROUP BY s;",
+                                   (col_id,)).fetchall())
+    return [{"status": s, "count": counts[s]} for s in BOOKING_STATUSES if counts.get(s)]
 
 
 def get_bookings_by_ids(ids: list[int]) -> list[dict]:
@@ -1637,6 +1752,7 @@ def insert_containers(col_id: int, containers: list[dict], source: str = "manual
         changes = _safely(_detect_container_changes, conn, col_id, containers, enabled)
         ids = _insert_container_rows(conn.cursor(), col_id, containers, _now_str())
         _safely(_record_notifications, conn, col_id, changes or [], source)
+        _safely(_sync_booking_gate_status, conn, col_id)
         return ids
 
 

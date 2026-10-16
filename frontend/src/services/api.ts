@@ -1,6 +1,6 @@
 import axios from 'axios';
 import {
-  Collection, Booking, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
+  Collection, Booking, BookingStatus, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
@@ -74,6 +74,8 @@ const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, 
     params.sort_dir = q.sort_dir || 'asc';
   }
   if (q.carriers?.length) params.carriers = q.carriers;
+  if (q.statuses?.length) params.statuses = q.statuses;
+  if (q.hide_closed) params.hide_closed = 'true';
   return params;
 };
 
@@ -114,6 +116,11 @@ export const getBookingIds = async (collectionId: number, q: TableQuery): Promis
   (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getBookingCarriers = async (collectionId: number): Promise<ColumnValueCount[]> =>
   (await apiClient.get<ColumnValueCount[]>('/bookings/carriers', { params: { collection_id: collectionId } })).data;
+export const getBookingStatuses = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<{ status: string; count: number }[]>('/bookings/statuses', { params: { collection_id: collectionId } }))
+    .data.map((s) => ({ carrier: s.status, count: s.count }));
+export const setBookingStatusApi = async (ids: number[], status: BookingStatus): Promise<number> =>
+  (await apiClient.post<{ updated: number }>('/bookings/status', { ids, status })).data.updated;
 export const getBookingsByIds = async (ids: number[]): Promise<Booking[]> =>
   (await apiClient.post<Booking[]>('/bookings/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 

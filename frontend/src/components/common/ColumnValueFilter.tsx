@@ -25,13 +25,15 @@ interface ColumnValueFilterProps {
   value: string[];
   onChange: (values: string[]) => void;
   labels: ColumnFilterLabels;
+  /** Display text of a stored value (e.g. a status code); the value itself is shown when omitted */
+  formatOption?: (value: string) => string;
 }
 
 const WIDTH = 224;
 const MARGIN = 8;
 
 /** Filter button for a table column (e.g. the carrier): a checkbox list of its values, in a portal. */
-export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, loadOptions, value, onChange, labels }) => {
+export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, loadOptions, value, onChange, labels, formatOption }) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -83,7 +85,8 @@ export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, lo
   const selected = new Set(value);
   const toggle = (c: string) => onChange(selected.has(c) ? value.filter((v) => v !== c) : [...value, c]);
   const q = query.trim().toUpperCase();
-  const shown = (options || []).filter((o) => !q || (o.carrier || labels.empty).toUpperCase().includes(q));
+  const text = (v: string) => (v ? (formatOption ? formatOption(v) : v) : labels.empty);
+  const shown = (options || []).filter((o) => !q || text(o.carrier).toUpperCase().includes(q));
   const active = value.length > 0;
 
   return (
@@ -138,7 +141,7 @@ export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, lo
                       onChange={() => toggle(o.carrier)}
                       className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
                     />
-                    <span className={`flex-1 truncate ${o.carrier ? '' : 'italic text-slate-400'}`}>{o.carrier || labels.empty}</span>
+                    <span className={`flex-1 truncate ${o.carrier ? '' : 'italic text-slate-400'}`}>{text(o.carrier)}</span>
                     <span className="text-[10px] text-slate-400 tabular-nums">{o.count}</span>
                   </label>
                 ))

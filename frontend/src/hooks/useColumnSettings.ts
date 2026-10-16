@@ -10,6 +10,8 @@ export interface ColumnMigrationOptions {
   replace?: Record<string, string>;
   /** Keys forced hidden (appended hidden if missing from the stored list). */
   hide?: string[];
+  /** key -> key it should come right after (e.g. a column that was first added at the far end). */
+  moveAfter?: Record<string, string>;
 }
 
 export interface ColumnMigration extends ColumnMigrationOptions {
@@ -18,11 +20,34 @@ export interface ColumnMigration extends ColumnMigrationOptions {
 }
 
 /**
+ * Adds the default columns missing from a stored list, each right after the column that precedes it in the
+ * defaults (first when none does), so a new column shows up where it belongs instead of at the far end.
+ */
+export function insertMissingDefaults(stored: ColumnDef[], defaults: ColumnDef[]): ColumnDef[] {
+  const result = [...stored];
+  const keys = new Set(stored.map((c) => c.key));
+  defaults.forEach((def, i) => {
+    if (keys.has(def.key)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const idx = result.findIndex((c) => c.key === defaults[j].key);
+      if (idx !== -1) {
+        at = idx + 1;
+        break;
+      }
+    }
+    result.splice(at, 0, { ...def, defaultLabel: def.label });
+    keys.add(def.key);
+  });
+  return result;
+}
+
+/**
  * Migrates a stored column list to a new set of defaults.
  * - Keys in `replace` are swapped in place for their new key (unless the new key is already stored,
  *   in which case the old one is simply hidden). Old keys that still exist in `defaults` are kept, hidden.
  * - Keys in `hide` become `visible: false`.
- * - Stored columns that no longer exist in `defaults` are dropped; missing defaults are appended.
+ * - Stored columns that no longer exist in `defaults` are dropped; missing defaults are inserted in place.
  */
 export function migrateColumns(
   stored: ColumnDef[],
@@ -64,11 +89,14 @@ export function migrateColumns(
     push({ ...col });
   });
 
-  defaults.forEach((def) => {
-    if (!seen.has(def.key)) push({ ...def, defaultLabel: def.label });
+  const placed = insertMissingDefaults(result, defaults);
+  Object.entries(options.moveAfter || {}).forEach(([key, after]) => {
+    const from = placed.findIndex((c) => c.key === key);
+    if (from === -1 || !placed.some((c) => c.key === after)) return;
+    const [col] = placed.splice(from, 1);
+    placed.splice(placed.findIndex((c) => c.key === after) + 1, 0, col);
   });
-
-  return result.map((col) => (hide.has(col.key) ? { ...col, visible: false } : col));
+  return placed.map((col) => (hide.has(col.key) ? { ...col, visible: false } : col));
 }
 
 interface UseColumnSettingsOptions {
@@ -100,7 +128,6 @@ export function useColumnSettings({
             localStorage.setItem(versionKey, String(migration.version));
           }
         }
-        const existingKeys = new Set(parsed.map((c) => c.key));
         const merged: ColumnDef[] = parsed.map((col) => {
           const def = defaultColumns.find((d) => d.key === col.key);
           const defLabel = def ? def.label : col.key;
@@ -112,15 +139,7 @@ export function useColumnSettings({
             label: hasCustomLabel ? (col.customLabel as string) : (col.label || defLabel),
           };
         });
-        defaultColumns.forEach((col) => {
-          if (!existingKeys.has(col.key)) {
-            merged.push({
-              ...col,
-              defaultLabel: col.label,
-            });
-          }
-        });
-        return merged;
+        return insertMissingDefaults(merged, defaultColumns);
       }
     } catch (e) {
       console.error('Error loading saved columns:', e);

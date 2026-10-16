@@ -9,6 +9,10 @@ export interface Collection {
   watchlist_count?: number;
 }
 
+/** Booking workflow status, in workflow order (stored as these codes; labels come from translations) */
+export const BOOKING_STATUSES = ['new', 'dispatched', 'stuffed', 'gated_in', 'done', 'cancelled'] as const;
+export type BookingStatus = typeof BOOKING_STATUSES[number];
+
 export interface Booking {
   id: number;
   "Tên file PDF"?: string;
@@ -33,6 +37,9 @@ export interface Booking {
   "ETD_Pre"?: string;
   "Trunk Vessel"?: string;
   "ETD_Trunk"?: string;
+  "Trạng thái"?: BookingStatus;
+  /** Open booking whose cut-off (ePort's when known) has passed (computed by the server) */
+  "Trễ cut-off"?: boolean;
   [key: string]: any;
 }
 
@@ -459,6 +466,10 @@ export interface TableQuery {
   sort_dir?: 'asc' | 'desc';
   /** Filter column values to keep ('' = blank): booking carrier, container line operator */
   carriers?: string[];
+  /** Booking statuses to keep */
+  statuses?: string[];
+  /** Leave out done / cancelled bookings */
+  hide_closed?: boolean;
 }
 
 // ---------------------------------------------------------------------------

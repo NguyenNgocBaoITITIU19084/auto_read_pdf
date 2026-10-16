@@ -539,7 +539,27 @@ export const translations = {
         "Vessel": "Tên tàu / Số chuyến",
         "ETD": "Ngày tàu chạy (ETD)",
         "Ghi chú": "Ghi chú",
-        "Thời gian thêm": "Thời gian thêm"
+        "Thời gian thêm": "Thời gian thêm",
+        "Trạng thái": "Trạng thái"
+      },
+      status: {
+        labels: {
+          new: "Mới",
+          dispatched: "Đã điều xe lấy rỗng",
+          stuffed: "Đã đóng hàng",
+          gated_in: "Đã hạ bãi",
+          done: "Hoàn tất",
+          cancelled: "Huỷ"
+        },
+        overdue: "Trễ",
+        overdueTooltip: "Trễ cut-off: đã quá giờ cắt máng mà booking chưa hạ bãi",
+        change: "Đổi trạng thái",
+        changeTitle: "Đổi trạng thái {count} booking",
+        changeSuccess: "Đã chuyển {count} booking sang \"{status}\"",
+        hideClosed: "Ẩn Hoàn tất / Huỷ",
+        hideClosedTooltip: "Đang ẩn các booking Hoàn tất và Huỷ. Bấm để hiện lại.",
+        showClosedTooltip: "Đang hiện cả booking Hoàn tất và Huỷ. Bấm để ẩn.",
+        autoHint: "Booking tự chuyển sang \"Đã hạ bãi\" khi tra cứu container trên ePort thấy đủ số cont đã INGATE (hàng xuất, cont đầy)."
       },
       noteQuick: {
         title: "Thêm ghi chú",
@@ -1723,7 +1743,27 @@ export const translations = {
         "Vessel": "Vessel / Voyage",
         "ETD": "ETD",
         "Ghi chú": "Note",
-        "Thời gian thêm": "Added"
+        "Thời gian thêm": "Added",
+        "Trạng thái": "Status"
+      },
+      status: {
+        labels: {
+          new: "New",
+          dispatched: "Empty pickup dispatched",
+          stuffed: "Stuffed",
+          gated_in: "Gated in",
+          done: "Done",
+          cancelled: "Cancelled"
+        },
+        overdue: "Late",
+        overdueTooltip: "Late cut-off: the cut-off has passed and the booking is not gated in yet",
+        change: "Change status",
+        changeTitle: "Change status of {count} booking(s)",
+        changeSuccess: "Moved {count} booking(s) to \"{status}\"",
+        hideClosed: "Hide Done / Cancelled",
+        hideClosedTooltip: "Done and Cancelled bookings are hidden. Click to show them.",
+        showClosedTooltip: "Done and Cancelled bookings are shown. Click to hide them.",
+        autoHint: "A booking moves to \"Gated in\" by itself once an ePort container lookup shows all its containers gated in (export, full)."
       },
       noteQuick: {
         title: "Add note",

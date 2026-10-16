@@ -2,16 +2,17 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
   SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2,
-  ArchiveRestore
+  ArchiveRestore, ListChecks, EyeOff
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useMobileBridge } from '../../context/MobileBridgeContext';
 import { useImageQueue } from '../../context/ImageQueueContext';
-import { Booking, PageResult, TableQuery } from '../../types';
+import { Booking, BookingStatus, BOOKING_STATUSES, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers,
-  deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi, getBookingTrashCount
+  deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi, getBookingTrashCount,
+  getBookingStatuses, setBookingStatusApi
 } from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
@@ -31,6 +32,7 @@ import { Tooltip } from '../common/Tooltip';
 import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteHover';
 import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, eportTooltip } from './EportCutoff';
 import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
+import { BookingStatusCell, BookingStatusLabels, BookingStatusPicker, OverdueMark, OVERDUE_KEY, STATUS_KEY, statusOf } from './BookingStatus';
 import { formatRowForCopy, formatRowsAsTsv, copyTextToClipboard } from '../../utils/formatters';
 import { getBookingVesselCandidates, guessSiteFromDepot, splitVesselVoyage, vesselLookupKey } from '../../utils/vessel';
 import { Pagination } from '../common/Pagination';
@@ -72,6 +74,8 @@ function useStableCallback<A extends unknown[], R>(fn: (...args: A) => R): (...a
 }
 
 const getBookingId = (b: Booking) => b.id;
+const HIDE_CLOSED_STORAGE_KEY = 'booking_hide_closed';
+const BOOKING_COLUMNS_MIGRATION = { version: 1, moveAfter: { [STATUS_KEY]: 'Booking No' } };
 
 interface BookingRowProps {
   booking: Booking;
@@ -93,6 +97,8 @@ interface BookingRowProps {
   onSaveNote: (booking: Booking, note: string) => Promise<void>;
   timeLabels: RelativeTimeLabels;
   eportLabels: EportCutoffLabels;
+  statusLabels: BookingStatusLabels;
+  onChangeStatus: (booking: Booking, status: BookingStatus) => void;
 }
 
 const BookingRow = React.memo(function BookingRow({
@@ -115,11 +121,14 @@ const BookingRow = React.memo(function BookingRow({
   onSaveNote,
   timeLabels,
   eportLabels,
+  statusLabels,
+  onChangeStatus,
 }: BookingRowProps) {
   const note = getBookingNote(booking);
   const saveNote = (text: string) => onSaveNote(booking, text);
   const noteHoverProps = { note, onSave: saveNote, addLabels: noteAddLabels };
   const eport = String(booking[EPORT_CUTOFF_KEY] || '').trim();
+  const overdue = !!booking[OVERDUE_KEY];
   return (
     <tr
       onDoubleClick={() => onOpen(booking)}
@@ -165,14 +174,20 @@ const BookingRow = React.memo(function BookingRow({
             }}
             className="py-1.5 px-2.5 truncate"
             title={
-              col.key === 'Booking No' || col.key === NOTE_KEY || col.key === CREATED_KEY
+              col.key === 'Booking No' || col.key === NOTE_KEY || col.key === CREATED_KEY || col.key === STATUS_KEY
                 ? undefined
                 : col.key === CUTOFF_KEY && eport
                 ? eportTooltip(eportLabels, eport, val)
                 : String(val || '')
             }
           >
-            {col.key === CREATED_KEY ? (
+            {col.key === STATUS_KEY ? (
+              <BookingStatusCell
+                status={val}
+                labels={statusLabels}
+                onChange={(status) => onChangeStatus(booking, status)}
+              />
+            ) : col.key === CREATED_KEY ? (
               <AddedAt value={val} labels={timeLabels} />
             ) : col.key === 'Booking No' || col.key === NOTE_KEY ? (
               <NoteHover {...noteHoverProps} title={note ? noteLabel : noteAddLabels.title} className="block truncate">
@@ -184,8 +199,15 @@ const BookingRow = React.memo(function BookingRow({
                   <span className="text-slate-300 dark:text-slate-600">—</span>
                 )}
               </NoteHover>
-            ) : col.key === CUTOFF_KEY && eport ? (
-              <EportCutoffCell eport={eport} original={val} badge={eportLabels.badge} />
+            ) : col.key === CUTOFF_KEY && (eport || overdue) ? (
+              <span className="inline-flex items-center gap-1.5 max-w-full">
+                {eport ? (
+                  <EportCutoffCell eport={eport} original={val} badge={eportLabels.badge} />
+                ) : (
+                  <span className="font-semibold text-rose-600 dark:text-rose-400 truncate">{String(val)}</span>
+                )}
+                {overdue && <OverdueMark labels={statusLabels} />}
+              </span>
             ) : (
               <ValueBadge
                 table="booking"
@@ -253,6 +275,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   onPasteRequestHandled,
 }) => {
   const { t, activeCollection } = useApp();
+  /** Copies and exports show the status by name, not by its stored code. */
+  const withStatusLabel = useCallback(
+    (b: Booking): Booking => ({ ...b, [STATUS_KEY]: t.booking.status.labels[statusOf(b[STATUS_KEY])] } as Record<string, unknown> as Booking),
+    [t],
+  );
   const { addToast } = useToastActions();
   const confirm = useConfirm();
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
@@ -260,6 +287,22 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   // Column sort (server side; default newest first) and the carrier column filter
   const { sort, toggleSort, sortDirOf } = useTableSort('booking_sort');
   const [carrierFilter, setCarrierFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  // Done / cancelled bookings are hidden by default; the toolbar toggle says so and brings them back
+  const [hideClosed, setHideClosed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(HIDE_CLOSED_STORAGE_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(HIDE_CLOSED_STORAGE_KEY, hideClosed ? '1' : '0');
+    } catch {
+      /* only a convenience */
+    }
+  }, [hideClosed]);
 
   useEffect(() => {
     if (initialSearchQuery !== undefined) {
@@ -286,6 +329,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [trashCount, setTrashCount] = useState(0);
   const [isBulkVesselLookupOpen, setIsBulkVesselLookupOpen] = useState(false);
+  const [isStatusPickerOpen, setIsStatusPickerOpen] = useState(false);
   const [bookingForm, setBookingForm] = useState<{ mode: 'create' | 'edit'; booking: Booking | null } | null>(null);
 
   // Bulk action state
@@ -316,6 +360,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const defaultColumns: ColumnDef[] = useMemo(() => [
     { key: "Tên file PDF", label: t.booking.columns["Tên file PDF"], visible: true },
     { key: "Booking No", label: t.booking.columns["Booking No"], visible: true },
+    { key: STATUS_KEY, label: t.booking.columns[STATUS_KEY], visible: true },
     { key: "Carrier", label: t.booking.columns["Carrier"], visible: true },
     { key: "Vessel", label: t.booking.columns["Vessel"], visible: true },
     { key: "ETD", label: t.booking.columns["ETD"], visible: true },
@@ -335,6 +380,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const defaultWidths = useMemo(() => ({
     "Tên file PDF": 160,
     "Booking No": 130,
+    [STATUS_KEY]: 175,
     "Carrier": 145,
     "Vessel": 170,
     "ETD": 110,
@@ -346,7 +392,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     "Q'ty": 90,
     "Empty Pick Up CY": 180,
     "Full return CY": 150,
-    "Port Cargo Cut-off": 140,
+    "Port Cargo Cut-off": 190,
     [NOTE_KEY]: 220,
     [CREATED_KEY]: 120,
   }), []);
@@ -355,6 +401,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     storageKey: 'booking_table',
     defaultColumns,
     defaultWidths,
+    // the status column first landed at the far end of saved layouts: bring it next to the booking number
+    migration: BOOKING_COLUMNS_MIGRATION,
   });
 
   // Keep labels updated if language changes
@@ -389,8 +437,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   // ---------------------------------------------------------------------------
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
   const tableQuery = useMemo<TableQuery>(
-    () => ({ search_query: debouncedQuery, search_field: searchField, sort_by: sort?.key, sort_dir: sort?.dir, carriers: carrierFilter }),
-    [debouncedQuery, searchField, sort, carrierFilter]
+    () => ({
+      search_query: debouncedQuery, search_field: searchField, sort_by: sort?.key, sort_dir: sort?.dir,
+      carriers: carrierFilter, statuses: statusFilter, hide_closed: hideClosed,
+    }),
+    [debouncedQuery, searchField, sort, carrierFilter, statusFilter, hideClosed]
   );
 
   const table = useServerTable<Booking, PageResult<Booking>>({
@@ -419,7 +470,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   });
 
   // Another collection has other carriers
-  useEffect(() => setCarrierFilter([]), [activeCollection?.id]);
+  useEffect(() => {
+    setCarrierFilter([]);
+    setStatusFilter([]);
+  }, [activeCollection?.id]);
 
   useEffect(() => {
     void refreshTrashCount();
@@ -429,7 +483,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const selection = useRowSelection<Booking>(
     pageRows,
     getBookingId,
-    [activeCollection?.id, debouncedQuery, searchField, carrierFilter.join('\n')],
+    [activeCollection?.id, debouncedQuery, searchField, carrierFilter.join('\n'), statusFilter.join('\n'), hideClosed],
     { pruneMissing: false }
   );
   const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
@@ -550,7 +604,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   };
 
   const copyRow = useStableCallback(async (booking: Booking) => {
-    const text = formatRowForCopy(booking, columns);
+    const text = formatRowForCopy(withStatusLabel(booking), columns);
     const success = await copyTextToClipboard(text);
     if (success) {
       addToast(t.common.copySuccess, 'success');
@@ -601,6 +655,25 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     }
   });
 
+  const statusLabels = useMemo<BookingStatusLabels>(() => ({
+    labels: t.booking.status.labels,
+    overdue: t.booking.status.overdue,
+    overdueTooltip: t.booking.status.overdueTooltip,
+  }), [t]);
+
+  const changeStatus = useStableCallback(async (ids: number[], status: BookingStatus) => {
+    if (ids.length === 0) return;
+    try {
+      const updated = await setBookingStatusApi(ids, status);
+      addToast(tf(t.booking.status.changeSuccess, { count: updated, status: t.booking.status.labels[status] }), 'success');
+      await loadData('refresh');
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      addToast((typeof detail === 'string' && detail) || e?.message || t.common.error, 'error');
+    }
+  });
+  const changeRowStatus = useStableCallback((booking: Booking, status: BookingStatus) => changeStatus([booking.id], status));
+
   // ---------------------------------------------------------------------------
   // Bulk actions
   // ---------------------------------------------------------------------------
@@ -630,7 +703,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const handleBulkCopy = async () => {
     const rows = await resolveSelectedRows();
     if (rows.length === 0) return;
-    const ok = await copyTextToClipboard(formatRowsAsTsv(rows, columns, true));
+    const ok = await copyTextToClipboard(formatRowsAsTsv(rows.map(withStatusLabel), columns, true));
     addToast(
       ok ? tf(t.booking.bulkActions.copySuccess, { count: rows.length }) : t.common.error,
       ok ? 'success' : 'error'
@@ -713,7 +786,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       const rows = scope === 'all'
         ? await getBookings(activeCollection.id, debouncedQuery, searchField)
         : await resolveSelectedRows();
-      setExportRows(rows);
+      setExportRows(rows.map(withStatusLabel));
       setIsExportOpen(true);
     } catch (e: any) {
       addToast(e?.message || t.common.error, 'error');
@@ -732,6 +805,12 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   });
 
   const bulkActions: BulkAction[] = [
+    {
+      key: 'status',
+      label: t.booking.status.change,
+      icon: ListChecks,
+      onClick: () => setIsStatusPickerOpen(true),
+    },
     {
       key: 'lookup-vessels',
       label: vesselLookupProgress
@@ -782,9 +861,21 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         { key: 'delete-row', label: m.deleteRow, icon: Trash2, onClick: () => handleDelete(booking.id), danger: true },
       );
     }
+    const current = booking[STATUS_KEY];
+    const statusItems: MenuGroup['items'] = BOOKING_STATUSES.map((s) => ({
+      key: `status-${s}`,
+      label: t.booking.status.labels[s],
+      icon: ListChecks,
+      disabled: selection.count <= 1 && current === s,
+      onClick: () => changeStatus(selection.count > 1 ? selectedIdList : [booking.id], s),
+    }));
     return [
       { items: rowItems.filter((i) => !i.danger) },
-      { label: tf(m.selectedCount, { count: selection.count }), items: bulkMenuItems(bulkActions, selection.count).filter((a) => !a.danger) },
+      { label: t.booking.status.change, items: statusItems },
+      {
+        label: tf(m.selectedCount, { count: selection.count }),
+        items: bulkMenuItems(bulkActions, selection.count).filter((a) => !a.danger && a.key !== 'status'),
+      },
       { items: [...rowItems.filter((i) => i.danger), ...bulkMenuItems(bulkActions, selection.count).filter((a) => a.danger)] },
     ];
   };
@@ -863,6 +954,21 @@ export const BookingTab: React.FC<BookingTabProps> = ({
               className="w-full pl-8 pr-3 py-1.5 text-xs font-medium bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500"
             />
           </div>
+          <Tooltip content={hideClosed ? t.booking.status.hideClosedTooltip : t.booking.status.showClosedTooltip}>
+            <button
+              type="button"
+              aria-pressed={hideClosed}
+              onClick={() => setHideClosed((v) => !v)}
+              className={`shrink-0 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+                hideClosed
+                  ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
+                  : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/80 dark:text-slate-400 dark:border-slate-700'
+              }`}
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              {t.booking.status.hideClosed}
+            </button>
+          </Tooltip>
         </div>
 
         {/* Action Buttons */}
@@ -1019,6 +1125,15 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         onChange={setCarrierFilter}
                         labels={t.common.columnFilter}
                       />
+                    ) : col.key === STATUS_KEY && activeCollection ? (
+                      <ColumnValueFilter
+                        column={col.label}
+                        loadOptions={() => getBookingStatuses(activeCollection.id)}
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                        labels={t.common.columnFilter}
+                        formatOption={(v) => t.booking.status.labels[v as BookingStatus] ?? v}
+                      />
                     ) : undefined}
                   />
                 ))}
@@ -1078,6 +1193,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         onSaveNote={saveBookingNote}
                         timeLabels={t.common.relativeTime}
                         eportLabels={eportLabels}
+                        statusLabels={statusLabels}
+                        onChangeStatus={changeRowStatus}
                       />
                     );
                   })}
@@ -1126,6 +1243,17 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       />
 
       {/* Modals */}
+      <BookingStatusPicker
+        isOpen={isStatusPickerOpen}
+        title={tf(t.booking.status.changeTitle, { count: selection.count })}
+        hint={t.booking.status.autoHint}
+        labels={statusLabels}
+        onPick={(s) => {
+          setIsStatusPickerOpen(false);
+          void changeStatus(selectedIdList, s);
+        }}
+        onClose={() => setIsStatusPickerOpen(false)}
+      />
       <BookingDetailModal
         isOpen={!!selectedBooking}
         onClose={closeDetail}
