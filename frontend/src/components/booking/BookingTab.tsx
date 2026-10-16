@@ -30,7 +30,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { Tooltip } from '../common/Tooltip';
 import { NoteHover, NOTE_KEY, getBookingNote, NoteQuickAddLabels } from './NoteHover';
-import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, eportTooltip } from './EportCutoff';
+import { CUTOFF_KEY, EPORT_CUTOFF_KEY, EportCutoffCell, EportCutoffLabels, effectiveCutoff, eportTooltip } from './EportCutoff';
 import { AddedAt, CREATED_KEY, RelativeTimeLabels } from './AddedAt';
 import { BookingCalendar, BookingCalendarLabels } from './BookingCalendar';
 import { ViewToggle, useTableView } from '../common/ViewToggle';
@@ -282,6 +282,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const withStatusLabel = useCallback(
     (b: Booking): Booking => ({ ...b, [STATUS_KEY]: t.booking.status.labels[statusOf(b[STATUS_KEY])] } as Record<string, unknown> as Booking),
     [t],
+  );
+  /** Copies take the cut-off the cell shows (ePort's newer time when known). */
+  const forCopy = useCallback(
+    (b: Booking): Booking => ({ ...withStatusLabel(b), [CUTOFF_KEY]: effectiveCutoff(b) } as Record<string, unknown> as Booking),
+    [withStatusLabel],
   );
   const { addToast } = useToastActions();
   const confirm = useConfirm();
@@ -612,7 +617,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   };
 
   const copyRow = useStableCallback(async (booking: Booking) => {
-    const text = formatRowForCopy(withStatusLabel(booking), columns);
+    const text = formatRowForCopy(forCopy(booking), columns);
     const success = await copyTextToClipboard(text);
     if (success) {
       addToast(t.common.copySuccess, 'success');
@@ -732,7 +737,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const handleBulkCopy = async () => {
     const rows = await resolveSelectedRows();
     if (rows.length === 0) return;
-    const ok = await copyTextToClipboard(formatRowsAsTsv(rows.map(withStatusLabel), columns, true));
+    const ok = await copyTextToClipboard(formatRowsAsTsv(rows.map(forCopy), columns, true));
     addToast(
       ok ? tf(t.booking.bulkActions.copySuccess, { count: rows.length }) : t.common.error,
       ok ? 'success' : 'error'

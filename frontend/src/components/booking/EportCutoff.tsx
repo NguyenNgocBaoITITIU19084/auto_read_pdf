@@ -12,7 +12,13 @@ export interface EportCutoffLabels {
 
 const isBlank = (v: unknown) => v === undefined || v === null || String(v).trim() === '' || String(v).trim().toLowerCase() === 'null';
 
-export const eportTooltip = (labels: EportCutoffLabels, eport: string, original: unknown): string =>
+/** The cut-off the table shows: ePort's time when known, else the booking's own. */
+export const effectiveCutoff = (booking: Record<string, unknown>): unknown => {
+  const eport = String(booking[EPORT_CUTOFF_KEY] ?? '').trim();
+  return isBlank(eport) ? booking[CUTOFF_KEY] : eport;
+};
+
+export const eportTooltip =(labels: EportCutoffLabels, eport: string, original: unknown): string =>
   isBlank(original)
     ? tf(labels.tooltipNoOriginal, { eport })
     : tf(labels.tooltip, { eport, original: String(original) });

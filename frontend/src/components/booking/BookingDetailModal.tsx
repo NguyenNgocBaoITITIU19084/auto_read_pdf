@@ -12,6 +12,7 @@ import { getBookingVesselCandidates } from '../../utils/vessel';
 import { NOTE_KEY, getBookingNote } from './NoteHover';
 import { useFieldSelection } from '../../hooks/useFieldSelection';
 import { FieldCopyBar } from '../common/FieldCopyBar';
+import { CUTOFF_KEY, effectiveCutoff } from './EportCutoff';
 import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface BookingDetailModalProps {
@@ -78,7 +79,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   const entries: CopyEntry[] = fields.map((f) => ({
     key: f.key,
     label: f.label,
-    value: String((f.key === "Carrier" ? carrierName : booking[f.key]) ?? ''),
+    value: String((f.key === "Carrier" ? carrierName : f.key === CUTOFF_KEY ? effectiveCutoff(booking) : booking[f.key]) ?? ''),
   }));
   if (note) entries.push({ key: NOTE_KEY, label: t.booking.columns[NOTE_KEY], value: note });
 
@@ -213,7 +214,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                     )}
                     <button
                       type="button"
-                      onClick={() => copyField(String(val), f.key)}
+                      onClick={() => copyField(String(f.key === CUTOFF_KEY ? effectiveCutoff(booking) : val), f.key)}
                       className="text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 p-0.5 rounded transition-colors"
                       title={t.common.copy}
                     >
