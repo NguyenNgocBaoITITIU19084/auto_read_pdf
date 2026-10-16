@@ -9,7 +9,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { ContainerInfo, ContainerWatchlist, ContainerWatchlistBatchItem, PageResult, ContainerPageResult, TableQuery } from '../../types';
 import {
-  getContainers, getContainersPage, getContainerIds, getContainersByIds, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
+  getContainers, getContainersPage, getContainerIds, getContainersByIds, getContainerLineOpers, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
   addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist,
   addContainerWatchlistBatch, removeContainerWatchlistBatch, resyncContainersApi,
   containerTrashApi,
@@ -29,6 +29,8 @@ import { extractClipboardFiles, isEditableTarget, isImageFile } from '../booking
 import { ContainerWatchlistModal } from './ContainerWatchlistModal';
 import { ContainerRow } from './ContainerRow';
 import { ResizableTh } from '../common/ResizableTh';
+import { ColumnValueFilter } from '../common/ColumnValueFilter';
+import { useTableSort } from '../../hooks/useTableSort';
 import { ColumnMigration, useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
 import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
@@ -171,36 +173,36 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   ], [t]);
 
   const defaultWidths = useMemo(() => ({
-    "site_id": 75,
+    "site_id": 95,
     "containerno": 130,
     "event_type": 130,
     "event_time": 140,
-    "in_yard": 75,
-    "fel": 65,
-    "iso": 75,
-    "gross": 85,
-    "container_gross": 95,
-    "tare_wt": 80,
-    "manifest_wt": 85,
-    "gate_wt": 80,
-    "gate_gross_wt": 95,
-    "certified_weight": 90,
-    "vgm": 75,
-    "category": 85,
-    "cust": 75,
-    "location": 95,
-    "stack": 75,
-    "temp": 75,
+    "in_yard": 95,
+    "fel": 85,
+    "iso": 95,
+    "gross": 105,
+    "container_gross": 115,
+    "tare_wt": 100,
+    "manifest_wt": 105,
+    "gate_wt": 100,
+    "gate_gross_wt": 115,
+    "certified_weight": 110,
+    "vgm": 95,
+    "category": 105,
+    "cust": 95,
+    "location": 115,
+    "stack": 95,
+    "temp": 95,
     "haz": 110,
-    "load_to_vessel": 90,
-    "pod_destination": 95,
+    "load_to_vessel": 110,
+    "pod_destination": 115,
     "truck_vessel": 140,
     "trans_in": 140,
     "trans_out": 140,
     "cont_in_ts": 140,
     "cont_out_ts": 140,
-    "line_oper": 80,
-    "im_exp": 80,
+    "line_oper": 115,
+    "im_exp": 100,
     "bill_book": 125,
     "cust_approval_date": 140,
     "customs_status": 165,
@@ -208,7 +210,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     "infras_fee_status": 115,
     "item_seal_no": 105,
     "note": 180,
-    "item_key": 95,
+    "item_key": 115,
     "queried_at": 140,
   }), []);
 
@@ -244,13 +246,19 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   // Data loading (server-paged table + separate watchlist load)
   // ---------------------------------------------------------------------------
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  // Column sort (server side; default newest lookup first) and the line operator column filter
+  const { sort, toggleSort, sortDirOf } = useTableSort('container_sort');
+  const [valueFilter, setValueFilter] = useState<string[]>([]);
   const tableQuery = useMemo<TableQuery>(
     () => ({
       search_query: debouncedQuery,
       search_field: searchField,
       event_type: eventTypeFilter === 'ALL' ? undefined : eventTypeFilter,
+      sort_by: sort?.key,
+      sort_dir: sort?.dir,
+      carriers: valueFilter,
     }),
-    [debouncedQuery, searchField, eventTypeFilter]
+    [debouncedQuery, searchField, eventTypeFilter, sort, valueFilter]
   );
 
   const table = useServerTable<ContainerInfo, ContainerPageResult>({
@@ -296,6 +304,9 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCollection?.id]);
 
+  // Another collection has other line operators
+  useEffect(() => setValueFilter([]), [activeCollection?.id]);
+
   useEffect(() => {
     loadWatchlist();
   }, [activeCollection?.id, loadWatchlist]);
@@ -331,7 +342,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   const selection = useRowSelection(
     pageRows,
     getRowId,
-    [activeCollection?.id, debouncedQuery, searchField, eventTypeFilter],
+    [activeCollection?.id, debouncedQuery, searchField, eventTypeFilter, valueFilter.join('\n')],
     { pruneMissing: false }
   );
   const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
@@ -1024,6 +1035,18 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                     label={col.label}
                     width={columnWidths[col.key]}
                     onResize={startResize}
+                    sortDir={sortDirOf(col.key)}
+                    onSort={toggleSort}
+                    sortLabels={t.common.sort}
+                    extra={col.key === 'line_oper' && activeCollection ? (
+                      <ColumnValueFilter
+                        column={col.label}
+                        loadOptions={() => getContainerLineOpers(activeCollection.id)}
+                        value={valueFilter}
+                        onChange={setValueFilter}
+                        labels={t.common.columnFilter}
+                      />
+                    ) : undefined}
                   />
                 ))}
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">

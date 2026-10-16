@@ -66,7 +66,31 @@ def get_connection() -> ManagedConnection:
                 except sqlite3.OperationalError as e:
                     logger.warning(f"Could not enable WAL journal mode: {e}")
     conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.create_function("sort_key", 1, _sort_key, deterministic=True)
     return conn
+
+
+_SORT_DMY = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+_SORT_YMD = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+_SORT_TIME = re.compile(r"(?<![\d/])(\d{1,2}):(\d{2})(?::(\d{2}))?")
+_SORT_NUMBER = re.compile(r"\s*(-?\d+(?:[.,]\d+)?)\s*[A-Za-z%°]*\s*")
+
+
+def _sort_key(value) -> str:
+    """Table sort value: dates ('19/10/2026 10:00', 'EST: 14:00 16/10/2026', '2026-10-15 08:50:56') by
+    date and time, numbers ('18900 KGM', '-18') by value, anything else as upper-case text."""
+    text = str(value or "").strip()
+    date = _SORT_DMY.search(text)
+    ymd = (date.group(3), date.group(2), date.group(1)) if date else None
+    if not ymd and (iso := _SORT_YMD.search(text)):
+        ymd = iso.groups()
+    if ymd:
+        t = _SORT_TIME.search(text)
+        hms = (t.group(1), t.group(2), t.group(3) or "0") if t else ("0", "0", "0")
+        return "1" + "".join(f"{int(v):02d}" for v in (*ymd, *hms))
+    if number := _SORT_NUMBER.fullmatch(text):
+        return f"0{float(number.group(1).replace(',', '.')) + 1e12:024.6f}"
+    return "2" + text.upper()
 
 
 def _clean_ids(ids) -> list[int]:
@@ -751,9 +775,13 @@ _BOOKING_ALL_FIELDS = ("pdf_name", "booking_no", "carrier", "port_of_discharging
                        "ts_port", "equipment_type", "empty_pickup_cy", "full_return_cy", "vessel", "etd", "note")
 
 
-def _booking_where(col_id: int, search_query: str = None, search_field: str = None) -> tuple[str, list]:
+def _booking_where(col_id: int, search_query: str = None, search_field: str = None,
+                   carriers: list[str] = None) -> tuple[str, list]:
     where = "collection_id = ?"
     params: list = [col_id]
+    extra, extra_params = _values_filter("carrier", carriers)  # '' picks bookings without a carrier
+    where += extra
+    params.extend(extra_params)
     if search_query:
         q = f"%{search_query}%"
         if search_field and search_field != "all" and search_field in BOOKING_SEARCH_COLUMNS:
@@ -814,6 +842,50 @@ def _booking_row_to_api(row: dict) -> dict:
 _BOOKING_ORDER = "ORDER BY id DESC"
 
 
+# Table column (API key) -> stored column
+_BOOKING_SORT_COLUMNS = {
+    "Tên file PDF": "pdf_name", "Booking No": "booking_no", "Carrier": "carrier",
+    "Port of Discharging": "port_of_discharging", "Place of Delivery": "place_of_delivery", "Block": "block_val",
+    "T/S Port": "ts_port", "Equipment Type": "equipment_type", "Q'ty": "qty", "Empty Pick Up CY": "empty_pickup_cy",
+    "Full return CY": "full_return_cy", "Port Cargo Cut-off": "cutoff_time", "Vessel": "vessel", "ETD": "etd",
+    "Ghi chú": "note", "Thời gian thêm": "created_at",
+}
+
+
+def _sort_order(col: str, sort_dir: str = None, tiebreak: str = "id DESC") -> str:
+    """ORDER BY a stored column via sort_key(); blank / 'null' values stay last in both directions."""
+    direction = "DESC" if (sort_dir or "").lower() == "desc" else "ASC"
+    blank = f"({col} IS NULL OR TRIM({col}) IN ('', 'null'))"
+    return f"ORDER BY {blank}, sort_key({col}) {direction}, {tiebreak}"
+
+
+def _blank_as_empty(col: str) -> str:
+    return f"COALESCE(NULLIF(TRIM({col}), 'null'), '')"
+
+
+def _values_filter(col: str, values: list[str] = None) -> tuple[str, list]:
+    """' AND col IN (...)' for a column filter ('' picks blank / 'null' values)."""
+    if not values:
+        return "", []
+    return f" AND {_blank_as_empty(col)} IN ({','.join('?' * len(values))})", list(values)
+
+
+def _value_counts(table: str, col: str, col_id: int) -> list[dict]:
+    """Distinct values of a column in a collection with their row counts ('' = blank), for a column filter."""
+    expr = _blank_as_empty(col)
+    with get_connection() as conn:
+        rows = conn.execute(f"SELECT {expr} AS v, COUNT(*) FROM {table} WHERE collection_id = ? GROUP BY v ORDER BY v;",
+                            (col_id,)).fetchall()
+    return [{"carrier": v, "count": n} for v, n in rows]
+
+
+def _booking_order(sort_by: str = None, sort_dir: str = None) -> str:
+    """ORDER BY for a table column; blank / 'null' values stay last in both directions."""
+    if sort_by not in _BOOKING_SORT_COLUMNS:
+        return _BOOKING_ORDER
+    return _sort_order(_BOOKING_SORT_COLUMNS[sort_by], sort_dir)
+
+
 def get_bookings(col_id: int, search_query: str = None, search_field: str = None, newest_first: bool = True) -> list[dict]:
     where, params = _booking_where(col_id, search_query, search_field)
     order = _BOOKING_ORDER if newest_first else "ORDER BY id ASC"
@@ -823,21 +895,30 @@ def get_bookings(col_id: int, search_query: str = None, search_field: str = None
 
 
 def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
-                      search_query: str = None, search_field: str = None) -> dict:
+                      search_query: str = None, search_field: str = None,
+                      sort_by: str = None, sort_dir: str = None, carriers: list[str] = None) -> dict:
     limit, offset = _page_bounds(limit, offset)
-    where, params = _booking_where(col_id, search_query, search_field)
+    where, params = _booking_where(col_id, search_query, search_field, carriers)
+    order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
-        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {_BOOKING_ORDER} LIMIT ? OFFSET ?;",
+        rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {order} LIMIT ? OFFSET ?;",
                              (*params, limit, offset))
     return {"items": [_booking_row_to_api(r) for r in rows], "total": total}
 
 
-def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
-    where, params = _booking_where(col_id, search_query, search_field)
+def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None,
+                    sort_by: str = None, sort_dir: str = None, carriers: list[str] = None) -> list[int]:
+    where, params = _booking_where(col_id, search_query, search_field, carriers)
+    order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
-        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {_BOOKING_ORDER};",
+        return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {order};",
                                            tuple(params)).fetchall()]
+
+
+def get_booking_carriers(col_id: int) -> list[dict]:
+    """Carriers of a collection with their booking counts ('' = no carrier), for the column filter."""
+    return _value_counts("bookings", "carrier", col_id)
 
 
 def get_bookings_by_ids(ids: list[int]) -> list[dict]:
@@ -1323,23 +1404,33 @@ def get_vessel_schedules(col_id: int, search_query: str = None, search_field: st
         return _select_dicts(conn, f"SELECT * FROM vessel_schedules WHERE {where} {_VESSEL_ORDER};", tuple(params))
 
 
+def _vessel_order(sort_by: str = None, sort_dir: str = None) -> str:
+    if sort_by not in VESSEL_SEARCH_COLUMNS:
+        return _VESSEL_ORDER
+    return _sort_order(sort_by, sort_dir, "queried_at DESC, id ASC")
+
+
 def get_vessel_schedules_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
-                              search_query: str = None, search_field: str = None) -> dict:
+                              search_query: str = None, search_field: str = None,
+                              sort_by: str = None, sort_dir: str = None) -> dict:
     limit, offset = _page_bounds(limit, offset)
     where, params = _vessel_where(col_id, search_query, search_field)
+    order = _vessel_order(sort_by, sort_dir)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM vessel_schedules WHERE {where};", tuple(params)).fetchone()[0]
         items = _select_dicts(
-            conn, f"SELECT * FROM vessel_schedules WHERE {where} {_VESSEL_ORDER} LIMIT ? OFFSET ?;",
+            conn, f"SELECT * FROM vessel_schedules WHERE {where} {order} LIMIT ? OFFSET ?;",
             (*params, limit, offset))
     return {"items": items, "total": total}
 
 
-def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None) -> list[int]:
+def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None,
+                            sort_by: str = None, sort_dir: str = None) -> list[int]:
     where, params = _vessel_where(col_id, search_query, search_field)
     with get_connection() as conn:
         return [r[0] for r in conn.execute(
-            f"SELECT id FROM vessel_schedules WHERE {where} {_VESSEL_ORDER};", tuple(params)).fetchall()]
+            f"SELECT id FROM vessel_schedules WHERE {where} {_vessel_order(sort_by, sort_dir)};",
+            tuple(params)).fetchall()]
 
 
 def get_vessel_schedules_by_ids(ids: list[int]) -> list[dict]:
@@ -1563,9 +1654,10 @@ _CONTAINER_ORDER = "ORDER BY queried_at DESC, id ASC"
 
 
 def _container_where(col_id: int, search_query: str = None, search_field: str = None,
-                     event_type: str = None) -> tuple[str, list]:
-    where = "collection_id = ?"
-    params: list = [col_id]
+                     event_type: str = None, line_opers: list[str] = None) -> tuple[str, list]:
+    where, params = _values_filter("line_oper", line_opers)
+    where = "collection_id = ?" + where
+    params: list = [col_id, *params]
     if search_query:
         q = f"%{search_query}%"
         if search_field and search_field != "all" and search_field in CONTAINER_SEARCH_COLUMNS:
@@ -1595,11 +1687,20 @@ def get_containers(col_id: int, search_query: str = None, search_field: str = No
     return [_enrich_container_row(r) for r in rows]
 
 
+def _container_order(sort_by: str = None, sort_dir: str = None) -> str:
+    if sort_by not in CONTAINER_SEARCH_COLUMNS:
+        return _CONTAINER_ORDER
+    col = CUSTOMS_STATUS_SQL if sort_by == "customs_status" else sort_by
+    return _sort_order(col, sort_dir, "queried_at DESC, id ASC")
+
+
 def get_containers_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0, search_query: str = None,
-                        search_field: str = None, event_type: str = None) -> dict:
+                        search_field: str = None, event_type: str = None,
+                        sort_by: str = None, sort_dir: str = None, line_opers: list[str] = None) -> dict:
     limit, offset = _page_bounds(limit, offset)
-    base_where, base_params = _container_where(col_id, search_query, search_field)
-    where, params = _container_where(col_id, search_query, search_field, event_type)
+    # event type counts follow every other filter, so the event tabs show what each would list
+    base_where, base_params = _container_where(col_id, search_query, search_field, None, line_opers)
+    where, params = _container_where(col_id, search_query, search_field, event_type, line_opers)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM containers WHERE {where};", tuple(params)).fetchone()[0]
         counts = {
@@ -1609,17 +1710,24 @@ def get_containers_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: in
             ).fetchall()
         }
         rows = _select_dicts(
-            conn, f"SELECT * FROM containers WHERE {where} {_CONTAINER_ORDER} LIMIT ? OFFSET ?;",
+            conn, f"SELECT * FROM containers WHERE {where} {_container_order(sort_by, sort_dir)} LIMIT ? OFFSET ?;",
             (*params, limit, offset))
     return {"items": [_enrich_container_row(r) for r in rows], "total": total, "event_type_counts": counts}
 
 
 def get_container_ids(col_id: int, search_query: str = None, search_field: str = None,
-                      event_type: str = None) -> list[int]:
-    where, params = _container_where(col_id, search_query, search_field, event_type)
+                      event_type: str = None, sort_by: str = None, sort_dir: str = None,
+                      line_opers: list[str] = None) -> list[int]:
+    where, params = _container_where(col_id, search_query, search_field, event_type, line_opers)
     with get_connection() as conn:
         return [r[0] for r in conn.execute(
-            f"SELECT id FROM containers WHERE {where} {_CONTAINER_ORDER};", tuple(params)).fetchall()]
+            f"SELECT id FROM containers WHERE {where} {_container_order(sort_by, sort_dir)};",
+            tuple(params)).fetchall()]
+
+
+def get_container_line_opers(col_id: int) -> list[dict]:
+    """Line operators of a collection's containers with their counts, for the column filter."""
+    return _value_counts("containers", "line_oper", col_id)
 
 
 def get_containers_by_ids(ids: list[int]) -> list[dict]:

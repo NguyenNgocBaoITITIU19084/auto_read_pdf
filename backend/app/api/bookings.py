@@ -8,7 +8,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from backend.app.core.database import (
     insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
-    get_bookings_page, get_booking_ids, get_bookings_by_ids,
+    get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers,
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
     BOOKING_TRASH_KEEP_DAYS,
@@ -102,16 +102,26 @@ def list_bookings_page(
     offset: int = Query(0),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None, description="Table column to sort by, e.g. 'ETD'"),
+    sort_dir: Optional[str] = Query(None, description="'asc' or 'desc'"),
+    carriers: Optional[List[str]] = Query(None, description="Only these carriers ('' = no carrier)"),
 ):
-    return get_bookings_page(collection_id, limit, offset, search_query, search_field)
+    return get_bookings_page(collection_id, limit, offset, search_query, search_field, sort_by, sort_dir, carriers)
 
 @router.get("/ids")
 def list_booking_ids(
     collection_id: int = Query(...),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
+    carriers: Optional[List[str]] = Query(None),
 ):
-    return {"ids": get_booking_ids(collection_id, search_query, search_field)}
+    return {"ids": get_booking_ids(collection_id, search_query, search_field, sort_by, sort_dir, carriers)}
+
+@router.get("/carriers")
+def list_booking_carriers(collection_id: int = Query(...)):
+    return get_booking_carriers(collection_id)
 
 @router.post("/by-ids")
 def list_bookings_by_ids(payload: BatchIdsRequest):

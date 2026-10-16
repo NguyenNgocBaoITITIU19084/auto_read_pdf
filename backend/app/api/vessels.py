@@ -42,16 +42,20 @@ def list_vessels_page(
     offset: int = Query(0),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
 ):
-    return get_vessel_schedules_page(collection_id, limit, offset, search_query, search_field)
+    return get_vessel_schedules_page(collection_id, limit, offset, search_query, search_field, sort_by, sort_dir)
 
 @router.get("/ids")
 def list_vessel_ids(
     collection_id: int = Query(...),
     search_query: Optional[str] = Query(None),
     search_field: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
+    sort_dir: Optional[str] = Query(None),
 ):
-    return {"ids": get_vessel_schedule_ids(collection_id, search_query, search_field)}
+    return {"ids": get_vessel_schedule_ids(collection_id, search_query, search_field, sort_by, sort_dir)}
 
 @router.post("/by-ids")
 def list_vessels_by_ids(payload: BatchIdsRequest):

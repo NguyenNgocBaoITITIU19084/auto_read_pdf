@@ -326,3 +326,39 @@ def test_pdf_preview_shows_a_misnamed_photo():
     files = {"file": ("photo.pdf", io.BytesIO(_image_bytes("PNG")), "application/pdf")}
     body = client.post("/api/v1/bookings/pdf-preview", files=files).json()
     assert body["page_count"] == 1 and body["pages"][0].startswith("data:image/png;base64,")
+
+
+def test_bookings_page_sorts_by_column(col_id):
+    for no, etd, qty in (("BK1", "05/11/2026", "2"), ("BK2", "19/10/2026", "10"), ("BK3", "", "1"), ("BK4", "01/12/2025", "3")):
+        insert_booking(col_id, {"Booking No": no, "ETD": etd, "Q'ty": qty})
+
+    def page(**params):
+        res = client.get("/api/v1/bookings/page", params={"collection_id": col_id, **params})
+        assert res.status_code == 200
+        return [r["Booking No"] for r in res.json()["items"]]
+
+    # dd/mm/yyyy sorts by date; blank ETD stays last both ways
+    assert page(sort_by="ETD", sort_dir="asc") == ["BK4", "BK2", "BK1", "BK3"]
+    assert page(sort_by="ETD", sort_dir="desc") == ["BK1", "BK2", "BK4", "BK3"]
+    assert page(sort_by="Q'ty", sort_dir="desc") == ["BK2", "BK4", "BK1", "BK3"]
+    # unknown column -> default newest first
+    assert page(sort_by="id; DROP TABLE bookings") == ["BK4", "BK3", "BK2", "BK1"]
+    ids = client.get("/api/v1/bookings/ids", params={"collection_id": col_id, "sort_by": "ETD"}).json()["ids"]
+    assert len(ids) == 4
+
+
+def test_bookings_filter_by_carrier(col_id):
+    for no, carrier in (("BK1", "OOCL"), ("BK2", "MAERSK"), ("BK3", "OOCL"), ("BK4", "")):
+        insert_booking(col_id, {"Booking No": no, "Carrier": carrier})
+
+    res = client.get("/api/v1/bookings/carriers", params={"collection_id": col_id})
+    assert res.json() == [{"carrier": "", "count": 1}, {"carrier": "MAERSK", "count": 1}, {"carrier": "OOCL", "count": 2}]
+
+    def page(carriers):
+        res = client.get("/api/v1/bookings/page", params={"collection_id": col_id, "carriers": carriers})
+        return [r["Booking No"] for r in res.json()["items"]], res.json()["total"]
+
+    assert page(["OOCL"]) == (["BK3", "BK1"], 2)
+    assert page(["MAERSK", ""]) == (["BK4", "BK2"], 2)
+    ids = client.get("/api/v1/bookings/ids", params={"collection_id": col_id, "carriers": ["OOCL"]}).json()["ids"]
+    assert len(ids) == 2

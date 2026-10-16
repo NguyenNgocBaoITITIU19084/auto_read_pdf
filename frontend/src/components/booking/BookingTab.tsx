@@ -10,7 +10,7 @@ import { useMobileBridge } from '../../context/MobileBridgeContext';
 import { useImageQueue } from '../../context/ImageQueueContext';
 import { Booking, PageResult, TableQuery } from '../../types';
 import {
-  getBookings, getBookingsPage, getBookingIds, getBookingsByIds,
+  getBookings, getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers,
   deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi, getBookingTrashCount
 } from '../../services/api';
 import { ExportModal } from '../common/ExportModal';
@@ -22,6 +22,8 @@ import { PhoneCaptureModal } from './PhoneCaptureModal';
 import { QuickVesselSearch } from './QuickVesselSearch';
 import { BulkVesselLookupModal, BulkVesselLookupMode } from './BulkVesselLookupModal';
 import { ResizableTh } from '../common/ResizableTh';
+import { ColumnValueFilter } from '../common/ColumnValueFilter';
+import { useTableSort } from '../../hooks/useTableSort';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useConfirm } from '../../hooks/useConfirm';
 import { useRowSelection } from '../../hooks/useRowSelection';
@@ -255,6 +257,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const confirm = useConfirm();
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery || '');
   const [searchField, setSearchField] = useState('all');
+  // Column sort (server side; default newest first) and the carrier column filter
+  const { sort, toggleSort, sortDirOf } = useTableSort('booking_sort');
+  const [carrierFilter, setCarrierFilter] = useState<string[]>([]);
 
   useEffect(() => {
     if (initialSearchQuery !== undefined) {
@@ -330,15 +335,15 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const defaultWidths = useMemo(() => ({
     "Tên file PDF": 160,
     "Booking No": 130,
-    "Carrier": 110,
+    "Carrier": 145,
     "Vessel": 170,
     "ETD": 110,
     "Port of Discharging": 140,
     "Place of Delivery": 140,
     "T/S Port": 120,
-    "Block": 80,
+    "Block": 100,
     "Equipment Type": 110,
-    "Q'ty": 70,
+    "Q'ty": 90,
     "Empty Pick Up CY": 180,
     "Full return CY": 150,
     "Port Cargo Cut-off": 140,
@@ -384,8 +389,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   // ---------------------------------------------------------------------------
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
   const tableQuery = useMemo<TableQuery>(
-    () => ({ search_query: debouncedQuery, search_field: searchField }),
-    [debouncedQuery, searchField]
+    () => ({ search_query: debouncedQuery, search_field: searchField, sort_by: sort?.key, sort_dir: sort?.dir, carriers: carrierFilter }),
+    [debouncedQuery, searchField, sort, carrierFilter]
   );
 
   const table = useServerTable<Booking, PageResult<Booking>>({
@@ -413,6 +418,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     await Promise.all([table.reload(mode), refreshTrashCount()]);
   });
 
+  // Another collection has other carriers
+  useEffect(() => setCarrierFilter([]), [activeCollection?.id]);
+
   useEffect(() => {
     void refreshTrashCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -421,7 +429,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const selection = useRowSelection<Booking>(
     pageRows,
     getBookingId,
-    [activeCollection?.id, debouncedQuery, searchField],
+    [activeCollection?.id, debouncedQuery, searchField, carrierFilter.join('\n')],
     { pruneMissing: false }
   );
   const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
@@ -1000,6 +1008,18 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                     label={col.label}
                     width={columnWidths[col.key]}
                     onResize={startResize}
+                    sortDir={sortDirOf(col.key)}
+                    onSort={toggleSort}
+                    sortLabels={t.common.sort}
+                    extra={col.key === 'Carrier' && activeCollection ? (
+                      <ColumnValueFilter
+                        column={col.label}
+                        loadOptions={() => getBookingCarriers(activeCollection.id)}
+                        value={carrierFilter}
+                        onChange={setCarrierFilter}
+                        labels={t.common.columnFilter}
+                      />
+                    ) : undefined}
                   />
                 ))}
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-28 text-[11px]">

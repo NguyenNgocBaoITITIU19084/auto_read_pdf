@@ -252,6 +252,21 @@ export const translations = {
       deleteConfirm: "Bạn có chắc chắn muốn xóa không?",
       clearConfirm: "Bạn có chắc chắn muốn xóa toàn bộ dữ liệu trong bộ sưu tập này không?",
       stt: "STT",
+      columnFilter: {
+        button: "Lọc theo {col}",
+        active: "Đang lọc {n} giá trị",
+        search: "Tìm...",
+        all: "Chọn tất cả",
+        clear: "Bỏ lọc",
+        empty: "(Trống)",
+        none: "Không có giá trị nào",
+        loading: "Đang tải..."
+      },
+      sort: {
+        none: "Sắp xếp",
+        asc: "Đang sắp xếp tăng dần",
+        desc: "Đang sắp xếp giảm dần"
+      },
       total: "Tổng số",
       items: "dòng",
       selected: "đã chọn",
@@ -1421,6 +1436,21 @@ export const translations = {
       deleteConfirm: "Are you sure you want to delete this?",
       clearConfirm: "Are you sure you want to clear all data in this collection?",
       stt: "No.",
+      columnFilter: {
+        button: "Filter by {col}",
+        active: "Filtering {n} values",
+        search: "Find...",
+        all: "Select all",
+        clear: "Clear filter",
+        empty: "(Blank)",
+        none: "No values",
+        loading: "Loading..."
+      },
+      sort: {
+        none: "Sort",
+        asc: "Sorted ascending",
+        desc: "Sorted descending"
+      },
       total: "Total",
       items: "rows",
       selected: "selected",

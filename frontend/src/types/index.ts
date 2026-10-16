@@ -455,6 +455,10 @@ export interface TableQuery {
   search_query?: string;
   search_field?: string;
   event_type?: string;
+  sort_by?: string;
+  sort_dir?: 'asc' | 'desc';
+  /** Filter column values to keep ('' = blank): booking carrier, container line operator */
+  carriers?: string[];
 }
 
 // ---------------------------------------------------------------------------

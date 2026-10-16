@@ -26,6 +26,7 @@ import { VesselDetailModal } from './VesselDetailModal';
 import { VesselWatchlistModal } from './VesselWatchlistModal';
 import { VesselRow } from './VesselRow';
 import { ResizableTh } from '../common/ResizableTh';
+import { useTableSort } from '../../hooks/useTableSort';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { Tooltip } from '../common/Tooltip';
 import { formatRowForCopy, copyTextToClipboard } from '../../utils/formatters';
@@ -113,15 +114,15 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   ], [t]);
 
   const defaultWidths = useMemo(() => ({
-    "site_id": 75,
-    "agent": 75,
+    "site_id": 95,
+    "agent": 95,
     "vessel_name": 140,
     "in_out_voyage": 120,
     "actual_berth_time": 150,
     "actual_departure_time": 150,
     "closing_time": 140,
     "closing_time_icd": 140,
-    "in_gate": 80,
+    "in_gate": 100,
     "open_ts": 130,
     "reefer_open_ts": 130,
     "oog_open_ts": 130,
@@ -161,9 +162,11 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
   // Data loading (server-paged table + separate watchlist load)
   // ---------------------------------------------------------------------------
   const debouncedQuery = useDebouncedValue(searchQuery, 300);
+  // Column sort (server side; default newest lookup first)
+  const { sort, toggleSort, sortDirOf } = useTableSort('vessel_sort');
   const tableQuery = useMemo<TableQuery>(
-    () => ({ search_query: debouncedQuery, search_field: searchField }),
-    [debouncedQuery, searchField]
+    () => ({ search_query: debouncedQuery, search_field: searchField, sort_by: sort?.key, sort_dir: sort?.dir }),
+    [debouncedQuery, searchField, sort]
   );
 
   const table = useServerTable<VesselSchedule, PageResult<VesselSchedule>>({
@@ -743,6 +746,9 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery }) => {
                     label={col.label}
                     width={columnWidths[col.key]}
                     onResize={startResize}
+                    sortDir={sortDirOf(col.key)}
+                    onSort={toggleSort}
+                    sortLabels={t.common.sort}
                   />
                 ))}
                 <th className="py-2 px-2.5 font-bold text-slate-600 dark:text-slate-300 text-center w-24 text-[11px]">

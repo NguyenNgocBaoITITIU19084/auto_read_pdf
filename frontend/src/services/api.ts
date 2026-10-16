@@ -55,11 +55,25 @@ export const downloadLogsZipApi = async (): Promise<{ blob: Blob; filename: stri
   return { blob: res.data, filename: match?.[1] || 'auto-read-pdf-logs.zip' };
 };
 
+// Repeated keys ('carriers=A&carriers=B') as FastAPI reads lists, not axios' default 'carriers[]='
+const listParams = { indexes: null } as const;
+
+/** Distinct values of a table's filter column with their row counts ('' = blank). */
+export interface ColumnValueCount {
+  carrier: string;
+  count: number;
+}
+
 const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, number> = {}) => {
-  const params: Record<string, string | number> = { collection_id: collectionId, ...extra };
+  const params: Record<string, string | number | string[]> = { collection_id: collectionId, ...extra };
   if (q.search_query) params.search_query = q.search_query;
   if (q.search_field && q.search_field !== 'all') params.search_field = q.search_field;
   if (q.event_type && q.event_type !== 'ALL') params.event_type = q.event_type;
+  if (q.sort_by) {
+    params.sort_by = q.sort_by;
+    params.sort_dir = q.sort_dir || 'asc';
+  }
+  if (q.carriers?.length) params.carriers = q.carriers;
   return params;
 };
 
@@ -95,9 +109,11 @@ export const getBookings = async (collectionId: number, query?: string, field?: 
 };
 
 export const getBookingsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<Booking>> =>
-  (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+  (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
 export const getBookingIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
-  (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q) })).data.ids;
+  (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
+export const getBookingCarriers = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<ColumnValueCount[]>('/bookings/carriers', { params: { collection_id: collectionId } })).data;
 export const getBookingsByIds = async (ids: number[]): Promise<Booking[]> =>
   (await apiClient.post<Booking[]>('/bookings/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
@@ -250,9 +266,9 @@ export const getVessels = async (collectionId: number, query?: string, field?: s
 };
 
 export const getVesselsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<VesselSchedule>> =>
-  (await apiClient.get<PageResult<VesselSchedule>>('/vessels/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+  (await apiClient.get<PageResult<VesselSchedule>>('/vessels/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
 export const getVesselIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
-  (await apiClient.get<{ ids: number[] }>('/vessels/ids', { params: tableParams(collectionId, q) })).data.ids;
+  (await apiClient.get<{ ids: number[] }>('/vessels/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getVesselsByIds = async (ids: number[]): Promise<VesselSchedule[]> =>
   (await apiClient.post<VesselSchedule[]>('/vessels/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
@@ -340,9 +356,12 @@ export const getContainers = async (collectionId: number, query?: string, field?
 };
 
 export const getContainersPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<ContainerPageResult> =>
-  (await apiClient.get<ContainerPageResult>('/containers/page', { params: tableParams(collectionId, q, { limit, offset }) })).data;
+  (await apiClient.get<ContainerPageResult>('/containers/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
 export const getContainerIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
-  (await apiClient.get<{ ids: number[] }>('/containers/ids', { params: tableParams(collectionId, q) })).data.ids;
+  (await apiClient.get<{ ids: number[] }>('/containers/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
+/** Line operators of the collection's containers (the container table's filter column). */
+export const getContainerLineOpers = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<ColumnValueCount[]>('/containers/carriers', { params: { collection_id: collectionId } })).data;
 export const getContainersByIds = async (ids: number[]): Promise<ContainerInfo[]> =>
   (await apiClient.post<ContainerInfo[]>('/containers/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
