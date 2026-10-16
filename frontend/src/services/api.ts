@@ -1,6 +1,6 @@
 import axios from 'axios';
 import {
-  Collection, Booking, BookingStatus, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
+  Collection, Booking, BookingStatus, ExportColumn, ExportTab, ExportTemplate, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
@@ -485,6 +485,23 @@ export const exportExcelApi = async (data: any[], selectedColumns: string[]): Pr
     selected_columns: selectedColumns,
   }, { responseType: 'blob' });
   return res.data;
+};
+
+/** Rows keyed by column key; each column's header, colour and fill in order. */
+export const exportColumnsExcelApi = async (data: Record<string, unknown>[], columns: ExportColumn[], filename: string): Promise<Blob> =>
+  (await apiClient.post('/export/excel', { data, columns, filename }, { responseType: 'blob', timeout: LONG_TIMEOUT })).data;
+
+type ExportTemplateInput = Pick<ExportTemplate, 'name' | 'filename' | 'columns'>;
+export const exportTemplatesApi = {
+  list: async (tab: ExportTab): Promise<ExportTemplate[]> =>
+    (await apiClient.get<ExportTemplate[]>('/export/templates', { params: { tab } })).data,
+  create: async (tab: ExportTab, input: ExportTemplateInput): Promise<ExportTemplate> =>
+    (await apiClient.post<ExportTemplate>('/export/templates', { tab, ...input })).data,
+  update: async (id: number, input: ExportTemplateInput): Promise<ExportTemplate> =>
+    (await apiClient.put<ExportTemplate>(`/export/templates/${id}`, input)).data,
+  remove: async (id: number): Promise<void> => {
+    await apiClient.delete(`/export/templates/${id}`);
+  },
 };
 
 export const getBackupDb = async (): Promise<any> => {

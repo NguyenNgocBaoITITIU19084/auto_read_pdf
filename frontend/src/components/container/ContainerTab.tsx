@@ -1173,6 +1173,8 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         data={exportData}
         allColumns={exportColumns}
         filenamePrefix={exportScope === 'selected' ? 'containers_selected' : 'containers'}
+        tab="container"
+        collectionName={activeCollection?.name}
       />
 
       <MoveToCollectionModal

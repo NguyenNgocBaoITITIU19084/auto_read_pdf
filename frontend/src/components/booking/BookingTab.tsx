@@ -1323,6 +1323,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         data={exportRows}
         allColumns={exportColumns}
         filenamePrefix={exportScope === 'selected' ? 'bookings_selected' : 'bookings'}
+        tab="booking"
+        collectionName={activeCollection?.name}
       />
 
       <MoveToCollectionModal

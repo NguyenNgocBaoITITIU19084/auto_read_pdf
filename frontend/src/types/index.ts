@@ -558,6 +558,34 @@ export interface AppNotification {
   read: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Excel export templates
+// ---------------------------------------------------------------------------
+export type ExportTab = 'booking' | 'vessel' | 'container';
+export type ExportFill = 'header' | 'column';
+export type PaletteColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
+/** A palette colour, or a custom one as '#RRGGBB' */
+export type ExportColor = PaletteColor | `#${string}`;
+
+/** One exported column: its key in the row, the header written (blank = the table's label), colour and fill */
+export interface ExportColumn {
+  key: string;
+  header: string;
+  color: ExportColor | null;
+  fill: ExportFill;
+}
+
+export interface ExportTemplate {
+  id: number;
+  tab: ExportTab;
+  name: string;
+  /** File name pattern; {date} and {collection} are filled in */
+  filename: string;
+  columns: ExportColumn[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface NotificationSettings {
   kinds: NotificationKind[];
   os_enabled: boolean;

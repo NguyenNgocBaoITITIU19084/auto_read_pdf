@@ -895,6 +895,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
         data={exportData}
         allColumns={exportColumns}
         filenamePrefix={exportScope === 'selected' ? 'vessel_schedules_selected' : 'vessel_schedules'}
+        tab="vessel"
+        collectionName={activeCollection?.name}
       />
 
       <MoveToCollectionModal

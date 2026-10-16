@@ -505,6 +505,19 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_queried ON containers(collection_id, queried_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_containers_col_event ON containers(collection_id, event_type);")
 
+        # Excel export templates (per tab): ordered columns with their header, colour and fill
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS export_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tab TEXT NOT NULL,
+                name TEXT NOT NULL,
+                filename TEXT NOT NULL DEFAULT '',
+                columns TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+
         # Reminders already sent (kept apart from notifications, which the user may clear)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS booking_reminders (
@@ -2301,6 +2314,98 @@ def _trim_notifications(conn: sqlite3.Connection, now: datetime) -> None:
     conn.execute("DELETE FROM notifications WHERE created_at < ?;", (old,))
     conn.execute("DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT ?);",
                  (NOTIFY_KEEP_MAX,))
+
+
+# ---------------------------------------------------------------------------
+# Excel export templates
+# ---------------------------------------------------------------------------
+EXPORT_TABS = ("booking", "vessel", "container")
+EXPORT_NAME_MAX = 80
+
+
+def _clean_export_columns(columns) -> list[dict]:
+    """Ordered [{key, header, color, fill}]: fill "header" unless "column", keys unique. An unreadable colour is an
+    error (ValueError), not dropped."""
+    from backend.app.services.exporter import EXPORT_FILLS, normalize_export_color
+    out, seen = [], set()
+    for c in columns or []:
+        if not isinstance(c, dict):
+            continue
+        key = str(c.get("key") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        raw_color = c.get("color")
+        color = normalize_export_color(raw_color)
+        if raw_color not in (None, "") and color is None:
+            # never drop a colour silently: the user would see their change vanish after saving
+            raise ValueError(f"Màu không hợp lệ ở cột \"{key}\": {raw_color}")
+        fill = c.get("fill") if c.get("fill") in EXPORT_FILLS else "header"
+        out.append({"key": key, "header": str(c.get("header") or "").strip()[:120], "color": color, "fill": fill})
+    return out
+
+
+def _export_template_to_api(row: dict) -> dict:
+    try:
+        columns = json.loads(row["columns"] or "[]")
+    except (TypeError, ValueError):
+        columns = []
+    return {"id": row["id"], "tab": row["tab"], "name": row["name"], "filename": row["filename"] or "",
+            "columns": columns, "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+
+def _check_export_template(conn: sqlite3.Connection, tab: str, name: str, columns, exclude_id: int | None) -> tuple[str, list]:
+    if tab not in EXPORT_TABS:
+        raise ValueError("Tab không hợp lệ")
+    name = " ".join(str(name or "").split())[:EXPORT_NAME_MAX]
+    if not name:
+        raise ValueError("Cần đặt tên cho mẫu xuất")
+    clean = _clean_export_columns(columns)
+    if not clean:
+        raise ValueError("Mẫu xuất cần ít nhất một cột")
+    # compared in Python: SQLite's LOWER() leaves Vietnamese letters as they are
+    others = conn.execute("SELECT name FROM export_templates WHERE tab = ? AND id != ?;",
+                          (tab, exclude_id if exclude_id is not None else -1)).fetchall()
+    if any((n or "").casefold() == name.casefold() for (n,) in others):
+        raise ValueError(f"Đã có mẫu xuất tên \"{name}\"")
+    return name, clean
+
+
+def list_export_templates(tab: str) -> list[dict]:
+    with get_connection() as conn:
+        rows = _select_dicts(conn, "SELECT * FROM export_templates WHERE tab = ? ORDER BY id;", (tab,))
+    rows.sort(key=lambda r: ((r["name"] or "").casefold(), r["id"]))
+    return [_export_template_to_api(r) for r in rows]
+
+
+def create_export_template(tab: str, name: str, columns, filename: str = "") -> dict:
+    now = _now_str()
+    with get_connection() as conn:
+        name, clean = _check_export_template(conn, tab, name, columns, None)
+        cur = conn.execute(
+            "INSERT INTO export_templates (tab, name, filename, columns, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);",
+            (tab, name, str(filename or "").strip()[:200], json.dumps(clean, ensure_ascii=False), now, now))
+        row = _select_dicts(conn, "SELECT * FROM export_templates WHERE id = ?;", (cur.lastrowid,))[0]
+    return _export_template_to_api(row)
+
+
+def update_export_template(template_id: int, name: str, columns, filename: str = "") -> dict | None:
+    with get_connection() as conn:
+        current = conn.execute("SELECT tab FROM export_templates WHERE id = ?;", (template_id,)).fetchone()
+        if not current:
+            return None
+        name, clean = _check_export_template(conn, current[0], name, columns, template_id)
+        conn.execute("UPDATE export_templates SET name = ?, filename = ?, columns = ?, updated_at = ? WHERE id = ?;",
+                     (name, str(filename or "").strip()[:200], json.dumps(clean, ensure_ascii=False), _now_str(),
+                      template_id))
+        row = _select_dicts(conn, "SELECT * FROM export_templates WHERE id = ?;", (template_id,))[0]
+    return _export_template_to_api(row)
+
+
+def delete_export_template(template_id: int) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute("DELETE FROM export_templates WHERE id = ?;", (template_id,))
+        return cur.rowcount > 0
 
 
 # ---------------------------------------------------------------------------
