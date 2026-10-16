@@ -1,6 +1,6 @@
 import axios from 'axios';
 import {
-  Collection, Booking, BookingStatus, ExportColumn, ExportTab, ExportTemplate, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
+  Collection, Booking, BookingLinks, BookingStatus, ExportColumn, ExportTab, ExportTemplate, VesselSchedule, VesselWatchlist, ContainerInfo, ContainerWatchlist, ColorRule,
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
@@ -109,6 +109,9 @@ export const getBookings = async (collectionId: number, query?: string, field?: 
   const res = await apiClient.get<Booking[]>('/bookings', { params });
   return res.data;
 };
+
+export const getBookingLinks = async (bookingId: number): Promise<BookingLinks> =>
+  (await apiClient.get<BookingLinks>(`/bookings/${bookingId}/links`)).data;
 
 export const getBookingsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<Booking>> =>
   (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;

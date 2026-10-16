@@ -129,6 +129,17 @@ export interface ContainerInfo {
   [key: string]: any;
 }
 
+/** A booking's ePort vessel schedules and containers (GET /bookings/{id}/links). */
+export interface BookingLinks {
+  /** Schedules naming the booking's vessel + voyage, one per port site */
+  vessels: (VesselSchedule & { closing_estimated: boolean })[];
+  /** One row per container with this booking number, its latest event */
+  containers: (ContainerInfo & { gated_in: boolean })[];
+  /** Containers gated in for export, out of the booking's Q'ty (null when Q'ty has no number) */
+  gated_in: number;
+  qty: number | null;
+}
+
 export interface ContainerWatchlist extends WatchlistSyncFields {
   id: number;
   collection_id: number;

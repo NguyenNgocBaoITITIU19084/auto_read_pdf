@@ -12,7 +12,7 @@ from backend.app.core.database import (
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
     BOOKING_TRASH_KEEP_DAYS, BOOKING_STATUSES, set_booking_status, get_booking_status_counts,
-    get_bookings_calendar,
+    get_bookings_calendar, get_booking_links,
 )
 from backend.app.schemas.models import BatchIdsRequest
 from backend.app.services.extractor import extract_booking_data, has_booking_fields
@@ -150,6 +150,14 @@ def list_bookings_calendar(
                                      statuses, hide_closed)
     except ValueError:
         raise HTTPException(status_code=400, detail="Ngày không hợp lệ (cần dạng YYYY-MM-DD)")
+
+@router.get("/{booking_id}/links")
+def booking_links(booking_id: int):
+    """The booking's ePort vessel schedules and containers."""
+    links = get_booking_links(booking_id)
+    if links is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy booking")
+    return links
 
 @router.get("/statuses")
 def list_booking_statuses(collection_id: int = Query(...)):

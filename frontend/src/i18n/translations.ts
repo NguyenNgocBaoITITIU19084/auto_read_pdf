@@ -909,6 +909,28 @@ export const translations = {
         save: "Lưu vào tab Tàu",
         saved: "Đã lưu",
         saveSuccess: "Đã lưu {count} lịch tàu vào tab Tàu"
+      },
+      links: {
+        vesselTitle: "Lịch tàu (ePort)",
+        vesselEmpty: "Chưa có lịch tàu khớp tàu + chuyến của booking này.",
+        vesselEmptyHint: "Bấm \"Tra tàu\" để tra trên ePort.",
+        noVessel: "Booking chưa có tên tàu.",
+        estimated: "DK",
+        estimatedTooltip: "Giờ cắt máng dự kiến (EST) trên ePort, có thể còn thay đổi",
+        berth: "Cập cảng",
+        departure: "Rời cảng",
+        closing: "Cắt máng",
+        openTs: "Mở cổng",
+        updated: "Cập nhật {time}",
+        containerTitle: "Container",
+        gatedIn: "{gated}/{qty} đã hạ bãi",
+        gatedInNoQty: "{gated} đã hạ bãi",
+        containerEmpty: "Chưa có container nào mang số booking này trong tab Container.",
+        noBookingNo: "Booking chưa có số booking.",
+        gatedBadge: "Đã hạ bãi",
+        openVesselTab: "Mở tab Tàu",
+        openContainerTab: "Mở tab Container",
+        loadError: "Không tải được lịch tàu / container"
       }
     },
     vessel: {
@@ -2278,6 +2300,28 @@ export const translations = {
         save: "Save to Vessels tab",
         saved: "Saved",
         saveSuccess: "Saved {count} schedule(s) to the Vessels tab"
+      },
+      links: {
+        vesselTitle: "Vessel schedule (ePort)",
+        vesselEmpty: "No schedule matches this booking's vessel + voyage yet.",
+        vesselEmptyHint: "Click \"Look up vessel\" to search ePort.",
+        noVessel: "This booking has no vessel.",
+        estimated: "EST",
+        estimatedTooltip: "Estimated (EST) cut-off on ePort, may still change",
+        berth: "Berthing",
+        departure: "Departure",
+        closing: "Cut-off",
+        openTs: "Gate open",
+        updated: "Updated {time}",
+        containerTitle: "Containers",
+        gatedIn: "{gated}/{qty} gated in",
+        gatedInNoQty: "{gated} gated in",
+        containerEmpty: "No container in the Containers tab carries this booking number yet.",
+        noBookingNo: "This booking has no booking number.",
+        gatedBadge: "Gated in",
+        openVesselTab: "Open Vessels tab",
+        openContainerTab: "Open Containers tab",
+        loadError: "Could not load vessel / container info"
       }
     },
     vessel: {

@@ -13,6 +13,7 @@ import { NOTE_KEY, getBookingNote } from './NoteHover';
 import { useFieldSelection } from '../../hooks/useFieldSelection';
 import { FieldCopyBar } from '../common/FieldCopyBar';
 import { CUTOFF_KEY, effectiveCutoff } from './EportCutoff';
+import { BookingLinksPanel } from './BookingLinksPanel';
 import type { CopyEntry } from '../../utils/fieldCopy';
 
 interface BookingDetailModalProps {
@@ -175,8 +176,9 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
 
         <FieldCopyBar entries={entries} {...picked.barProps} />
 
+        <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-4">
         {/* Detailed Fields Grid */}
-        <div className="grid grid-cols-2 gap-2.5 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-2.5">
           {fields.map((f) => {
             const rawVal = f.key === "Carrier" ? carrierName : booking[f.key];
             const val = rawVal !== undefined && rawVal !== null && rawVal !== '' ? rawVal : 'null';
@@ -247,6 +249,16 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
               </div>
             );
           })}
+        </div>
+
+        {/* Its vessel schedule and containers on ePort */}
+        <BookingLinksPanel
+          bookingId={booking.id}
+          bookingNo={String(booking["Booking No"] ?? '')}
+          vessel={String(booking["Vessel"] ?? '')}
+          labels={t.booking.links}
+          onNavigateTab={onNavigateTab && ((tab, query) => { onClose(); onNavigateTab(tab, query); })}
+        />
         </div>
 
         <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">

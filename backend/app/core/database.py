@@ -710,6 +710,13 @@ def _is_cutoff_overdue(row: dict, now: datetime | None = None) -> bool:
 _QTY_NUMBER = re.compile(r"\d+")
 
 
+def _gated_in_sql(alias: str) -> str:
+    """SQL test for a container event that is a full export container gated in at the port."""
+    event = f"REPLACE(UPPER({alias}.event_type), ' ', '')"
+    return (f"(UPPER(TRIM({alias}.fel)) = 'F' AND UPPER({alias}.im_exp) LIKE '%EXPORT%' "
+            f"AND ({event} LIKE '%INGATE%' OR {event} LIKE '%GATEIN%'))")
+
+
 def _sync_booking_gate_status(conn: sqlite3.Connection, col_id: int) -> int:
     """Move open bookings to "gated_in" once ePort shows all their containers gated in full for export.
 
@@ -725,9 +732,7 @@ def _sync_booking_gate_status(conn: sqlite3.Connection, col_id: int) -> int:
             AND UPPER(TRIM(c.bill_book)) = UPPER(TRIM(b.booking_no))
         WHERE b.collection_id = ? AND TRIM(COALESCE(b.booking_no, '')) NOT IN ('', 'null')
             AND {_STATUS_EXPR} IN ({open_list})
-            AND UPPER(TRIM(c.fel)) = 'F' AND UPPER(c.im_exp) LIKE '%EXPORT%'
-            AND (REPLACE(UPPER(c.event_type), ' ', '') LIKE '%INGATE%'
-                 OR REPLACE(UPPER(c.event_type), ' ', '') LIKE '%GATEIN%')
+            AND {_gated_in_sql("c")}
         GROUP BY b.id;
     """, (col_id,)).fetchall()
     changed = 0
@@ -1644,6 +1649,50 @@ def get_vessel_calendar(col_id: int, date_from: str, date_to: str, search_query:
             "booking_open_count": sum(1 for status in mine if status in _BOOKING_OPEN_STATUSES),
         })
     return {"items": items, "undated": undated}
+
+
+def get_booking_links(booking_id: int) -> dict | None:
+    """The ePort vessel schedules and containers of one booking, or None when there is no such booking.
+
+    "vessels": the collection's schedules naming the booking's vessel + voyage (same strict match as the
+    ePort cut-off; one per port site). "containers": one row per container whose BILL_BOOK is the booking
+    number, its latest event first, with "gated_in" when any of its events is the export gate-in that moves
+    the booking to "gated_in". "gated_in" / "qty": how many are gated in, out of the booking's Q'ty.
+    """
+    with get_connection() as conn:
+        found = _select_dicts(conn, "SELECT collection_id, booking_no, vessel, qty FROM bookings WHERE id = ?;",
+                              (booking_id,))
+        if not found:
+            return None
+        b = found[0]
+        col_id, booking_no, vessel = b["collection_id"], _s(b.get("booking_no")), _s(b.get("vessel"))
+        vessels = []
+        if vessel and vessel.lower() != "null":
+            schedules = _select_dicts(conn, "SELECT * FROM vessel_schedules WHERE collection_id = ? "
+                                            "ORDER BY site_id, id;", (col_id,))
+            vessels = [s for s in schedules if text_matches_schedule(vessel, s)]
+        events = []
+        if booking_no and booking_no.lower() != "null":
+            events = _select_dicts(
+                conn, f"SELECT c.*, {_gated_in_sql('c')} AS gate_event FROM containers c "
+                      "WHERE c.collection_id = ? AND UPPER(TRIM(c.bill_book)) = UPPER(?) "
+                      "ORDER BY sort_key(c.event_time) DESC, c.id DESC;", (col_id, booking_no))
+    containers: dict[str, dict] = {}
+    for e in events:
+        gated = bool(e.pop("gate_event"))
+        latest = containers.get(e["containerno"])
+        if latest is None:
+            containers[e["containerno"]] = {**_enrich_container_row(e), "gated_in": gated}
+        elif gated:
+            latest["gated_in"] = True
+    rows = sorted(containers.values(), key=lambda c: c["containerno"])
+    m = _QTY_NUMBER.search(_s(b.get("qty")))
+    return {
+        "vessels": [{**s, "closing_estimated": "EST" in str(s.get("closing_time") or "").upper()} for s in vessels],
+        "containers": rows,
+        "gated_in": sum(1 for c in rows if c["gated_in"]),
+        "qty": int(m.group()) if m else None,
+    }
 
 
 def get_vessel_schedule_ids(col_id: int, search_query: str = None, search_field: str = None,
