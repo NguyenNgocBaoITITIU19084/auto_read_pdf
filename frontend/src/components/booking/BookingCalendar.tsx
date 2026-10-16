@@ -5,8 +5,10 @@ import { getBookingsCalendar } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import { ValueBadge } from '../common/ValueBadge';
 import {
-  WeekCalendar, WeekNavLabels, addDays, dayKey, groupByDay as groupItemsByDay, startOfWeek,
+  ActiveFilters, FilterToggle, WeekCalendar, WeekNavLabels, addDays, dayKey, groupByDay as groupItemsByDay, startOfWeek,
 } from '../common/WeekCalendar';
+import { ColumnFilterLabels, ColumnValueFilter } from '../common/ColumnValueFilter';
+import type { ColumnValueCount } from '../../services/api';
 import { BookingStatusCell, BookingStatusLabels, OVERDUE_KEY, STATUS_KEY } from './BookingStatus';
 import { BookingStatus } from '../../types';
 
@@ -18,6 +20,11 @@ export const DEADLINE_KEY = 'Hạn cut-off';
 export const ALL_DAY_KEY = 'Cut-off cả ngày';
 
 export interface BookingCalendarLabels extends WeekNavLabels {
+  filterCarrier: string;
+  filterStatus: string;
+  onlyLate: string;
+  filtersActive: string;
+  clearFilters: string;
   summary: string;
   lateSummary: string;
   undated: string;
@@ -40,13 +47,23 @@ interface BookingCalendarProps {
   onContextMenu: (booking: Booking, e: React.MouseEvent) => void;
   onChangeStatus: (booking: Booking, status: BookingStatus) => void;
   onError: (message: string) => void;
+  /** Shared with the table: carriers and statuses kept (empty = all) */
+  carriers: string[];
+  onCarriersChange: (values: string[]) => void;
+  loadCarriers: () => Promise<ColumnValueCount[]>;
+  statuses: string[];
+  onStatusesChange: (values: string[]) => void;
+  loadStatuses: () => Promise<ColumnValueCount[]>;
+  filterLabels: ColumnFilterLabels;
 }
 
 /** Week view of the bookings by cut-off: one column per day, Monday to Sunday. */
 export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   collectionId, query, reloadKey, labels, statusLabels, onOpen, onContextMenu, onChangeStatus, onError,
+  carriers, onCarriersChange, loadCarriers, statuses, onStatusesChange, loadStatuses, filterLabels,
 }) => {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [onlyLate, setOnlyLate] = useState(false);
   const [items, setItems] = useState<Booking[]>([]);
   const [undated, setUndated] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -78,7 +95,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
 
   const itemsByDay = useMemo(() => {
     const cards = new Map<string, React.ReactNode[]>();
-    groupByDay(items).forEach((list, key) => cards.set(key, list.map((b) => (
+    groupByDay(onlyLate ? items.filter((b) => b[OVERDUE_KEY]) : items).forEach((list, key) => cards.set(key, list.map((b) => (
       <CalendarCard
         key={b.id}
         booking={b}
@@ -90,8 +107,9 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
       />
     ))));
     return cards;
-  }, [items, labels.allDay, statusLabels, onOpen, onContextMenu, onChangeStatus]);
+  }, [items, onlyLate, labels.allDay, statusLabels, onOpen, onContextMenu, onChangeStatus]);
   const late = items.filter((b) => b[OVERDUE_KEY]).length;
+  const activeFilters = (carriers.length > 0 ? 1 : 0) + (statuses.length > 0 ? 1 : 0) + (onlyLate ? 1 : 0);
 
   return (
     <WeekCalendar
@@ -100,6 +118,40 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
       labels={labels}
       loading={loading}
       itemsByDay={itemsByDay}
+      filters={(
+        <>
+          <ColumnValueFilter
+            variant="chip"
+            column={labels.filterCarrier}
+            loadOptions={loadCarriers}
+            value={carriers}
+            onChange={onCarriersChange}
+            labels={filterLabels}
+          />
+          <ColumnValueFilter
+            variant="chip"
+            column={labels.filterStatus}
+            loadOptions={loadStatuses}
+            value={statuses}
+            onChange={onStatusesChange}
+            labels={filterLabels}
+            formatOption={(v) => statusLabels.labels[v as BookingStatus] ?? v}
+          />
+          <FilterToggle active={onlyLate} onChange={setOnlyLate} icon={<AlertTriangle className="w-3 h-3" />}>
+            {labels.onlyLate}
+          </FilterToggle>
+          <ActiveFilters
+            count={activeFilters}
+            label={labels.filtersActive}
+            clearLabel={labels.clearFilters}
+            onClear={() => {
+              onCarriersChange([]);
+              onStatusesChange([]);
+              setOnlyLate(false);
+            }}
+          />
+        </>
+      )}
       summary={(
         <>
           <span className="font-semibold text-slate-700 dark:text-slate-200">{tf(labels.summary, { count: items.length })}</span>

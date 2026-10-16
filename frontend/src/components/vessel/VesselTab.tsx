@@ -746,6 +746,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
           onContextMenu={handleRowContextMenu}
           onOpenBookings={onNavigateTab ? openVesselBookings : undefined}
           onError={showCalendarError}
+          filterLabels={t.common.columnFilter}
         />
       ) : (
       <div data-tour="vessel-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">

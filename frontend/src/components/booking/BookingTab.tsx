@@ -692,6 +692,11 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     empty: t.booking.calendar.empty,
     allDay: t.booking.calendar.allDay,
     error: t.booking.calendar.error,
+    filterCarrier: t.booking.calendar.filterCarrier,
+    filterStatus: t.booking.calendar.filterStatus,
+    onlyLate: t.booking.calendar.onlyLate,
+    filtersActive: t.booking.calendar.filtersActive,
+    clearFilters: t.booking.calendar.clearFilters,
   }), [t]);
   const showCalendarError = useStableCallback((message: string) => addToast(message, 'error'));
 
@@ -1137,6 +1142,13 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           onContextMenu={handleRowContextMenu}
           onChangeStatus={changeRowStatus}
           onError={showCalendarError}
+          carriers={carrierFilter}
+          onCarriersChange={setCarrierFilter}
+          loadCarriers={() => getBookingCarriers(activeCollection.id)}
+          statuses={statusFilter}
+          onStatusesChange={setStatusFilter}
+          loadStatuses={() => getBookingStatuses(activeCollection.id)}
+          filterLabels={t.common.columnFilter}
         />
       ) : (
       <div data-tour="booking-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">

@@ -14,6 +14,7 @@ const labels: VesselCalendarLabels = {
   summary: '{count} tàu', soonSummary: '{count} sắp cắt máng', undated: '{count} chưa có giờ',
   estimated: 'DK', estimatedTooltip: 'dự kiến', closed: 'Đã cắt máng', soon: 'Sắp cắt máng', etd: 'ETD', hoursLeft: 'còn {h} giờ', minutesLeft: 'còn {m} phút',
   bookings: '{count} booking', bookingsOpen: '{count} chưa hạ bãi', bookingsTooltip: 'xem booking', error: 'Lỗi',
+  filterSite: 'Cảng', filterAgent: 'Đại lý', onlySoon: 'Chỉ tàu sắp cắt máng', filtersActive: 'Đang lọc {count} điều kiện', clearFilters: 'Xóa lọc',
 };
 
 const schedule = (over: Record<string, unknown>) => ({
@@ -22,6 +23,8 @@ const schedule = (over: Record<string, unknown>) => ({
   closing_time_icd: '', in_gate: '', open_ts: '', reefer_open_ts: '', oog_open_ts: '', haz_open_ts: '',
   remarks: '', queried_at: '', closing_state: 'open', booking_count: 0, booking_open_count: 0, ...over,
 });
+
+const filterLabels = { button: 'Lọc theo {col}', active: 'Đang lọc {n}', search: 'Tìm...', all: 'Chọn tất cả', clear: 'Bỏ lọc', empty: '(Trống)', none: 'Không có', loading: 'Đang tải...' };
 
 describe('shortTime', () => {
   it('keeps the time and day of an ePort time', () => {
@@ -68,7 +71,7 @@ describe('VesselCalendar', () => {
     const onOpenBookings = vi.fn();
     render(
       <VesselCalendar collectionId={5} query={{ search_query: 'S' }} reloadKey={0} labels={labels}
-        onOpen={onOpen} onContextMenu={() => {}} onOpenBookings={onOpenBookings} onError={() => {}} />,
+        onOpen={onOpen} onContextMenu={() => {}} onOpenBookings={onOpenBookings} onError={() => {}} filterLabels={filterLabels} />,
     );
     await screen.findByText('SHANGHAI VOYAGER');
     expect(screen.getByText(/^Sắp cắt máng/)).toBeTruthy();
@@ -83,5 +86,29 @@ describe('VesselCalendar', () => {
     expect(onOpen).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText('PAST SHIP'));
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 2 }));
+  });
+
+  it('filters the week by terminal and to vessels closing soon', async () => {
+    const wed = dayKey(addDays(startOfWeek(new Date()), 2));
+    getVesselsCalendar.mockResolvedValue({
+      items: [
+        schedule({ id: 1, vessel_name: 'CTL SOON', site_id: 'CTL', calendar_deadline: `${wed} 10:00`, closing_state: 'soon' }),
+        schedule({ id: 2, vessel_name: 'GNL OPEN', site_id: 'GNL', agent: 'MSK', calendar_deadline: `${wed} 12:00` }),
+      ],
+      undated: 0,
+    });
+    render(
+      <VesselCalendar collectionId={5} query={{}} reloadKey={0} labels={labels}
+        onOpen={() => {}} onContextMenu={() => {}} onError={() => {}} filterLabels={filterLabels} />,
+    );
+    await screen.findByText('GNL OPEN');
+    fireEvent.click(screen.getByRole('button', { name: 'Lọc theo Cảng' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /GNL/ }));
+    expect(screen.queryByText('CTL SOON')).toBeNull();
+    expect(screen.getByText('GNL OPEN')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Xóa lọc/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Chỉ tàu sắp cắt máng/ }));
+    expect(screen.getByText('CTL SOON')).toBeInTheDocument();
+    expect(screen.queryByText('GNL OPEN')).toBeNull();
   });
 });

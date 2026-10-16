@@ -1,5 +1,5 @@
 import React, { useMemo, useRef } from 'react';
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Loader2, Undo2 } from 'lucide-react';
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Loader2, Undo2, X } from 'lucide-react';
 import { tf } from '../../services/i18nFormat';
 
 export interface WeekNavLabels {
@@ -77,13 +77,15 @@ interface WeekCalendarProps {
   loading: boolean;
   /** Right side of the week bar (counts, warnings) */
   summary?: React.ReactNode;
+  /** Filter bar under the week bar */
+  filters?: React.ReactNode;
   /** Rendered cards per day ('YYYY-MM-DD') */
   itemsByDay: Map<string, React.ReactNode[]>;
 }
 
 /** Week bar (‹ week ›, where it sits from today, a way back) over one column per day, Monday to Sunday. */
 export const WeekCalendar: React.FC<WeekCalendarProps> = ({
-  weekStart, onWeekStartChange, labels, loading, summary, itemsByDay,
+  weekStart, onWeekStartChange, labels, loading, summary, filters, itemsByDay,
 }) => {
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const from = dayKey(days[0]);
@@ -176,6 +178,12 @@ export const WeekCalendar: React.FC<WeekCalendarProps> = ({
         </span>
       </div>
 
+      {filters && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 shrink-0">
+          {filters}
+        </div>
+      )}
+
       {/* One column per day */}
       <div className="flex-1 min-h-0 overflow-auto">
         <div className="grid grid-cols-7 min-w-[900px] min-h-full divide-x divide-slate-200 dark:divide-slate-800">
@@ -218,3 +226,40 @@ export const WeekCalendar: React.FC<WeekCalendarProps> = ({
     </div>
   );
 };
+
+/** "Only late" style switch of a calendar's filter bar. */
+export const FilterToggle: React.FC<{ active: boolean; onChange: (active: boolean) => void; icon?: React.ReactNode; children: React.ReactNode }> = ({
+  active, onChange, icon, children,
+}) => (
+  <button
+    type="button"
+    aria-pressed={active}
+    onClick={() => onChange(!active)}
+    className={`shrink-0 inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+      active
+        ? 'border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300'
+        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+    }`}
+  >
+    {icon}
+    {children}
+  </button>
+);
+
+/** How many filters are on, and a way to clear them all (nothing when none is on). */
+export const ActiveFilters: React.FC<{ count: number; label: string; clearLabel: string; onClear: () => void }> = ({
+  count, label, clearLabel, onClear,
+}) =>
+  count > 0 ? (
+    <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+      <span className="whitespace-nowrap">{tf(label, { count })}</span>
+      <button
+        type="button"
+        onClick={onClear}
+        className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/40 whitespace-nowrap"
+      >
+        <X className="w-3 h-3" />
+        {clearLabel}
+      </button>
+    </span>
+  ) : null;

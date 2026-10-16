@@ -683,7 +683,12 @@ export const translations = {
         undated: "{count} booking chưa có giờ cắt máng (không hiện trên lịch)",
         empty: "Không có cut-off",
         allDay: "Cả ngày",
-        error: "Không tải được lịch"
+        error: "Không tải được lịch",
+        filterCarrier: "Hãng tàu",
+        filterStatus: "Trạng thái",
+        onlyLate: "Chỉ booking trễ",
+        filtersActive: "Đang lọc {count} điều kiện",
+        clearFilters: "Xóa lọc"
       },
       noteQuick: {
         title: "Thêm ghi chú",
@@ -936,7 +941,12 @@ export const translations = {
         bookings: "{count} booking",
         bookingsOpen: "{count} chưa hạ bãi",
         bookingsTooltip: "Xem các booking đi tàu này ở tab Booking",
-        error: "Không tải được lịch tàu"
+        error: "Không tải được lịch tàu",
+        filterSite: "Cảng",
+        filterAgent: "Đại lý",
+        onlySoon: "Chỉ tàu sắp cắt máng",
+        filtersActive: "Đang lọc {count} điều kiện",
+        clearFilters: "Xóa lọc"
       },
       trash: {
         button: "Thùng rác",
@@ -2042,7 +2052,12 @@ export const translations = {
         undated: "{count} booking(s) without a cut-off (not on the calendar)",
         empty: "No cut-off",
         allDay: "All day",
-        error: "Could not load the calendar"
+        error: "Could not load the calendar",
+        filterCarrier: "Shipping line",
+        filterStatus: "Status",
+        onlyLate: "Late only",
+        filtersActive: "{count} filter(s) on",
+        clearFilters: "Clear filters"
       },
       noteQuick: {
         title: "Add note",
@@ -2295,7 +2310,12 @@ export const translations = {
         bookings: "{count} booking(s)",
         bookingsOpen: "{count} not gated in",
         bookingsTooltip: "Show the bookings on this vessel in the Booking tab",
-        error: "Could not load the vessel calendar"
+        error: "Could not load the vessel calendar",
+        filterSite: "Terminal",
+        filterAgent: "Agent",
+        onlySoon: "Closing soon only",
+        filtersActive: "{count} filter(s) on",
+        clearFilters: "Clear filters"
       },
       trash: {
         button: "Trash",

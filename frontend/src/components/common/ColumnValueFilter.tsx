@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Filter, Search } from 'lucide-react';
+import { ChevronDown, Filter, Search } from 'lucide-react';
 import type { ColumnValueCount } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 
@@ -27,13 +27,15 @@ interface ColumnValueFilterProps {
   labels: ColumnFilterLabels;
   /** Display text of a stored value (e.g. a status code); the value itself is shown when omitted */
   formatOption?: (value: string) => string;
+  /** "icon" (table header, default) or "chip": a labelled toolbar button showing how many values are picked */
+  variant?: 'icon' | 'chip';
 }
 
 const WIDTH = 224;
 const MARGIN = 8;
 
 /** Filter button for a table column (e.g. the carrier): a checkbox list of its values, in a portal. */
-export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, loadOptions, value, onChange, labels, formatOption }) => {
+export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, loadOptions, value, onChange, labels, formatOption, variant = 'icon' }) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -91,20 +93,43 @@ export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, lo
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        title={active ? tf(labels.active, { n: value.length }) : tf(labels.button, { col: column })}
-        aria-label={tf(labels.button, { col: column })}
-        aria-expanded={open}
-        className={`shrink-0 flex items-center gap-0.5 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${
-          active ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500 opacity-60 group-hover/th:opacity-100'
-        }`}
-      >
-        <Filter className="w-3 h-3" fill={active ? 'currentColor' : 'none'} />
-        {active && <span className="text-[10px] font-bold leading-none">{value.length}</span>}
-      </button>
+      {variant === 'chip' ? (
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          title={active ? value.map(text).join(', ') : tf(labels.button, { col: column })}
+          aria-label={tf(labels.button, { col: column })}
+          aria-expanded={open}
+          className={`shrink-0 inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+            active
+              ? 'border-primary-300 dark:border-primary-700 bg-primary-50 dark:bg-primary-950/50 text-primary-700 dark:text-primary-300'
+              : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Filter className="w-3 h-3" fill={active ? 'currentColor' : 'none'} />
+          {column}
+          {active && (
+            <span className="min-w-[16px] rounded-full bg-primary-600 px-1 text-center text-[10px] font-bold leading-4 text-white">{value.length}</span>
+          )}
+          <ChevronDown className="w-3 h-3 opacity-60" />
+        </button>
+      ) : (
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          title={active ? tf(labels.active, { n: value.length }) : tf(labels.button, { col: column })}
+          aria-label={tf(labels.button, { col: column })}
+          aria-expanded={open}
+          className={`shrink-0 flex items-center gap-0.5 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors ${
+            active ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400 dark:text-slate-500 opacity-60 group-hover/th:opacity-100'
+          }`}
+        >
+          <Filter className="w-3 h-3" fill={active ? 'currentColor' : 'none'} />
+          {active && <span className="text-[10px] font-bold leading-none">{value.length}</span>}
+        </button>
+      )}
       {open &&
         createPortal(
           <div

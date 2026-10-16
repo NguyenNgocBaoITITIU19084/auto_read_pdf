@@ -16,11 +16,19 @@ const labels: BookingCalendarLabels = {
   weekdays: ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'CN'],
   summary: '{count} booking', lateSummary: '{count} trễ', undated: '{count} chưa có cut-off',
   empty: 'Không có cut-off', allDay: 'Cả ngày', error: 'Lỗi',
+  filterCarrier: 'Hãng tàu', filterStatus: 'Trạng thái', onlyLate: 'Chỉ booking trễ', filtersActive: 'Đang lọc {count} điều kiện', clearFilters: 'Xóa lọc',
 };
 const statusLabels: BookingStatusLabels = {
   labels: { new: 'Mới', dispatched: 'Đã điều xe', stuffed: 'Đã đóng hàng', gated_in: 'Đã hạ bãi', done: 'Hoàn tất', cancelled: 'Huỷ' },
   overdue: 'Trễ', overdueTooltip: 'quá giờ',
 };
+
+const filterLabels = { button: 'Lọc theo {col}', active: 'Đang lọc {n}', search: 'Tìm...', all: 'Chọn tất cả', clear: 'Bỏ lọc', empty: '(Trống)', none: 'Không có', loading: 'Đang tải...' };
+const filterProps = (over: Record<string, unknown> = {}) => ({
+  carriers: [] as string[], onCarriersChange: vi.fn(), loadCarriers: async () => [{ carrier: 'ONE', count: 2 }, { carrier: 'MSC', count: 1 }],
+  statuses: [] as string[], onStatusesChange: vi.fn(), loadStatuses: async () => [{ carrier: 'new', count: 3 }],
+  filterLabels, ...over,
+});
 
 describe('calendar dates', () => {
   it('starts weeks on Monday', () => {
@@ -68,7 +76,7 @@ describe('BookingCalendar', () => {
     const onOpen = vi.fn();
     render(
       <BookingCalendar collectionId={1} query={{}} reloadKey={0} labels={labels} statusLabels={statusLabels}
-        onOpen={onOpen} onContextMenu={() => {}} onChangeStatus={() => {}} onError={() => {}} />,
+        onOpen={onOpen} onContextMenu={() => {}} onChangeStatus={() => {}} onError={() => {}} {...filterProps()} />,
     );
     await screen.findByText('BK7');
     expect(getBookingsCalendar).toHaveBeenCalledWith(1, dayKey(monday), dayKey(addDays(monday, 6)), {});
@@ -84,7 +92,7 @@ describe('BookingCalendar', () => {
     getBookingsCalendar.mockResolvedValue({ items: [], undated: 0 });
     render(
       <BookingCalendar collectionId={1} query={{}} reloadKey={0} labels={labels} statusLabels={statusLabels}
-        onOpen={() => {}} onContextMenu={() => {}} onChangeStatus={() => {}} onError={() => {}} />,
+        onOpen={() => {}} onContextMenu={() => {}} onChangeStatus={() => {}} onError={() => {}} {...filterProps()} />,
     );
     await waitFor(() => expect(getBookingsCalendar).toHaveBeenCalledTimes(1));
     expect(screen.queryByText('Về tuần này')).toBeNull();
@@ -94,5 +102,46 @@ describe('BookingCalendar', () => {
     fireEvent.click(screen.getByText('Về tuần này'));
     const now = startOfWeek(new Date());
     await waitFor(() => expect(getBookingsCalendar).toHaveBeenLastCalledWith(1, dayKey(now), dayKey(addDays(now, 6)), {}));
+  });
+
+  it('filters to late bookings, shows the shared carrier filter and clears everything', async () => {
+    const wed = dayKey(addDays(startOfWeek(new Date()), 2));
+    getBookingsCalendar.mockResolvedValue({
+      items: [
+        { id: 1, 'Booking No': 'LATE1', 'Hạn cut-off': `${wed} 08:00`, 'Trễ cut-off': true },
+        { id: 2, 'Booking No': 'OK2', 'Hạn cut-off': `${wed} 09:00` },
+      ],
+      undated: 0,
+    });
+    const onCarriersChange = vi.fn();
+    const onStatusesChange = vi.fn();
+    render(
+      <BookingCalendar collectionId={1} query={{}} reloadKey={0} labels={labels} statusLabels={statusLabels}
+        onOpen={() => {}} onContextMenu={() => {}} onChangeStatus={() => {}} onError={() => {}}
+        {...filterProps({ carriers: ['ONE'], onCarriersChange, onStatusesChange })} />,
+    );
+    await screen.findByText('OK2');
+    expect(screen.getByText('Đang lọc 1 điều kiện')).toBeInTheDocument();     // the carrier set from the table
+    fireEvent.click(screen.getByRole('button', { name: /Chỉ booking trễ/ }));
+    expect(screen.queryByText('OK2')).toBeNull();
+    expect(screen.getByText('LATE1')).toBeInTheDocument();
+    expect(screen.getByText('Đang lọc 2 điều kiện')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Xóa lọc/ }));
+    expect(onCarriersChange).toHaveBeenCalledWith([]);
+    expect(onStatusesChange).toHaveBeenCalledWith([]);
+    expect(screen.getByText('OK2')).toBeInTheDocument();
+  });
+
+  it('opens the carrier list from the filter bar and picks one', async () => {
+    getBookingsCalendar.mockResolvedValue({ items: [], undated: 0 });
+    const onCarriersChange = vi.fn();
+    render(
+      <BookingCalendar collectionId={1} query={{}} reloadKey={0} labels={labels} statusLabels={statusLabels}
+        onOpen={() => {}} onContextMenu={() => {}} onChangeStatus={() => {}} onError={() => {}}
+        {...filterProps({ onCarriersChange })} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Lọc theo Hãng tàu' }));
+    fireEvent.click(await screen.findByRole('checkbox', { name: /MSC/ }));
+    expect(onCarriersChange).toHaveBeenCalledWith(['MSC']);
   });
 });

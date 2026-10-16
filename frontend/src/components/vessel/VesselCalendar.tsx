@@ -3,9 +3,15 @@ import { Anchor, Clock, FileText, Hourglass } from 'lucide-react';
 import { TableQuery, VesselSchedule } from '../../types';
 import { getVesselsCalendar } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
-import { WeekCalendar, WeekNavLabels, addDays, dayKey, groupByDay, startOfWeek } from '../common/WeekCalendar';
+import { ActiveFilters, FilterToggle, WeekCalendar, WeekNavLabels, addDays, dayKey, groupByDay, startOfWeek } from '../common/WeekCalendar';
+import { ColumnFilterLabels, ColumnValueFilter } from '../common/ColumnValueFilter';
 
 export interface VesselCalendarLabels extends WeekNavLabels {
+  filterSite: string;
+  filterAgent: string;
+  onlySoon: string;
+  filtersActive: string;
+  clearFilters: string;
   summary: string;
   soonSummary: string;
   undated: string;
@@ -64,13 +70,28 @@ interface VesselCalendarProps {
   /** Show this vessel's bookings in the booking tab */
   onOpenBookings?: (schedule: VesselSchedule) => void;
   onError: (message: string) => void;
+  filterLabels: ColumnFilterLabels;
 }
+
+/** Distinct values of a field among the week's vessels, with counts, for a filter list. */
+export const valueCounts = (items: VesselSchedule[], field: 'site_id' | 'agent') => {
+  const counts = new Map<string, number>();
+  items.forEach((v) => {
+    const value = String(v[field] || '').trim();
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+  return Array.from(counts, ([carrier, count]) => ({ carrier, count })).sort((a, b) => a.carrier.localeCompare(b.carrier));
+};
 
 /** Week view of the vessel schedules by closing time (cắt máng). */
 export const VesselCalendar: React.FC<VesselCalendarProps> = ({
-  collectionId, query, reloadKey, labels, onOpen, onContextMenu, onOpenBookings, onError,
+  collectionId, query, reloadKey, labels, onOpen, onContextMenu, onOpenBookings, onError, filterLabels,
 }) => {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  // Filters of the week's vessels (on top of the table's search)
+  const [sites, setSites] = useState<string[]>([]);
+  const [agents, setAgents] = useState<string[]>([]);
+  const [onlySoon, setOnlySoon] = useState(false);
   const [items, setItems] = useState<VesselSchedule[]>([]);
   const [undated, setUndated] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -99,14 +120,20 @@ export const VesselCalendar: React.FC<VesselCalendarProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionId, from, to, queryKey, reloadKey]);
 
+  const shown = useMemo(() => items.filter((v) =>
+    (sites.length === 0 || sites.includes(String(v.site_id || '').trim()))
+    && (agents.length === 0 || agents.includes(String(v.agent || '').trim()))
+    && (!onlySoon || v.closing_state === 'soon')), [items, sites, agents, onlySoon]);
+
   const itemsByDay = useMemo(() => {
     const cards = new Map<string, React.ReactNode[]>();
-    groupByDay(items, (v) => String(v.calendar_deadline || '')).forEach((list, key) => cards.set(key, list.map((v) => (
+    groupByDay(shown, (v) => String(v.calendar_deadline || '')).forEach((list, key) => cards.set(key, list.map((v) => (
       <VesselCard key={v.id} schedule={v} labels={labels} onOpen={onOpen} onContextMenu={onContextMenu} onOpenBookings={onOpenBookings} />
     ))));
     return cards;
-  }, [items, labels, onOpen, onContextMenu, onOpenBookings]);
+  }, [shown, labels, onOpen, onContextMenu, onOpenBookings]);
   const soon = items.filter((v) => v.closing_state === 'soon').length;
+  const activeFilters = (sites.length > 0 ? 1 : 0) + (agents.length > 0 ? 1 : 0) + (onlySoon ? 1 : 0);
 
   return (
     <WeekCalendar
@@ -115,6 +142,39 @@ export const VesselCalendar: React.FC<VesselCalendarProps> = ({
       labels={labels}
       loading={loading}
       itemsByDay={itemsByDay}
+      filters={(
+        <>
+          <ColumnValueFilter
+            variant="chip"
+            column={labels.filterSite}
+            loadOptions={async () => valueCounts(items, 'site_id')}
+            value={sites}
+            onChange={setSites}
+            labels={filterLabels}
+          />
+          <ColumnValueFilter
+            variant="chip"
+            column={labels.filterAgent}
+            loadOptions={async () => valueCounts(items, 'agent')}
+            value={agents}
+            onChange={setAgents}
+            labels={filterLabels}
+          />
+          <FilterToggle active={onlySoon} onChange={setOnlySoon} icon={<Clock className="w-3 h-3" />}>
+            {labels.onlySoon}
+          </FilterToggle>
+          <ActiveFilters
+            count={activeFilters}
+            label={labels.filtersActive}
+            clearLabel={labels.clearFilters}
+            onClear={() => {
+              setSites([]);
+              setAgents([]);
+              setOnlySoon(false);
+            }}
+          />
+        </>
+      )}
       summary={(
         <>
           <span className="font-semibold text-slate-700 dark:text-slate-200">{tf(labels.summary, { count: items.length })}</span>
