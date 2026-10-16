@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from backend.app.services.carrier_parsers import cma, find_parser
@@ -194,3 +195,19 @@ def test_anl_direct_booking_is_read_as_cma_cgm():
     assert r["Port of Discharging"] == "JEBEL ALI"
     assert r["Equipment Type"] == "20'GP"
     assert r["Q'ty"] == "2"
+
+
+def test_cma_wrapped_terminal_after_final_place_is_not_the_destination():
+    # BKGCONF_SGN3465014.pdf: the final place has its own ETA and its terminal name wraps around it
+    route = """VUNG TAU 22-OCT-2026 23-OCT-2026 LAN HAI CHANG AN 0T22CW1MA TVI GEMALINK PORT
+SINGAPORE 29-OCT-2026 30-OCT-2026 CMA CGM VENDOME 0FLN9W1MA FAL CMA CGM PSA LION TERMINAL
+DUNKERQUE 10-DEC-2026 11-DEC-2026 THETIS D 0D2BLN1MA ISX TERMINAL DE FLANDRES
+SEAFORTH CONTAINER
+LIVERPOOL 12-DEC-2026
+TERMINAL
+"""
+    text = re.sub(r"VUNG TAU 20-OCT.*?JEBEL ALI\n", route, CMA_TEXT, flags=re.DOTALL)
+    r = extract_booking_from_text(text, "BKGCONF_SGN3465014.pdf")
+    assert r["Port of Discharging"] == r["Place of Delivery"] == "LIVERPOOL"
+    assert r["T/S Port"] == "SINGAPORE"
+    assert r["Trunk Vessel"] == "CMA CGM VENDOME 0FLN9W1MA"
