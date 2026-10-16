@@ -165,7 +165,7 @@ def test_oocl_direct_booking_side_by_side_depots():
     assert res["Equipment Type"] == "20'GP"
     assert res["Q'ty"] == "2"
     assert res["Empty Pick Up CY"] == "SINOVNL TAN VAN"
-    assert res["Full return CY"] == "CAT LAI TERMINAL"
+    assert res["Full return CY"] == "CAT LAI"
     assert res["Port Cargo Cut-off"] == "30/09/2026 14:00"
 
 
@@ -371,3 +371,24 @@ def test_cosco_wrapped_terminal_and_destination():
 def test_cargosmart_container_type_codes(name, code):
     from backend.app.services.carrier_parsers.cargosmart import _type_code
     assert _type_code(name) == code
+
+
+def _w(text, x0, top):
+    return {"text": text, "x0": x0, "x1": x0 + 6 * len(text), "top": top}
+
+
+def test_oocl_depots_on_the_next_page():
+    # 2174309940.pdf: the depot labels end page 1, the names open page 2 below its barcode header
+    page1 = [_w("CARGO", 23, 768), _w("WEIGHT:", 59, 768),
+             _w("EMPTY", 23, 810), _w("PICKUP", 57, 810), _w("LOCATION:", 94, 810),
+             _w("FULL", 299, 810), _w("RETURN", 324, 810), _w("LOCATION:", 364, 810)]
+    page2 = [_w("By", 378, 23), _w("OOCL", 390, 23), _w("App", 415, 23),
+             _w("AAAAAAABBBBBBBBBBBBBBAAAABBAAAA", 378, 34),
+             _w("Booking", 160, 58), _w("Acknowledgement", 226, 58),
+             _w("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", 378, 82),
+             _w("SINOVNL", 23, 100), _w("TAN", 66, 100), _w("VAN", 87, 100),
+             _w("Cat", 299, 100), _w("Lai", 316, 100), _w("Terminal", 330, 100),
+             _w("My", 23, 112), _w("Phuoc-Tan", 39, 112), _w("Inter-Provincial", 299, 112)]
+    res = extract_booking_from_text(OOCL1_TEXT, "2174309940.pdf", [page1, page2])
+    assert res["Empty Pick Up CY"] == "SINOVNL TAN VAN"
+    assert res["Full return CY"] == "CAT LAI"
