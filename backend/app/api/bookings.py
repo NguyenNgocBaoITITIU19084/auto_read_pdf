@@ -32,6 +32,8 @@ W_UNSUPPORTED = "Unsupported file format. Please upload an image (PNG, JPG, WEBP
 class SaveBookingRequest(BaseModel):
     collection_id: int
     booking: Dict[str, Any]
+    # Replace the newest row with the same Booking No instead of adding another one
+    overwrite: bool = False
 
 class CheckDuplicatesRequest(BaseModel):
     collection_id: int
@@ -294,6 +296,12 @@ def save_manual_booking(req: SaveBookingRequest):
     data, errors = normalize_manual_booking(req.booking)
     if errors:
         raise HTTPException(status_code=400, detail="; ".join(errors))
+    dups = find_duplicate_booking_ids(req.collection_id, data.get("Booking No", "")) if req.overwrite else []
+    if dups:
+        # Fields the reading does not carry (note, status, created time) are kept
+        item = update_booking(dups[-1], data)
+        logger.info(f"Booking overwritten id={dups[-1]} collection={req.collection_id}")
+        return {"status": "success", "id": dups[-1], "item": item, "warnings": [], "overwritten": True}
     warnings = _duplicate_warnings(req.collection_id, data.get("Booking No", ""), None)
     row_id = insert_booking(req.collection_id, data)
     logger.info(f"Manual booking saved id={row_id} collection={req.collection_id} duplicate={bool(warnings)}")

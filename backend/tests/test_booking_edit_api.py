@@ -51,6 +51,23 @@ def test_manual_save_validates_and_warns_duplicates(client):
     assert dup.status_code == 200 and "SGN9" in dup.json()["warnings"][0].upper()
 
 
+def test_manual_save_overwrites_newest_duplicate_and_keeps_its_note(client):
+    col = db.create_collection("O")
+    save = lambda booking, **kw: client.post(f"{API}/bookings/manual-save", json={"collection_id": col, "booking": booking, **kw})
+    older = save({"Booking No": "YM1", "Vessel": "OLD A"}).json()["id"]
+    newer = save({"Booking No": "YM1", "Vessel": "OLD B", "Ghi chú": "giữ lại"}).json()["id"]
+
+    res = save({"Booking No": "ym1", "Vessel": "New Ship", "ETD": "25/10/2026"}, overwrite=True)
+    body = res.json()
+    assert res.status_code == 200 and body["overwritten"] is True and body["id"] == newer and body["warnings"] == []
+    assert body["item"]["Vessel"] == "NEW SHIP" and body["item"]["ETD"] == "25/10/2026" and body["item"]["Ghi chú"] == "giữ lại"
+    assert {b["id"]: b["Vessel"] for b in db.get_bookings_by_ids([older, newer])} == {older: "OLD A", newer: "NEW SHIP"}
+
+    # nothing to overwrite: a new row is added as usual
+    fresh = save({"Booking No": "YM2"}, overwrite=True).json()
+    assert fresh["id"] not in (older, newer) and not fresh.get("overwritten")
+
+
 def test_update_booking_partial_and_not_found(client):
     col = db.create_collection("U")
     bid = db.insert_booking(col, {"Booking No": "A1", "Vessel": "OLD", "Carrier": "PIL"})

@@ -215,12 +215,18 @@ export const extractBookingImageApi = async (file: File, apiKey?: string): Promi
 export const checkBookingDuplicatesApi = async (collectionId: number, bookingNos: string[]): Promise<string[]> =>
   (await apiClient.post<{ existing: string[] }>('/bookings/check-duplicates', { collection_id: collectionId, booking_nos: bookingNos })).data.existing || [];
 
-export const saveManualBookingApi = async (collectionId: number, booking: Partial<Booking>): Promise<{ item: Booking; warnings: string[] }> => {
-  const res = await apiClient.post<{ status: string; id: number; item: Booking; warnings?: string[] }>('/bookings/manual-save', {
+/** `overwrite` replaces the newest booking with the same Booking No instead of adding a row. */
+export const saveManualBookingApi = async (
+  collectionId: number,
+  booking: Partial<Booking>,
+  overwrite = false
+): Promise<{ item: Booking; warnings: string[]; overwritten: boolean }> => {
+  const res = await apiClient.post<{ status: string; id: number; item: Booking; warnings?: string[]; overwritten?: boolean }>('/bookings/manual-save', {
     collection_id: collectionId,
     booking,
+    ...(overwrite ? { overwrite: true } : {}),
   });
-  return { item: res.data.item, warnings: res.data.warnings || [] };
+  return { item: res.data.item, warnings: res.data.warnings || [], overwritten: !!res.data.overwritten };
 };
 
 export const updateBookingApi = async (id: number, booking: Partial<Booking>): Promise<{ item: Booking; warnings: string[] }> => {

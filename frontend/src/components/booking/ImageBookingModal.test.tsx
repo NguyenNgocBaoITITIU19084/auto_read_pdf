@@ -9,7 +9,10 @@ const addToast = vi.fn();
 const collection = { id: 1, name: 'Test' };
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, activeCollection: collection }) }));
 vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
-vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => vi.fn().mockResolvedValue(true) }));
+vi.mock('../../hooks/useConfirm', () => ({
+  useConfirm: () => vi.fn().mockResolvedValue(true),
+  useConfirmChoice: () => vi.fn().mockResolvedValue('confirm'),
+}));
 vi.mock('../common/Modal', () => ({ Modal: ({ isOpen, children }: any) => (isOpen ? <div>{children}</div> : null) }));
 vi.mock('../common/AISettingsCard', () => ({ AISettingsCard: () => <div>ai-settings</div> }));
 vi.mock('./QuickVesselSearch', () => ({ QuickVesselSearch: () => null }));
@@ -106,7 +109,7 @@ describe('ImageBookingModal (reading queue)', () => {
     fireEvent.click(screen.getAllByRole('option')[0]);
     fireEvent.change(screen.getByDisplayValue('SGN1'), { target: { value: 'SGN1X' } });
     fireEvent.click(saveBtn());
-    await waitFor(() => expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1X', 'Tên file PDF': 'a.png' })));
+    await waitFor(() => expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1X', 'Tên file PDF': 'a.png' }), false));
     expect(onClose).not.toHaveBeenCalled();                                            // the failed image is still waiting
     // The saved image leaves the queue; only the failed one is left
     await waitFor(() => expect(screen.queryByText('a.png')).toBeNull());
@@ -145,7 +148,7 @@ describe('ImageBookingModal (reading queue)', () => {
     expect(screen.queryByTitle(translations.vi.booking.imageModal.rotate)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: translations.vi.booking.imageModal.saveToCollection }));
-    await waitFor(() => expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': '2338872150', 'Tên file PDF': 'OOCL 1.pdf' })));
+    await waitFor(() => expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': '2338872150', 'Tên file PDF': 'OOCL 1.pdf' }), false));
   });
 
   it('says so when a PDF cannot be displayed, but still shows what was read', async () => {
