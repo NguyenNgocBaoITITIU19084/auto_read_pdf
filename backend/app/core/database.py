@@ -268,6 +268,7 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "booking", "column_key": "Carrier", "match_value": "MATSON", "match_type": "contains", "preset_id": "magenta", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "DJ SHIPPING", "match_type": "contains", "preset_id": "rust", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "LEGEND", "match_type": "contains", "preset_id": "olive", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "JINJIANG", "match_type": "contains", "preset_id": "jade", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "SAMUDERA", "match_type": "contains", "preset_id": "ocean", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "RCL", "match_type": "exact", "preset_id": "charcoal", "is_enabled": 1},
 ]
@@ -928,6 +929,8 @@ def _fallback_carrier(row: dict) -> str:
     upper_check = f"{b_no} {row.get('vessel', '') or ''} {row.get('pdf_name', '') or ''}".upper()
     if "DJ SHIPPING" in upper_check or b_no.startswith("DJL"):
         return "DJ SHIPPING"
+    if "JINJIANG" in upper_check or b_no.startswith("JJMS"):
+        return "JINJIANG"
     if "DONGJIN" in upper_check or "DJSC" in upper_check or b_no.startswith("DJ"):
         return "DONGJIN"
     if "PIL" in upper_check or b_no.startswith("SGN6") or "KOTA" in upper_check:

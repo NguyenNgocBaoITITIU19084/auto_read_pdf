@@ -379,6 +379,19 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#3f6212',
     badgeClass: 'bg-lime-800 text-lime-50 border-lime-900 dark:bg-lime-700 dark:text-lime-50 dark:border-lime-500',
   },
+  {
+    id: 'jade',
+    name: 'Jade (Solid)',
+    nameVi: 'Xanh ngọc bích (đậm)',
+    bgClass: 'bg-teal-800',
+    darkBgClass: 'dark:bg-teal-700',
+    borderClass: 'border-teal-900',
+    darkBorderClass: 'dark:border-teal-500',
+    textClass: 'text-teal-50',
+    darkTextClass: 'dark:text-teal-50',
+    hexPreview: '#115e59',
+    badgeClass: 'bg-teal-800 text-teal-50 border-teal-900 dark:bg-teal-700 dark:text-teal-50 dark:border-teal-500',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));
