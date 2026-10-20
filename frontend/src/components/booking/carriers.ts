@@ -44,6 +44,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bMAERSK\b/, /\bSEALAND\b/],
   },
   {
+    key: 'TOPAZ MARINE',
+    patterns: [/\bTOPAZ\b/],
+  },
+  {
     key: 'CMA CGM',
     patterns: [/\bCMA\b/, /\bCNC\b/],
   },
