@@ -44,6 +44,10 @@ export const CARRIERS: CarrierDef[] = [
     patterns: [/\bMAERSK\b/, /\bSEALAND\b/],
   },
   {
+    key: 'TOPAZ MARINE',
+    patterns: [/\bTOPAZ\b/],
+  },
+  {
     key: 'CMA CGM',
     patterns: [/\bCMA\b/, /\bCNC\b/],
   },
@@ -123,6 +127,10 @@ export const CARRIERS: CarrierDef[] = [
     key: 'ZIM',
     patterns: [/\bZIM\b/],
   },
+  {
+    key: 'JINJIANG',
+    patterns: [/\bJINJIANG\b/, /\bJJ\s+SHIPP?ING\b/],
+  },
 ];
 
 const isBlank = (v?: string | null) => !v || v.trim() === '' || v.trim().toLowerCase() === 'null';
@@ -139,6 +147,7 @@ const BOOKING_PREFIXES: [RegExp, string][] = [
   [/^DJL/, 'DJ SHIPPING'],
   [/^LGVN/, 'LEGEND SHIPPING'],
   [/^ZIMU/, 'ZIM'],
+  [/^JJMS/, 'JINJIANG'],
   [/^DJ/, 'DONGJIN'],
   [/^CUL/, 'CULINES'],
   [/^SGN6/, 'PIL'],

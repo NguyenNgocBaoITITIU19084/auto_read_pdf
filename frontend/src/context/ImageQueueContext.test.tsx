@@ -5,11 +5,11 @@ import { translations } from '../i18n/translations';
 import type { ImageExtractResult } from '../types';
 
 const addToast = vi.fn();
-const confirm = vi.fn();
+const choose = vi.fn();
 let activeCollection: { id: number; name: string } | null = { id: 1, name: 'Test' };
 vi.mock('./AppContext', () => ({ useApp: () => ({ t: translations.vi, activeCollection }) }));
 vi.mock('./ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
-vi.mock('../hooks/useConfirm', () => ({ useConfirm: () => confirm }));
+vi.mock('../hooks/useConfirm', () => ({ useConfirmChoice: () => choose }));
 
 const extract = vi.fn();
 const checkDuplicates = vi.fn();
@@ -43,7 +43,7 @@ describe('ImageQueueProvider', () => {
   beforeEach(() => {
     RETRY_DELAYS.transientMs = 10;
     addToast.mockReset();
-    confirm.mockReset().mockResolvedValue(true);
+    choose.mockReset().mockResolvedValue('confirm');
     extract.mockReset();
     checkDuplicates.mockReset().mockResolvedValue([]);
     saveManual.mockReset().mockImplementation(async (_col: number, b: any) => ({ item: { id: 100 + Math.random(), ...b }, warnings: [] }));
@@ -197,7 +197,7 @@ describe('ImageQueueProvider', () => {
     activeCollection = { id: 2, name: 'Other' };
     rerender();
     await act(async () => { await result.current.save(result.current.items[0].id); });
-    expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1' }));
+    expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1' }), false);
     expect(statuses(result)).toEqual([]); // saved -> out of the queue
     expect(result.current.lastSaved?.collectionId).toBe(1);
     expect(result.current.savedVersion).toBe(1);
@@ -229,12 +229,37 @@ describe('ImageQueueProvider', () => {
     act(() => { result.current.enqueue([png('a.png')], 'upload'); });
     await waitFor(() => expect(result.current.items[0]?.dbDuplicate).toBe(true));
 
-    confirm.mockResolvedValueOnce(false);
+    choose.mockResolvedValueOnce('cancel');
     await act(async () => { expect(await result.current.save(result.current.items[0].id)).toBe(false); });
     expect(saveManual).not.toHaveBeenCalled();
+    expect(choose).toHaveBeenLastCalledWith(expect.objectContaining({ confirmText: q.saveAnyway, alternativeText: q.overwrite }));
 
     await act(async () => { expect(await result.current.save(result.current.items[0].id)).toBe(true); });
     expect(saveManual).toHaveBeenCalledTimes(1);
+    expect(saveManual.mock.calls[0][2]).toBe(false);
+  });
+
+  it('overwrites the booking already in the list when asked to', async () => {
+    extract.mockResolvedValue(ok('SGN1'));
+    checkDuplicates.mockResolvedValue(['SGN1']);
+    const { result } = renderHook(() => useImageQueue(), { wrapper });
+    act(() => { result.current.enqueue([png('a.png')], 'upload'); });
+    await waitFor(() => expect(result.current.items[0]?.dbDuplicate).toBe(true));
+
+    choose.mockResolvedValueOnce('alternative');
+    await act(async () => { expect(await result.current.save(result.current.items[0].id)).toBe(true); });
+    expect(saveManual).toHaveBeenCalledWith(1, expect.objectContaining({ 'Booking No': 'SGN1' }), true);
+    expect(addToast).toHaveBeenCalledWith(q.overwroteOne.replace('{no}', 'SGN1'), 'success');
+  });
+
+  it('offers no overwrite for a Booking No repeated only within the batch', async () => {
+    extract.mockResolvedValueOnce(ok('SGN1')).mockResolvedValueOnce(ok('SGN1'));
+    const { result } = renderHook(() => useImageQueue(), { wrapper });
+    act(() => { result.current.enqueue([png('a.png'), png('b.png')], 'upload'); });
+    await waitFor(() => expect(result.current.stats.finished).toBe(2));
+
+    await act(async () => { await result.current.save(result.current.items[1].id); });
+    expect(choose).toHaveBeenCalledWith(expect.objectContaining({ alternativeText: undefined }));
   });
 
   it('flags a batch that is read without a Gemini key', async () => {

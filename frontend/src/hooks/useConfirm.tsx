@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState, lazy, Suspense } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import type { ConfirmOptions } from '../components/common/ConfirmDialog';
 import { useApp } from '../context/AppContext';
 
@@ -8,11 +8,15 @@ export type { ConfirmOptions } from '../components/common/ConfirmDialog';
 
 export type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
 
-const ConfirmContext = createContext<ConfirmFn | null>(null);
+export type ConfirmChoice = 'confirm' | 'alternative' | 'cancel';
+/** Like ConfirmFn, for a dialog with a third button (`alternativeText`). */
+export type ConfirmChoiceFn = (options: ConfirmOptions) => Promise<ConfirmChoice>;
+
+const ConfirmContext = createContext<{ confirm: ConfirmFn; choose: ConfirmChoiceFn } | null>(null);
 
 interface PendingConfirm {
   options: ConfirmOptions;
-  resolve: (ok: boolean) => void;
+  resolve: (choice: ConfirmChoice) => void;
   /** Element focused before the dialog opened — focus is restored to it on close */
   restoreFocus: HTMLElement | null;
 }
@@ -23,12 +27,12 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const pendingRef = useRef<PendingConfirm | null>(null);
 
-  const close = useCallback((ok: boolean) => {
+  const close = useCallback((choice: ConfirmChoice) => {
     const current = pendingRef.current;
     if (!current) return;
     pendingRef.current = null;
     setPending(null);
-    current.resolve(ok);
+    current.resolve(choice);
     const el = current.restoreFocus;
     if (el) {
       // Restore after the dialog unmounts (fixes lost input focus in Electron on Windows)
@@ -44,12 +48,12 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  const confirm = useCallback<ConfirmFn>((options) => {
-    return new Promise<boolean>((resolve) => {
+  const choose = useCallback<ConfirmChoiceFn>((options) => {
+    return new Promise<ConfirmChoice>((resolve) => {
       // A newer request supersedes an open one (the older resolves as cancelled)
       const prev = pendingRef.current;
       if (prev) {
-        prev.resolve(false);
+        prev.resolve('cancel');
       }
       const active = document.activeElement;
       const next: PendingConfirm = {
@@ -62,14 +66,20 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, []);
 
+  const confirm = useCallback<ConfirmFn>(
+    async (options) => (await choose({ ...options, alternativeText: undefined })) === 'confirm',
+    [choose]
+  );
+  const value = useMemo(() => ({ confirm, choose }), [confirm, choose]);
+
   // Resolve dangling promise on unmount
   useEffect(() => () => {
-    pendingRef.current?.resolve(false);
+    pendingRef.current?.resolve('cancel');
     pendingRef.current = null;
   }, []);
 
   return (
-    <ConfirmContext.Provider value={confirm}>
+    <ConfirmContext.Provider value={value}>
       {children}
       {pending && (
         <Suspense fallback={null}>
@@ -80,8 +90,10 @@ export const ConfirmProvider: React.FC<{ children: React.ReactNode }> = ({ child
             confirmText={pending?.options.confirmText}
             cancelText={pending?.options.cancelText}
             danger={pending?.options.danger}
-            onConfirm={() => close(true)}
-            onCancel={() => close(false)}
+            alternativeText={pending?.options.alternativeText}
+            onConfirm={() => close('confirm')}
+            onCancel={() => close('cancel')}
+            onAlternative={() => close('alternative')}
             defaultTitle={t.confirm.title}
             defaultConfirmText={pending?.options.danger ? t.confirm.delete : t.confirm.confirm}
             defaultCancelText={t.confirm.cancel}
@@ -103,5 +115,18 @@ export const useConfirm = (): ConfirmFn => {
   if (!ctx) {
     throw new Error('useConfirm must be used within a ConfirmProvider');
   }
-  return ctx;
+  return ctx.confirm;
+};
+
+/**
+ * Confirm dialog with a third button:
+ *   const choose = useConfirmChoice();
+ *   const choice = await choose({ message, confirmText, alternativeText }); // 'confirm' | 'alternative' | 'cancel'
+ */
+export const useConfirmChoice = (): ConfirmChoiceFn => {
+  const ctx = useContext(ConfirmContext);
+  if (!ctx) {
+    throw new Error('useConfirmChoice must be used within a ConfirmProvider');
+  }
+  return ctx.choose;
 };

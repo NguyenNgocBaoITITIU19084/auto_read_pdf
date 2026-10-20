@@ -44,7 +44,7 @@ Analyze the image (which may be a photo, scan, or screenshot of a booking confir
 Return ONLY a valid JSON object with the following exact keys:
 {
   "Booking No": "string or 'null'",
-  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR LINE | HEUNG A LINE | SAMUDERA | TS LINE | RCL | OOCL | KMTC | NAMSUNG LINE | MSC | INTERASIA | SWIRE SHIPPING | MATSON | DJ SHIPPING | LEGEND SHIPPING | ZIM | Khác",
+  "Carrier": "DONGJIN | PIL | CULINES | ONE | SITC | COSCO | MAERSK | CMA CGM | EVERGREEN | WAN HAI | HAPAG-LLOYD | YANG MING | HMM | SINOKOR LINE | HEUNG A LINE | SAMUDERA | TS LINE | RCL | OOCL | KMTC | NAMSUNG LINE | MSC | INTERASIA | SWIRE SHIPPING | MATSON | DJ SHIPPING | LEGEND SHIPPING | ZIM | JINJIANG | TOPAZ MARINE | Khác",
   "Port of Discharging": "string or 'null'",
   "Place of Delivery": "string or 'null'",
   "Block": "string or 'null'",
@@ -85,7 +85,9 @@ Rules:
 20. Yang Ming 'BOOKING NOTE' (Vietnamese labels): Carrier is 'YANG MING'; Booking No is 'Cấp cho booking số'; Vessel is 'Tên tàu' (e.g. 'ZEPHYR LUMOS 019E') with ETD 'Ngày tàu chạy'; T/S Port is 'Cảng T/S' ('null' when blank); Port of Discharging is 'Cảng đích'; Place of Delivery is 'Cảng D/C'; Block is the code after 'BLOCK CODE' (e.g. 'USNY2'); Equipment 'Số lượng container: 1X40HQ' -> '40'HC', Q'ty '1'; Empty Pick Up CY is 'Nơi cấp container'; Full return CY is 'Nơi hạ bãi'; Port Cargo Cut-off is 'Closing time' ('TRƯỚC 18:00 GIỜ NGÀY 26/08/2026' -> '26/08/2026 18:00'); ignore the ETD / DISCHARGE PORT / SI CUT OFF schedule table.
 21. SITC 'LỆNH GIAO CONTAINER RỖNG' (empty release order): Carrier is 'SITC'; Booking No is 'B/L No'; Vessel is 'Dự kiến xếp lên tàu (Vessel)' + 'Chuyến (Voy)' (e.g. 'PADIAN 3 2637N') with 'Ngày tàu chạy (ETD)'; Port of Discharging is 'Cảng chuyển tải (POD)' (despite its label it is the port of discharge) and Place of Delivery 'Cảng đích (DLY)', long names wrapping onto two lines (e.g. 'MANILA NORTH HARBOUR'); T/S Port and Block are 'null'; Equipment '1 X 40HC' -> '40'HC', Q'ty '1'; Empty Pick Up CY is 'NƠI CẤP RỖNG'; Full return CY is 'Nơi hạ bãi (Drop-off Place)' (not the Export Terminal); Port Cargo Cut-off is 'Closing time' ('2026-10-23 06:00:00' -> '23/10/2026 06:00'; not SI & VGM cut off).
 22. ZIM 'BOOKING CONFIRMATION': Carrier is 'ZIM' (not MSC: the clauses cite IMO circular 'MSC.1/CIRC.1474'); Booking No follows 'BOOKING CONFIRMATION :' (e.g. 'ZIMUHCM80682914'); Vessel is 'Vessel/Voyage' as printed (e.g. 'SHENZHEN 16/W') with ETD 'Sailing Date'; T/S Port is 'Transit Port' ('null' when blank); Port of Discharging is 'Port of Discharge', Place of Delivery 'Place Delivery' (the port of discharge when blank); Equipment under 'Booking details' '1 X HC40' -> '40'HC', Q'ty '1'; Empty Pick Up CY is 'PickUp at' and Full return CY 'Return to' (e.g. 'TCS - ZIM DEPOT; HO CHI MINH CITY' / 'ICD PHUOC LONG; HO CHI MINH CITY - ICD PHUOC LONG'); Port Cargo Cut-off is 'Closing Date' (not SI or VGM closing); Block is 'null'.
-23. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
+23. Jinjiang Shipping 'CONTAINER ORDER' (JINJIANG SHIPPING (VIETNAM) / 'JJ SHIPPING'): Carrier is 'JINJIANG'; Booking No is 'BookingNo' (e.g. 'JJMSGZHY600023'); Vessel is 'VESSEL & VOY NO' before ' - ETD' (e.g. 'INFINITY 2640N') with that ETD in 24-hour time ('21/10/2026 05:00 AM' -> '21/10/2026 05:00'); T/S Port is 'PORT OF TRANSIT' (e.g. 'CNSHA - SHANGHAI'); Port of Discharging and Place of Delivery are both 'FINAL DESTINATION'; Equipment '1 X 40HC' -> '40'HC', Q'ty '1'; Empty Pick Up CY is 'EMPTY PICKUP LOCATION' ('null' when blank); Full return CY is 'FULL RETURN LOCATION' ('VNCLI' -> 'VNCLI - CAT LAI'); Port Cargo Cut-off is 'CY CUTOFF' ('13H 20/10/2026' -> '20/10/2026 13:00'; not 'SI/VGM CUT OFF' or 'CDS CUTOFF'); Block is 'null'.
+24. Topaz Marine 'BOOKING CONFIRMATION' (two columns, POL details left, POD details right): Carrier is 'TOPAZ MARINE' (not CMA CGM, which its terms mention); Booking No is 'No.' (e.g. 'FBC26100069'); Vessel is the left 'Vessel Name' + 'Voyage' (e.g. 'INCEDA 056S') with 'ETD'; with a 'Mother Vessel', that vessel + its right-hand 'Voyage' is the Trunk Vessel and the left one the Pre Carrier; T/S Port is 'Port of Transit' ('null' when blank); Port of Discharging is 'Port of Discharge', Place of Delivery 'Place of Delivery' (the port of discharge when blank); Equipment '01X40HC' -> '40'HC', Q'ty '1'; Empty Pick Up CY is 'Empty Pickup CY'; Full return CY is 'Full Return CY'; Port Cargo Cut-off is 'Port CutOff' ('Oct 20 2026 6:00PM' -> '20/10/2026 18:00'; not Doc, VGM or Customs cut-off); Block is 'null'.
+25. Do NOT wrap the JSON in Markdown backticks or write conversational text. Output pure JSON only.
 """
 
 # ---------------------------------------------------------------------------
@@ -410,6 +412,52 @@ def available_ocr_engines() -> List[str]:
     return engines
 
 
+def _get_or_compile_swift_ocr() -> Optional[str]:
+    cache_dir = os.path.expanduser("~/.cache/auto_read_pdf")
+    binary_path = os.path.join(cache_dir, "ocr_mac")
+    if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
+        return binary_path
+    if not shutil.which("swiftc"):
+        return None
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        swift_src = os.path.join(cache_dir, "ocr.swift")
+        with open(swift_src, "w", encoding="utf-8") as f:
+            f.write("""import Foundation
+import Vision
+import AppKit
+
+let args = CommandLine.arguments
+guard args.count > 1 else { exit(1) }
+let url = URL(fileURLWithPath: args[1])
+guard let image = NSImage(contentsOf: url),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    exit(1)
+}
+
+let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+let request = VNRecognizeTextRequest { (request, error) in
+    guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
+    for observation in observations {
+        if let topCandidate = observation.topCandidates(1).first {
+            print(topCandidate.string)
+        }
+    }
+}
+request.recognitionLevel = .accurate
+request.usesLanguageCorrection = false
+
+try? requestHandler.perform([request])
+""")
+        res = subprocess.run(["swiftc", swift_src, "-O", "-o", binary_path], timeout=30, capture_output=True)
+        if res.returncode == 0 and os.path.isfile(binary_path):
+            os.chmod(binary_path, 0o755)
+            return binary_path
+    except Exception as e:
+        logger.debug(f"Could not precompile swift OCR binary: {e}")
+    return None
+
+
 def _ocr_swift(image_bytes: bytes, timeout: float) -> str:
     from PIL import Image  # lazy import
 
@@ -418,14 +466,25 @@ def _ocr_swift(image_bytes: bytes, timeout: float) -> str:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
             tmp_path = tmp_img.name
         Image.open(io.BytesIO(image_bytes)).save(tmp_path, format="PNG")
-        code = _SWIFT_OCR_CODE.replace("__IMAGE_PATH__", tmp_path.replace("\\", "\\\\").replace('"', '\\"'))
-        res = subprocess.run(
-            ["swift", "-e", code],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=max(1.0, timeout),
-        )
+
+        binary = _get_or_compile_swift_ocr()
+        if binary:
+            res = subprocess.run(
+                [binary, tmp_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(1.0, timeout),
+            )
+        else:
+            code = _SWIFT_OCR_CODE.replace("__IMAGE_PATH__", tmp_path.replace("\\", "\\\\").replace('"', '\\"'))
+            res = subprocess.run(
+                ["swift", "-e", code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(1.0, timeout),
+            )
         if res.returncode == 0:
             return res.stdout.strip()
         return ""

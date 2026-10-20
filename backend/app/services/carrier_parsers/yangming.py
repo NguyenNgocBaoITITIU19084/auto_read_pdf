@@ -20,10 +20,15 @@ PORT / SI CUT OFF per service) is not booking data.
 The company header is a logo: the text layer names Yang Ming only in its closing line
 ('... DỊCH VỤ CỦA YANGMING') and e-mail addresses. Offline OCR may drop accented letters
 ('Tên àu') and puts empty or long values on the next line.
+
+Some PDFs write their text layer out of order (the booking number before its label, values
+after unrelated lines), so with word boxes the text is rebuilt row by row from their positions.
 """
 import re
 import unicodedata
 from typing import Dict, List, Optional, Sequence
+
+from .layout import group_rows, row_text
 
 ISSUER = re.compile(r"\bYANG\s?MING\b|@vn\.yangming\.com", re.IGNORECASE)
 
@@ -68,7 +73,14 @@ def _port(value: str) -> str:
     return re.sub(r"\s*,\s*", ", ", value).strip(" ,")
 
 
+def _rows_text(pages_words: Sequence[List[Dict]]) -> str:
+    """Page text rebuilt from word boxes, one visual row per line."""
+    return "\n".join(row_text(row) for words in pages_words for row in group_rows(words))
+
+
 def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict[str, str]:
+    if pages_words and any(pages_words):
+        text = _rows_text(pages_words)
     text = unicodedata.normalize("NFC", text)
     out: Dict[str, str] = {"Carrier": "YANG MING"}
 

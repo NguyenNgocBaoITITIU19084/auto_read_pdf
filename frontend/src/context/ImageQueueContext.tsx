@@ -3,7 +3,7 @@ import React, {
 } from 'react';
 import { useApp } from './AppContext';
 import { useToastActions } from './ToastContext';
-import { useConfirm } from '../hooks/useConfirm';
+import { useConfirmChoice } from '../hooks/useConfirm';
 import { checkBookingDuplicatesApi, extractBookingImageDetailedApi, saveManualBookingApi } from '../services/api';
 import { tf } from '../services/i18nFormat';
 import { isImageFile, isPdfFile } from '../components/booking/clipboard';
@@ -63,7 +63,7 @@ const isCancel = (e: any) => e?.code === 'ERR_CANCELED' || e?.name === 'Canceled
 export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { t, activeCollection } = useApp();
   const { addToast } = useToastActions();
-  const confirm = useConfirm();
+  const choose = useConfirmChoice();
 
   const [items, dispatch] = useReducer(queueReducer, [] as QueueItem[]);
   const [paused, setPaused] = useState<PauseReason | null>(null);
@@ -230,14 +230,14 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const batchDuplicatesRef = useRef(batchDuplicates);
   batchDuplicatesRef.current = batchDuplicates;
 
-  const persist = useCallback(async (item: QueueItem): Promise<boolean> => {
+  const persist = useCallback(async (item: QueueItem, overwrite = false): Promise<boolean> => {
     const tt = tRef.current.booking.imageQueue;
     dispatch({ type: 'saving', id: item.id, value: true });
     try {
       const { item: saved, warnings } = await saveManualBookingApi(item.collectionId, {
         ...item.fields,
         'Tên file PDF': item.fields['Tên file PDF'] || item.name,
-      });
+      }, overwrite);
       warnings.forEach((w) => addToastRef.current(w, 'info'));
       if (mountedRef.current) {
         dispatch({ type: 'saved', id: item.id, bookingId: saved.id });
@@ -258,21 +258,26 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (!item || item.saving || (item.status !== 'success' && item.status !== 'review')) return false;
     const tt = tRef.current.booking.imageQueue;
     const inBatch = batchDuplicatesRef.current.has(id);
+    let overwrite = false;
     if (inBatch || item.dbDuplicate) {
-      const ok = await confirm({
+      const choice = await choose({
         title: tt.saveDuplicateTitle,
-        message: tf(tt.saveDuplicateMessage, {
+        message: tf(item.dbDuplicate ? tt.saveDuplicateMessageOverwrite : tt.saveDuplicateMessage, {
           no: String(item.fields['Booking No'] || ''),
           where: item.dbDuplicate ? tt.whereDb : tt.whereBatch,
         }),
         confirmText: tt.saveAnyway,
+        // Only a booking already in the list can be overwritten
+        alternativeText: item.dbDuplicate ? tt.overwrite : undefined,
       });
-      if (!ok) return false;
+      if (choice === 'cancel') return false;
+      overwrite = choice === 'alternative';
     }
-    const saved = await persist(item);
-    if (saved) addToastRef.current(tf(tt.savedOne, { no: String(item.fields['Booking No'] || item.name) }), 'success');
+    const saved = await persist(item, overwrite);
+    const no = String(item.fields['Booking No'] || item.name);
+    if (saved) addToastRef.current(tf(overwrite ? tt.overwroteOne : tt.savedOne, { no }), 'success');
     return saved;
-  }, [confirm, persist]);
+  }, [choose, persist]);
 
   const saveAllSuccessful = useCallback(async () => {
     const tt = tRef.current.booking.imageQueue;

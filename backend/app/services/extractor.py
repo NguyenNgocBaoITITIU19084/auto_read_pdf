@@ -147,6 +147,8 @@ CARRIERS: List[CarrierEntry] = [
     ("SITC", _rx(r"\bSITC\b"), ("SITC",), []),
     ("COSCO", _rx(r"\bCOSCO\b", r"\bCOSU\b"), ("COSU",), []),
     ("MAERSK", _rx(r"\bMAERSK\b", r"\bSEA\s?LAND\b"), ("MAEU",), []),
+    # Before CMA CGM: Topaz Marine's terms name CMA-CGM vessels
+    ("TOPAZ MARINE", _rx(r"\bTOPAZ\s+MARINE\b"), (), []),
     ("CMA CGM", _rx(r"\bCMA\s?CGM\b", r"\bCNC\s+LINE\b", r"\bANL\b"), ("CMAU",), []),
     ("EVERGREEN", _rx(r"\bEVERGREEN\b", r"\bEMC\b"), ("EGLV",), _rx(r"^EVER\s")),
     # Wan Hai group, before WAN HAI: its notices carry Wan Hai vessel names. Matched on the company name
@@ -169,6 +171,7 @@ CARRIERS: List[CarrierEntry] = [
     ("SWIRE SHIPPING", _rx(r"\bSWIRE\s+SHIPPING\b", r"\bSWIRE\b"), (), []),
     # Before MSC: ZIM's terms cite IMO circular 'MSC.1/CIRC.1474'
     ("ZIM", _rx(r"\bZIM\s+INTEGRATED\b", r"\bZIM\b"), ("ZIMU",), []),
+    ("JINJIANG", _rx(r"\bJINJIANG\b", r"\bJJ\s+SHIPP?ING\b"), ("JJMS",), []),
     ("MSC", _rx(r"\bMEDITERRANEAN\s+SHIPPING\b", r"\bMSC\b"), ("MEDU",), _rx(r"^MSC\s")),
 ]
 
@@ -364,7 +367,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC, ZIM) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC, ZIM, Jinjiang, Topaz Marine) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

@@ -8,12 +8,15 @@ export interface ConfirmOptions {
   cancelText?: string;
   /** Red styling for destructive actions */
   danger?: boolean;
+  /** Optional third button between Cancel and Confirm (see useConfirmChoice) */
+  alternativeText?: string;
 }
 
 interface ConfirmDialogProps extends ConfirmOptions {
   isOpen: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  onAlternative?: () => void;
   /** Defaults (localized) used when title/confirmText/cancelText are omitted */
   defaultTitle?: string;
   defaultConfirmText?: string;
@@ -33,8 +36,10 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmText,
   cancelText,
   danger = false,
+  alternativeText,
   onConfirm,
   onCancel,
+  onAlternative,
   defaultTitle = 'Xác nhận',
   defaultConfirmText = 'Xác nhận',
   defaultCancelText = 'Hủy',
@@ -43,10 +48,13 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const alternativeBtnRef = useRef<HTMLButtonElement>(null);
   const onConfirmRef = useRef(onConfirm);
   const onCancelRef = useRef(onCancel);
+  const onAlternativeRef = useRef(onAlternative);
   onConfirmRef.current = onConfirm;
   onCancelRef.current = onCancel;
+  onAlternativeRef.current = onAlternative;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -63,19 +71,21 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         return;
       }
       if (e.key === 'Enter' && !e.isComposing) {
-        // Enter on the Cancel button cancels; anywhere else confirms
+        // Enter on the Cancel (or alternative) button picks it; anywhere else confirms
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
         if (document.activeElement === cancelBtnRef.current) {
           onCancelRef.current();
+        } else if (document.activeElement === alternativeBtnRef.current && onAlternativeRef.current) {
+          onAlternativeRef.current();
         } else {
           onConfirmRef.current();
         }
         return;
       }
       if (e.key === 'Tab') {
-        const focusables = [cancelBtnRef.current, confirmBtnRef.current].filter(Boolean) as HTMLElement[];
+        const focusables = [cancelBtnRef.current, alternativeBtnRef.current, confirmBtnRef.current].filter(Boolean) as HTMLElement[];
         if (focusables.length === 0) return;
         const idx = focusables.indexOf(document.activeElement as HTMLElement);
         e.preventDefault();
@@ -154,6 +164,16 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             >
               {cancelText || defaultCancelText}
             </button>
+            {alternativeText && onAlternative && (
+              <button
+                ref={alternativeBtnRef}
+                type="button"
+                onClick={onAlternative}
+                className="px-4 py-2 text-xs font-semibold rounded-xl text-primary-700 dark:text-primary-300 bg-primary-50 dark:bg-primary-950/60 border border-primary-200 dark:border-primary-800 hover:bg-primary-100 dark:hover:bg-primary-900/60 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-colors"
+              >
+                {alternativeText}
+              </button>
+            )}
             <button
               ref={confirmBtnRef}
               type="button"

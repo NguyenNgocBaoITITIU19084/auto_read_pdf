@@ -182,7 +182,10 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           {fields.map((f) => {
             const rawVal = f.key === "Carrier" ? carrierName : booking[f.key];
             const val = rawVal !== undefined && rawVal !== null && rawVal !== '' ? rawVal : 'null';
-            const isNull = val === 'null' || !val;
+            // The cut-off copies ePort's time when known, even if the booking has none of its own
+            const copyVal = String(f.key === CUTOFF_KEY ? effectiveCutoff(booking) ?? '' : val).trim();
+            const isNull = copyVal === '' || copyVal.toLowerCase() === 'null';
+            const isValNull = val === 'null' || !val;
             const Icon = f.icon;
 
             return (
@@ -216,7 +219,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                     )}
                     <button
                       type="button"
-                      onClick={() => copyField(String(f.key === CUTOFF_KEY ? effectiveCutoff(booking) : val), f.key)}
+                      onClick={() => copyField(copyVal, f.key)}
                       className="text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 p-0.5 rounded transition-colors"
                       title={t.common.copy}
                     >
@@ -243,7 +246,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                     )}
                   </div>
                 )}
-                <div className={`text-xs font-semibold break-words ${f.key === "Carrier" ? 'text-sm font-bold text-primary-700 dark:text-primary-300' : isNull ? 'text-slate-400 dark:text-slate-500 italic font-normal' : 'text-slate-900 dark:text-slate-100'}`}>
+                <div className={`text-xs font-semibold break-words ${f.key === "Carrier" ? 'text-sm font-bold text-primary-700 dark:text-primary-300' : isValNull ? 'text-slate-400 dark:text-slate-500 italic font-normal' : 'text-slate-900 dark:text-slate-100'}`}>
                   {String(val)}
                 </div>
               </div>
