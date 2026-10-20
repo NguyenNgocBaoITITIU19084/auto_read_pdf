@@ -410,6 +410,52 @@ def available_ocr_engines() -> List[str]:
     return engines
 
 
+def _get_or_compile_swift_ocr() -> Optional[str]:
+    cache_dir = os.path.expanduser("~/.cache/auto_read_pdf")
+    binary_path = os.path.join(cache_dir, "ocr_mac")
+    if os.path.isfile(binary_path) and os.access(binary_path, os.X_OK):
+        return binary_path
+    if not shutil.which("swiftc"):
+        return None
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        swift_src = os.path.join(cache_dir, "ocr.swift")
+        with open(swift_src, "w") as f:
+            f.write("""import Foundation
+import Vision
+import AppKit
+
+let args = CommandLine.arguments
+guard args.count > 1 else { exit(1) }
+let url = URL(fileURLWithPath: args[1])
+guard let image = NSImage(contentsOf: url),
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    exit(1)
+}
+
+let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+let request = VNRecognizeTextRequest { (request, error) in
+    guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
+    for observation in observations {
+        if let topCandidate = observation.topCandidates(1).first {
+            print(topCandidate.string)
+        }
+    }
+}
+request.recognitionLevel = .accurate
+request.usesLanguageCorrection = false
+
+try? requestHandler.perform([request])
+""")
+        res = subprocess.run(["swiftc", swift_src, "-O", "-o", binary_path], timeout=30, capture_output=True)
+        if res.returncode == 0 and os.path.isfile(binary_path):
+            os.chmod(binary_path, 0o755)
+            return binary_path
+    except Exception as e:
+        logger.debug(f"Could not precompile swift OCR binary: {e}")
+    return None
+
+
 def _ocr_swift(image_bytes: bytes, timeout: float) -> str:
     from PIL import Image  # lazy import
 
@@ -418,14 +464,25 @@ def _ocr_swift(image_bytes: bytes, timeout: float) -> str:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
             tmp_path = tmp_img.name
         Image.open(io.BytesIO(image_bytes)).save(tmp_path, format="PNG")
-        code = _SWIFT_OCR_CODE.replace("__IMAGE_PATH__", tmp_path.replace("\\", "\\\\").replace('"', '\\"'))
-        res = subprocess.run(
-            ["swift", "-e", code],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=max(1.0, timeout),
-        )
+
+        binary = _get_or_compile_swift_ocr()
+        if binary:
+            res = subprocess.run(
+                [binary, tmp_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(1.0, timeout),
+            )
+        else:
+            code = _SWIFT_OCR_CODE.replace("__IMAGE_PATH__", tmp_path.replace("\\", "\\\\").replace('"', '\\"'))
+            res = subprocess.run(
+                ["swift", "-e", code],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=max(1.0, timeout),
+            )
         if res.returncode == 0:
             return res.stdout.strip()
         return ""
