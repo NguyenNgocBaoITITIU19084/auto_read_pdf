@@ -420,7 +420,7 @@ def _get_or_compile_swift_ocr() -> Optional[str]:
     try:
         os.makedirs(cache_dir, exist_ok=True)
         swift_src = os.path.join(cache_dir, "ocr.swift")
-        with open(swift_src, "w") as f:
+        with open(swift_src, "w", encoding="utf-8") as f:
             f.write("""import Foundation
 import Vision
 import AppKit
