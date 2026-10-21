@@ -3,11 +3,13 @@
  *
  * macOS is intentionally left out: Squirrel.Mac refuses updates that are not signed
  * with a Developer ID, which this project does not have. On mac the module reports
- * state 'unsupported' and the UI falls back to a link to the releases page.
+ * state 'unsupported' and the UI falls back to a link to the releases page; a packaged mac app
+ * still looks for a newer GitHub release (latestVersion) so the UI can announce it.
  *
  * Flow: check -> download in background -> tell the renderer -> install when the user asks.
  */
 const { app } = require('electron');
+const { findNewerRelease, plainNotes } = require('./release_check');
 
 const RELEASES_URL = 'https://github.com/NguyenNgocBaoITITIU19084/auto_read_pdf/releases/latest';
 const FIRST_CHECK_DELAY_MS = 20_000; // let the backend finish booting first
@@ -52,6 +54,10 @@ function initUpdater({ onStatus: statusCallback, log: logger } = {}) {
 
   if (!supported()) {
     setStatus({ state: 'unsupported', releasesUrl: RELEASES_URL });
+    if (app.isPackaged) {
+      setTimeout(checkLatestRelease, FIRST_CHECK_DELAY_MS);
+      timer = setInterval(checkLatestRelease, CHECK_INTERVAL_MS);
+    }
     return;
   }
 
@@ -75,7 +81,7 @@ function initUpdater({ onStatus: statusCallback, log: logger } = {}) {
   autoUpdater.on('checking-for-update', () => setStatus({ state: 'checking', error: null }));
   autoUpdater.on('update-available', (info) => {
     log(`Update available: ${info && info.version}`);
-    setStatus({ state: 'downloading', version: info && info.version, percent: 0, error: null });
+    setStatus({ state: 'downloading', version: info && info.version, percent: 0, error: null, releaseNotes: plainNotes(info && info.releaseNotes) });
   });
   autoUpdater.on('update-not-available', () => {
     checking = false;
@@ -87,7 +93,7 @@ function initUpdater({ onStatus: statusCallback, log: logger } = {}) {
   autoUpdater.on('update-downloaded', (info) => {
     checking = false;
     log(`Update downloaded: ${info && info.version}`);
-    setStatus({ state: 'downloaded', version: info && info.version, percent: 100, error: null });
+    setStatus({ state: 'downloaded', version: info && info.version, percent: 100, error: null, releaseNotes: plainNotes(info && info.releaseNotes) || lastStatus.releaseNotes || '' });
   });
   autoUpdater.on('error', (err) => {
     checking = false;
@@ -100,6 +106,19 @@ function initUpdater({ onStatus: statusCallback, log: logger } = {}) {
 
   setTimeout(() => checkForUpdates(false), FIRST_CHECK_DELAY_MS);
   timer = setInterval(() => checkForUpdates(false), CHECK_INTERVAL_MS);
+}
+
+/** Builds without auto-update: announce a newer GitHub release (the UI links to its download page). */
+async function checkLatestRelease() {
+  try {
+    const found = await findNewerRelease(currentVersion());
+    if (found) {
+      log(`Newer release on GitHub: ${found.version}`);
+      setStatus({ latestVersion: found.version, releaseNotes: found.notes, releasesUrl: found.url || RELEASES_URL });
+    }
+  } catch (e) {
+    log(`Release check skipped: ${(e && e.message) || e}`); // offline or rate-limited: try again next interval
+  }
 }
 
 /** Returns the status after the check was started (not after it finished). */

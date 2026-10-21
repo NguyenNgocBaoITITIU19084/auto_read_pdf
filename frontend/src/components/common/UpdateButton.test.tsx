@@ -4,9 +4,7 @@ import { translations } from '../../i18n/translations';
 import type { UpdateStatus } from '../../types';
 
 const addToast = vi.fn();
-const confirm = vi.fn();
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
-vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => confirm }));
 vi.mock('../../services/api', () => ({ getBackendVersionApi: vi.fn().mockResolvedValue('2.2.0') }));
 
 import { UpdateButton } from './UpdateButton';
@@ -32,7 +30,6 @@ describe('UpdateButton', () => {
   beforeEach(() => {
     delete (window as any).electronAPI;
     addToast.mockReset();
-    confirm.mockReset().mockResolvedValue(true);
     checkForUpdates.mockReset().mockResolvedValue({ state: 'checking' });
     installUpdate.mockClear();
     openExternal.mockClear();
@@ -63,18 +60,36 @@ describe('UpdateButton', () => {
     expect(await screen.findByText('Đang tải 42%')).toBeInTheDocument();
   });
 
-  it('offers a green update button once downloaded and installs only after confirming', async () => {
+  it('announces a downloaded update in a dialog with its notes, and installs from it', async () => {
+    setupElectron({ state: 'downloaded', version: '2.3.0', currentVersion: '2.2.0', releaseNotes: 'Đọc booking Topaz' });
+    render(<UpdateButton />);
+    expect(await screen.findByRole('dialog')).toHaveTextContent(u.dialogTitle);
+    expect(screen.getByRole('dialog')).toHaveTextContent('v2.2.0 → v2.3.0');
+    expect(screen.getByText('Đọc booking Topaz')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(u.installNow) }));
+    await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it('"Để sau" closes the dialog without installing; the green chip opens it again', async () => {
     setupElectron({ state: 'downloaded', version: '2.3.0', currentVersion: '2.2.0' });
     render(<UpdateButton />);
-    const btn = await screen.findByRole('button', { name: /Cập nhật 2\.3\.0/ });
-
-    confirm.mockResolvedValueOnce(false);
-    fireEvent.click(btn);
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole('button', { name: u.later }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(installUpdate).not.toHaveBeenCalled();
 
-    fireEvent.click(btn);
-    await waitFor(() => expect(installUpdate).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: /Cập nhật 2\.3\.0/ }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText(u.dialogNoNotes)).toBeInTheDocument();             // no notes: a generic line
+  });
+
+  it('on macOS announces a newer GitHub release and opens its download page', async () => {
+    setupElectron({ state: 'unsupported', currentVersion: '2.2.0', latestVersion: '2.3.0', releaseNotes: 'Mới', releasesUrl: 'https://example.com/v2.3.0' });
+    render(<UpdateButton />);
+    expect(await screen.findByRole('dialog')).toHaveTextContent('v2.2.0 → v2.3.0');
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(u.downloadNew) }));
+    expect(openExternal).toHaveBeenCalledWith('https://example.com/v2.3.0');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Có bản 2\.3\.0/ })).toBeInTheDocument();
   });
 
   it('falls back to the releases page where auto-update is unsupported', async () => {

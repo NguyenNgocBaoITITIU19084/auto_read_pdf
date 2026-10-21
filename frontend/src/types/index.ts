@@ -401,6 +401,10 @@ export interface UpdateStatus {
   error?: string | null;
   currentVersion?: string;
   releasesUrl?: string;
+  /** Builds without auto-update (macOS): a newer release found on GitHub, offered as a download. */
+  latestVersion?: string | null;
+  /** Plain-text notes of the update being offered. */
+  releaseNotes?: string;
 }
 
 export interface ElectronAPI {

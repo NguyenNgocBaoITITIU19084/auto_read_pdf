@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useConfirm } from '../../hooks/useConfirm';
 import { useUpdateStatus } from '../../hooks/useUpdateStatus';
 import { getBackendVersionApi } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import { Tooltip } from './Tooltip';
+import { UpdateDialog, UpdateOffer } from './UpdateDialog';
 
 const RELEASES_URL = 'https://github.com/NguyenNgocBaoITITIU19084/auto_read_pdf/releases/latest';
 
@@ -16,17 +16,21 @@ const chipIdle =
 
 /**
  * Version chip in the header that doubles as the update control: click to check, shows download
- * progress, and turns into a green "Cập nhật x.y.z" button once an update is ready to install.
+ * progress, and turns into a green "Cập nhật x.y.z" button once an update is ready to install. A new version is also
+ * announced right away in an UpdateDialog ("Để sau" puts it off until the next launch; the green chip reopens it).
  * Where auto-update is unavailable (macOS, browser, dev run) it opens the releases page instead.
  */
 export const UpdateButton: React.FC = () => {
   const { t, addToast } = useApp();
-  const confirm = useConfirm();
   const u = t.appUpdate;
   const { status, checking, check, install } = useUpdateStatus();
   const [backendVersion, setBackendVersion] = useState('');
   const [installing, setInstalling] = useState(false);
   const manualRef = useRef(false);
+  /** The version the user put off with "Để sau": not offered again until the app restarts */
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  /** The user asked to see the offer again (clicked the chip) */
+  const [reopened, setReopened] = useState(false);
 
   const electronVersion = status.currentVersion || window.electronAPI?.version || '';
   const version = electronVersion || backendVersion;
@@ -59,26 +63,40 @@ export const UpdateButton: React.FC = () => {
     else window.open(url, '_blank', 'noopener');
   };
 
-  const handleInstall = async () => {
-    const ok = await confirm({
-      title: u.installTitle,
-      message: tf(u.installMessage, { version: status.version || '' }),
-      confirmText: u.installConfirm,
-    });
-    if (!ok) return;
-    setInstalling(true);
-    install().finally(() => setInstalling(false));
-  };
-
   const label = version ? `v${version}` : 'v—';
   const busy = checking || state === 'checking';
 
+  const offer: UpdateOffer | null =
+    state === 'downloaded' && status.version
+      ? { kind: 'install', version: status.version, currentVersion: version, notes: status.releaseNotes || '' }
+      : state === 'unsupported' && status.latestVersion
+        ? { kind: 'download', version: status.latestVersion, currentVersion: version, notes: status.releaseNotes || '' }
+        : null;
+  const showDialog = !!offer && (reopened || offer.version !== dismissed);
+  const later = () => {
+    setReopened(false);
+    if (offer) setDismissed(offer.version);
+  };
+  const accept = () => {
+    if (!offer) return;
+    if (offer.kind === 'download') {
+      openReleases();
+      later();
+      return;
+    }
+    setInstalling(true);
+    install().then((ok) => { if (!ok) setInstalling(false); });
+  };
+  const dialog = showDialog && offer ? <UpdateDialog offer={offer} busy={installing} onAccept={accept} onLater={later} /> : null;
+
   if (state === 'downloaded') {
     return (
+      <>
+      {dialog}
       <Tooltip content={tf(u.readyTip, { version: status.version || '' })} position="bottom">
         <button
           type="button"
-          onClick={handleInstall}
+          onClick={() => setReopened(true)}
           disabled={installing}
           className="flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-500/30 transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
         >
@@ -90,6 +108,7 @@ export const UpdateButton: React.FC = () => {
           {tf(u.ready, { version: status.version || '' })}
         </button>
       </Tooltip>
+      </>
     );
   }
 
@@ -102,6 +121,24 @@ export const UpdateButton: React.FC = () => {
           {tf(u.downloadingShort, { percent })}
         </span>
       </Tooltip>
+    );
+  }
+
+  if (state === 'unsupported' && offer) {
+    return (
+      <>
+        {dialog}
+        <Tooltip content={tf(u.newAvailableTip, { version: offer.version })} position="bottom">
+          <button
+            type="button"
+            onClick={() => setReopened(true)}
+            className="flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-500/30 transition-colors cursor-pointer whitespace-nowrap"
+          >
+            <ArrowDownToLine className="w-3 h-3" />
+            {tf(u.newAvailable, { version: offer.version })}
+          </button>
+        </Tooltip>
+      </>
     );
   }
 
