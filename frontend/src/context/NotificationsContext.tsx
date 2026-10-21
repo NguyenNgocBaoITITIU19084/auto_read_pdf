@@ -5,9 +5,11 @@ import { AppNotification } from '../types';
 import { clearNotificationsApi, getNotificationsApi, markNotificationsReadApi } from '../services/api';
 import { tf } from '../services/i18nFormat';
 import { notificationTitle } from '../utils/notifications';
-import { playNotificationVoice } from '../utils/notificationVoice';
+import { getNotificationVoiceRepeatMin, playNotificationVoice } from '../utils/notificationVoice';
 
 export const POLL_MS = 20000;
+/** How often the voice reminder checks whether it is due. */
+const REMIND_CHECK_MS = 30000;
 /** Up to this many new changes get their own toast; more are folded into one. */
 const MAX_INDIVIDUAL_TOASTS = 3;
 
@@ -47,10 +49,13 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const inFlightRef = useRef(false);
   /** Highest id the voice has announced: the toast path and the desktop app's batch path must not both speak */
   const spokenMaxRef = useRef(0);
+  /** When the voice last spoke: the next reminder for unread notifications counts from here */
+  const spokenAtRef = useRef(Date.now());
   const announce = useCallback((ids: number[]) => {
     const max = Math.max(0, ...ids);
     if (max <= spokenMaxRef.current) return;
     spokenMaxRef.current = max;
+    spokenAtRef.current = Date.now();
     playNotificationVoice();
   }, []);
   const mountedRef = useRef(true);
@@ -126,6 +131,20 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // ...and when it has claimed a new batch (the only path while the window is hidden), say "Có thông báo mới"
   useEffect(() => window.electronAPI?.onNotificationVoice?.(announce), [announce]);
+
+  // Keep saying "Có thông báo mới" every few minutes until nothing is unread (the interval is a setting; 0 = off)
+  const hasUnread = unread > 0;
+  useEffect(() => {
+    if (!hasUnread) return;
+    spokenAtRef.current = Math.max(spokenAtRef.current, Date.now() - REMIND_CHECK_MS); // never nag the moment it turns unread
+    const timer = setInterval(() => {
+      const minutes = getNotificationVoiceRepeatMin();
+      if (!minutes || Date.now() - spokenAtRef.current < minutes * 60000) return;
+      spokenAtRef.current = Date.now();
+      playNotificationVoice();
+    }, REMIND_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [hasUnread]);
 
   const markRead = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;

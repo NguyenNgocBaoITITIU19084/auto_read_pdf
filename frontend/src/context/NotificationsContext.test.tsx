@@ -19,7 +19,8 @@ vi.mock('../services/api', () => ({
 }));
 
 const playVoice = vi.fn();
-vi.mock('../utils/notificationVoice', () => ({ playNotificationVoice: () => playVoice() }));
+let repeatMin = 5;
+vi.mock('../utils/notificationVoice', () => ({ playNotificationVoice: () => playVoice(), getNotificationVoiceRepeatMin: () => repeatMin }));
 
 import { NotificationsProvider, POLL_MS, useNotifications } from './NotificationsContext';
 
@@ -39,6 +40,7 @@ describe('NotificationsProvider', () => {
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
     addToast.mockReset();
     playVoice.mockReset();
+    repeatMin = 5;
     getNotifications.mockReset().mockResolvedValue(reply([]));
     markRead.mockReset().mockResolvedValue(undefined);
     clearRead.mockReset().mockResolvedValue(undefined);
@@ -143,6 +145,30 @@ describe('NotificationsProvider', () => {
     act(() => onVoice([3]));                                                      // window hidden: only the desktop app sees it
     expect(playVoice).toHaveBeenCalledTimes(2);
     delete (window as { electronAPI?: unknown }).electronAPI;
+  });
+
+  it('repeats the voice every few minutes while something is unread, and stops once it is read', async () => {
+    getNotifications.mockResolvedValue(reply([note(1)]));
+    const { result } = renderHook(() => useNotifications(), { wrapper });
+    await waitFor(() => expect(result.current.unread).toBe(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4 * 60000); });
+    expect(playVoice).not.toHaveBeenCalled();                                    // not due yet
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(playVoice).toHaveBeenCalledTimes(1);                                  // 5 minutes
+
+    getNotifications.mockResolvedValue(reply([note(1, { read: true })]));
+    await act(async () => { await result.current.markAllRead(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60000); });
+    expect(playVoice).toHaveBeenCalledTimes(1);                                  // nothing unread: silent
+  });
+
+  it('does not repeat when the reminder is switched off', async () => {
+    repeatMin = 0;
+    getNotifications.mockResolvedValue(reply([note(1)]));
+    const { result } = renderHook(() => useNotifications(), { wrapper });
+    await waitFor(() => expect(result.current.unread).toBe(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30 * 60000); });
+    expect(playVoice).not.toHaveBeenCalled();
   });
 
   it('stays quiet when the backend is unavailable', async () => {

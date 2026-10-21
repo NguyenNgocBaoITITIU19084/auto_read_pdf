@@ -4,7 +4,10 @@ import { useApp } from '../../context/AppContext';
 import { NotificationKind, NotificationSettings } from '../../types';
 import { getNotificationSettingsApi, saveNotificationSettingsApi, sendTestNotificationApi } from '../../services/api';
 import { useNotifications } from '../../context/NotificationsContext';
-import { isNotificationVoiceOn, playNotificationVoice, setNotificationVoiceOn } from '../../utils/notificationVoice';
+import { tf } from '../../services/i18nFormat';
+import {
+  REPEAT_CHOICES, getNotificationVoiceRepeatMin, isNotificationVoiceOn, playNotificationVoice, setNotificationVoiceOn, setNotificationVoiceRepeatMin,
+} from '../../utils/notificationVoice';
 
 /** The kinds a user can switch on / off (the test sample is not one of them) */
 type SettingKind = Exclude<NotificationKind, 'test' | 'vessel_schedule'>;
@@ -21,6 +24,7 @@ export const NotificationSettingsCard: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [voiceOn, setVoiceOn] = useState(isNotificationVoiceOn);
+  const [repeatMin, setRepeatMin] = useState(getNotificationVoiceRepeatMin);
   const { refresh } = useNotifications();
   const desktop = typeof window !== 'undefined' && !!window.electronAPI?.platform;
 
@@ -142,6 +146,25 @@ export const NotificationSettingsCard: React.FC = () => {
             {s.voice}
             <span className="block text-[11px] text-slate-400 dark:text-slate-500">{s.voiceHint}</span>
           </span>
+        </label>
+      )}
+      {desktop && (
+        <label className="flex flex-wrap items-center gap-2 pl-11 text-xs text-slate-600 dark:text-slate-300">
+          <span>{s.voiceRepeat}</span>
+          <select
+            value={repeatMin}
+            disabled={!voiceOn}
+            onChange={(e) => {
+              const minutes = Number(e.target.value);
+              setRepeatMin(minutes);
+              setNotificationVoiceRepeatMin(minutes);
+            }}
+            className="px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs disabled:opacity-50"
+          >
+            {REPEAT_CHOICES.map((m) => (
+              <option key={m} value={m}>{m ? tf(s.voiceRepeatEvery, { minutes: m }) : s.voiceRepeatOff}</option>
+            ))}
+          </select>
         </label>
       )}
 
