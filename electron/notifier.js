@@ -41,7 +41,8 @@ function createNotifier({ backendRequest, Notification, showMainWindow, sendToRe
       const items = (res && res.items) || [];
       if (items.length === 0) return;
       sendToRenderer('notifications-changed'); // refresh the bell / badge
-      sendToRenderer('notification-voice'); // "Có thông báo mới", focused or not (the renderer applies the on/off setting)
+      // "Có thông báo mới", focused or not; the renderer applies the on/off setting and skips ids it already announced
+      sendToRenderer('notification-voice', { ids: items.map((n) => n.id) });
       if (!res.summary || (isAppFocused() && !force)) return; // the user is looking at the app: the bell and toast are enough
       show(res.summary);
     } catch (e) {

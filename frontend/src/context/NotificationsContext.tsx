@@ -45,6 +45,14 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   /** Highest id already shown; null until the first load so existing notifications don't toast on startup */
   const seenMaxRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
+  /** Highest id the voice has announced: the toast path and the desktop app's batch path must not both speak */
+  const spokenMaxRef = useRef(0);
+  const announce = useCallback((ids: number[]) => {
+    const max = Math.max(0, ...ids);
+    if (max <= spokenMaxRef.current) return;
+    spokenMaxRef.current = max;
+    playNotificationVoice();
+  }, []);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -68,14 +76,16 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
         } else {
           fresh.forEach((n) => addToastRef.current(notificationTitle(n, tRef.current), 'info'));
         }
+        if (fresh.length) announce(fresh.map((n) => n.id));
       }
       seenMaxRef.current = Math.max(seen ?? 0, maxId);
+      if (seen === null) spokenMaxRef.current = Math.max(spokenMaxRef.current, maxId); // nothing old is announced on startup
     } catch {
       /* the backend may be starting up or busy: the next poll retries, no error spam */
     } finally {
       inFlightRef.current = false;
     }
-  }, []);
+  }, [announce]);
 
   // Poll only while the window is visible
   useEffect(() => {
@@ -114,8 +124,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     return api.onNotificationsChanged(() => void refresh());
   }, [refresh]);
 
-  // ...and when it has claimed a new batch, say "Có thông báo mới"
-  useEffect(() => window.electronAPI?.onNotificationVoice?.(playNotificationVoice), []);
+  // ...and when it has claimed a new batch (the only path while the window is hidden), say "Có thông báo mới"
+  useEffect(() => window.electronAPI?.onNotificationVoice?.(announce), [announce]);
 
   const markRead = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;

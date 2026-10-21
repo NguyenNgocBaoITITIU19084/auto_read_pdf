@@ -34,7 +34,7 @@ test('claims from the backend and shows one popup for the batch', async () => {
   assert.deepEqual(calls.requests, ['POST /api/v1/notifications/claim-os']);
   assert.equal(FakeNotification.shown.length, 1);
   assert.deepEqual(FakeNotification.shown[0].opts, { title: 'Cont EMCU1234567 đã OUTGATE', body: '26/09/2026 09:46', silent: false, sound: 'Submarine' });
-  assert.deepEqual(calls.sent, [['notifications-changed', undefined], ['notification-voice', undefined]]);
+  assert.deepEqual(calls.sent, [['notifications-changed', undefined], ['notification-voice', { ids: [1] }]]);
 });
 
 test('nothing to show when the backend has nothing new', async () => {
@@ -48,7 +48,7 @@ test('no popup while the user is looking at the app, but the bell is refreshed a
   const { notifier, calls } = setup({ response: one, focused: true });
   await notifier.poll();
   assert.equal(FakeNotification.shown.length, 0);
-  assert.deepEqual(calls.sent, [['notifications-changed', undefined], ['notification-voice', undefined]]);
+  assert.deepEqual(calls.sent, [['notifications-changed', undefined], ['notification-voice', { ids: [1] }]]);
 });
 
 test('no popup when the backend withholds the summary (popups switched off)', async () => {

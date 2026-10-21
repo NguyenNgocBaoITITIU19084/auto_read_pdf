@@ -18,6 +18,9 @@ vi.mock('../services/api', () => ({
   clearNotificationsApi: (...a: unknown[]) => clearRead(...a),
 }));
 
+const playVoice = vi.fn();
+vi.mock('../utils/notificationVoice', () => ({ playNotificationVoice: () => playVoice() }));
+
 import { NotificationsProvider, POLL_MS, useNotifications } from './NotificationsContext';
 
 const wrapper = ({ children }: { children: React.ReactNode }) => <NotificationsProvider>{children}</NotificationsProvider>;
@@ -35,6 +38,7 @@ describe('NotificationsProvider', () => {
     visibility = 'visible';
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
     addToast.mockReset();
+    playVoice.mockReset();
     getNotifications.mockReset().mockResolvedValue(reply([]));
     markRead.mockReset().mockResolvedValue(undefined);
     clearRead.mockReset().mockResolvedValue(undefined);
@@ -120,6 +124,25 @@ describe('NotificationsProvider', () => {
 
     await act(async () => { await result.current.clearRead(); });
     expect(clearRead).toHaveBeenCalledWith(true);
+  });
+
+  it('says "Có thông báo mới" with the toast, once, even when the desktop app announces the same batch', async () => {
+    let onVoice: (ids: number[]) => void = () => {};
+    window.electronAPI = { onNotificationVoice: (cb: (ids: number[]) => void) => { onVoice = cb; return () => {}; } } as unknown as typeof window.electronAPI;
+    getNotifications.mockResolvedValueOnce(reply([note(1)]));
+    const { result } = renderHook(() => useNotifications(), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    expect(playVoice).not.toHaveBeenCalled();                                    // nothing old on startup
+
+    getNotifications.mockResolvedValueOnce(reply([note(2), note(1)]));
+    await act(async () => { await result.current.refresh(); });
+    expect(playVoice).toHaveBeenCalledTimes(1);
+    act(() => onVoice([2]));                                                      // the desktop app claims it a moment later
+    expect(playVoice).toHaveBeenCalledTimes(1);
+
+    act(() => onVoice([3]));                                                      // window hidden: only the desktop app sees it
+    expect(playVoice).toHaveBeenCalledTimes(2);
+    delete (window as { electronAPI?: unknown }).electronAPI;
   });
 
   it('stays quiet when the backend is unavailable', async () => {

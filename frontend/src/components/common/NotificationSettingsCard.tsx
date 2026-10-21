@@ -130,7 +130,6 @@ export const NotificationSettingsCard: React.FC = () => {
           <input
             type="checkbox"
             checked={voiceOn}
-            disabled={!settings?.os_enabled}
             onChange={() => {
               const on = !voiceOn;
               setVoiceOn(on);

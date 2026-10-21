@@ -422,7 +422,7 @@ export interface ElectronAPI {
   /** Desktop only: claim pending notifications now and pop them up even while the app is focused. */
   pollNotificationsNow?: () => Promise<void>;
   /** Desktop only: fires once per batch of new notifications (plays the "Có thông báo mới" voice). Returns unsubscribe. */
-  onNotificationVoice?: (callback: () => void) => () => void;
+  onNotificationVoice?: (callback: (ids: number[]) => void) => () => void;
   /** Desktop only: a system popup was clicked — open that notification's detail (or the matching tab). Returns unsubscribe. */
   onNotificationNavigate?: (callback: (target: { tab: 'vessel' | 'container' | null; query: string | null; notificationId?: number | null }) => void) => () => void;
   /** Quit and install a downloaded update; false when nothing is ready. */

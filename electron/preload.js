@@ -55,10 +55,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('notifications-changed', listener);
     return () => ipcRenderer.removeListener('notifications-changed', listener);
   },
-  /** Fires once per batch of new notifications, to say "Có thông báo mới". Returns an unsubscribe function. */
+  /** Fires once per batch of new notifications ({ids}), to say "Có thông báo mới". Returns an unsubscribe function. */
   onNotificationVoice: (callback) => {
     if (typeof callback !== 'function') return () => {};
-    const listener = () => callback();
+    const listener = (_event, payload) => callback((payload && payload.ids) || []);
     ipcRenderer.on('notification-voice', listener);
     return () => ipcRenderer.removeListener('notification-voice', listener);
   },
