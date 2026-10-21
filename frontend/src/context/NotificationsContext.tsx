@@ -5,6 +5,7 @@ import { AppNotification } from '../types';
 import { clearNotificationsApi, getNotificationsApi, markNotificationsReadApi } from '../services/api';
 import { tf } from '../services/i18nFormat';
 import { notificationTitle } from '../utils/notifications';
+import { playNotificationVoice } from '../utils/notificationVoice';
 
 export const POLL_MS = 20000;
 /** Up to this many new changes get their own toast; more are folded into one. */
@@ -112,6 +113,9 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!api?.onNotificationsChanged) return;
     return api.onNotificationsChanged(() => void refresh());
   }, [refresh]);
+
+  // ...and when it has claimed a new batch, say "Có thông báo mới"
+  useEffect(() => window.electronAPI?.onNotificationVoice?.(playNotificationVoice), []);
 
   const markRead = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;

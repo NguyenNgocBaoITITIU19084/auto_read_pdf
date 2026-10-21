@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { NotificationKind, NotificationSettings } from '../../types';
 import { getNotificationSettingsApi, saveNotificationSettingsApi, sendTestNotificationApi } from '../../services/api';
 import { useNotifications } from '../../context/NotificationsContext';
+import { isNotificationVoiceOn, playNotificationVoice, setNotificationVoiceOn } from '../../utils/notificationVoice';
 
 /** The kinds a user can switch on / off (the test sample is not one of them) */
 type SettingKind = Exclude<NotificationKind, 'test' | 'vessel_schedule'>;
@@ -19,6 +20,7 @@ export const NotificationSettingsCard: React.FC = () => {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(isNotificationVoiceOn);
   const { refresh } = useNotifications();
   const desktop = typeof window !== 'undefined' && !!window.electronAPI?.platform;
 
@@ -122,6 +124,27 @@ export const NotificationSettingsCard: React.FC = () => {
           {!desktop && <span className="block text-[11px] italic">{s.osBrowser}</span>}
         </span>
       </label>
+
+      {desktop && (
+        <label className="flex items-start gap-2 pl-5 text-xs text-slate-700 dark:text-slate-200 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={voiceOn}
+            disabled={!settings?.os_enabled}
+            onChange={() => {
+              const on = !voiceOn;
+              setVoiceOn(on);
+              setNotificationVoiceOn(on);
+              if (on) playNotificationVoice(); // let the user hear it right away
+            }}
+            className="mt-0.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
+          />
+          <span>
+            {s.voice}
+            <span className="block text-[11px] text-slate-400 dark:text-slate-500">{s.voiceHint}</span>
+          </span>
+        </label>
+      )}
 
       <div className="flex items-start justify-between gap-3 pt-2 border-t border-slate-200/80 dark:border-slate-700/80">
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{s.requirement}</p>

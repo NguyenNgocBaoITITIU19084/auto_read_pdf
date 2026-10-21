@@ -55,6 +55,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('notifications-changed', listener);
     return () => ipcRenderer.removeListener('notifications-changed', listener);
   },
+  /** Fires once per batch of new notifications, to say "Có thông báo mới". Returns an unsubscribe function. */
+  onNotificationVoice: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = () => callback();
+    ipcRenderer.on('notification-voice', listener);
+    return () => ipcRenderer.removeListener('notification-voice', listener);
+  },
   /** Claim pending notifications now and show the popup even if the app is focused (used by the test button). */
   pollNotificationsNow: () => ipcRenderer.invoke('notifications-poll-now'),
   /** A system popup was clicked: {tab: 'vessel'|'container'|null, query, notificationId}. Returns an unsubscribe function. */
