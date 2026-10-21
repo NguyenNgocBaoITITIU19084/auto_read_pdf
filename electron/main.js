@@ -18,6 +18,7 @@ const { backend, backendRequest } = require('./py_manager');
 const { createTrayIcon, createAppIcon } = require('./tray_icon');
 const updater = require('./updater');
 const { createNotifier } = require('./notifier');
+const { setupWindowsToasts } = require('./win_toast');
 
 const APP_NAME = 'Auto Read PDF Pro';
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -464,8 +465,17 @@ function registerIpc() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 function onReady() {
-  // Windows only shows toasts for an app that has an AppUserModelID (the installer sets the same id on the shortcut)
-  if (process.platform === 'win32') app.setAppUserModelId('com.autoreadpdf.pro');
+  // Windows only shows toasts for an app whose AppUserModelID sits on a Start Menu shortcut (see win_toast.js)
+  const toasts = setupWindowsToasts({
+    platform: process.platform,
+    isDev,
+    execPath: process.execPath,
+    portableExe: process.env.PORTABLE_EXECUTABLE_FILE,
+    appDataDir: app.getPath('appData'),
+    setAppUserModelId: (id) => app.setAppUserModelId(id),
+    writeShortcutLink: (...args) => shell.writeShortcutLink(...args),
+  });
+  if (toasts !== 'skipped') console.log(`[Electron] Windows toasts: ${toasts}`);
   registerIpc();
 
   backend.on('status', (status) => {
