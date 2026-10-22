@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { tf } from '../../services/i18nFormat';
 
 export interface UpdateOffer {
-  /** 'install': downloaded, restart to install (Windows). 'download': open the release page (macOS). */
+  /** 'install': downloaded, restart to install (Windows). 'download': open the release page (macOS, Windows portable). */
   kind: 'install' | 'download';
   version: string;
   currentVersion: string;

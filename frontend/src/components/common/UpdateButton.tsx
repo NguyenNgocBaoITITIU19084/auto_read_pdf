@@ -18,7 +18,7 @@ const chipIdle =
  * Version chip in the header that doubles as the update control: click to check, shows download
  * progress, and turns into a green "Cập nhật x.y.z" button once an update is ready to install. A new version is also
  * announced right away in an UpdateDialog ("Để sau" puts it off until the next launch; the green chip reopens it).
- * Where auto-update is unavailable (macOS, browser, dev run) it opens the releases page instead.
+ * Where auto-update is unavailable (macOS, Windows portable, browser, dev run) it opens the releases page instead.
  */
 export const UpdateButton: React.FC = () => {
   const { t, addToast } = useApp();

@@ -1,10 +1,12 @@
 /**
- * Auto-update (Windows only).
+ * Auto-update (Windows installed build only).
  *
  * macOS is intentionally left out: Squirrel.Mac refuses updates that are not signed
- * with a Developer ID, which this project does not have. On mac the module reports
- * state 'unsupported' and the UI falls back to a link to the releases page; a packaged mac app
- * still looks for a newer GitHub release (latestVersion) so the UI can announce it.
+ * with a Developer ID, which this project does not have. The Windows portable build is left
+ * out too: electron-updater would run the NSIS installer and add an installed copy instead of
+ * replacing the portable exe. Both report state 'unsupported' and the UI falls back to a link to
+ * the releases page; a packaged build still looks for a newer GitHub release (latestVersion) so
+ * the UI can announce it.
  *
  * Flow: check -> download in background -> tell the renderer -> install when the user asks.
  */
@@ -30,7 +32,8 @@ function currentVersion() {
 }
 
 function supported() {
-  return process.platform === 'win32' && app.isPackaged;
+  // electron-builder's portable launcher sets PORTABLE_EXECUTABLE_FILE
+  return process.platform === 'win32' && app.isPackaged && !process.env.PORTABLE_EXECUTABLE_FILE;
 }
 
 function setStatus(patch) {
@@ -154,7 +157,9 @@ async function quitAndInstall(beforeInstall) {
     log(`beforeInstall failed: ${(e && e.message) || e}`);
   }
   log('Quitting to install update');
-  autoUpdater.quitAndInstall(false, true);
+  // Silent: the NSIS wizard (oneClick: false) would otherwise walk the user through every
+  // install step again. A silent update reuses the previous install directory and relaunches.
+  autoUpdater.quitAndInstall(true, true);
   return true;
 }
 

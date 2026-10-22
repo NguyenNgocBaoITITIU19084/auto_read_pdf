@@ -1,5 +1,5 @@
 /**
- * "Is there a newer release?" for builds that cannot auto-update (macOS: no Developer ID, so Squirrel.Mac refuses).
+ * "Is there a newer release?" for builds that cannot auto-update (macOS: no Developer ID, so Squirrel.Mac refuses; Windows portable).
  * Reads the latest GitHub release; the UI then offers its download page.
  *
  * Pure apart from the injected fetch, so it is tested without Electron (see release_check.test.js).
