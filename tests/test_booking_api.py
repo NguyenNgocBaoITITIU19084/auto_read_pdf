@@ -347,6 +347,21 @@ def test_bookings_page_sorts_by_column(col_id):
     assert len(ids) == 4
 
 
+def test_bookings_sort_by_cutoff_prefers_eport(col_id):
+    # the cut-off column sorts by the time the cell shows: ePort's when known, else the booking's own
+    for no, cutoff, eport in (("BK1", "26/10/2026 22:30", ""), ("BK2", "20/10/2026 10:00", "31/10/2026 10:00"),
+                              ("BK3", "", ""), ("BK4", "30/10/2026 08:00", "28/10/2026 02:00")):
+        insert_booking(col_id, {"Booking No": no, "Port Cargo Cut-off": cutoff, "Cut-off ePort": eport})
+
+    def page(sort_dir):
+        res = client.get("/api/v1/bookings/page",
+                         params={"collection_id": col_id, "sort_by": "Port Cargo Cut-off", "sort_dir": sort_dir})
+        return [r["Booking No"] for r in res.json()["items"]]
+
+    assert page("asc") == ["BK1", "BK4", "BK2", "BK3"]
+    assert page("desc") == ["BK2", "BK4", "BK1", "BK3"]
+
+
 def test_bookings_filter_by_carrier(col_id):
     for no, carrier in (("BK1", "OOCL"), ("BK2", "MAERSK"), ("BK3", "OOCL"), ("BK4", "")):
         insert_booking(col_id, {"Booking No": no, "Carrier": carrier})

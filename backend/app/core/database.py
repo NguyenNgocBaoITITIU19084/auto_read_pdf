@@ -977,13 +977,20 @@ def _booking_row_to_api(row: dict) -> dict:
 _BOOKING_ORDER = "ORDER BY id DESC"
 
 
+# The cut-off a booking is planned by: ePort's closing time when known, else the booking's own
+_DEADLINE_EXPR = ("CASE WHEN TRIM(COALESCE(eport_cutoff, '')) NOT IN ('', 'null') "
+                  "THEN eport_cutoff ELSE cutoff_time END")
+
+
 # Table column (API key) -> stored column
 _BOOKING_SORT_COLUMNS = {
     "Tên file PDF": "pdf_name", "Booking No": "booking_no", "Carrier": "carrier",
     "Port of Discharging": "port_of_discharging", "Place of Delivery": "place_of_delivery", "Block": "block_val",
     "T/S Port": "ts_port", "Equipment Type": "equipment_type", "Q'ty": "qty", "Empty Pick Up CY": "empty_pickup_cy",
-    "Full return CY": "full_return_cy", "Port Cargo Cut-off": "cutoff_time", "Vessel": "vessel", "ETD": "etd",
+    "Full return CY": "full_return_cy", "Vessel": "vessel", "ETD": "etd",
     "Ghi chú": "note", "Thời gian thêm": "created_at",
+    # sorts by the cut-off the cell shows (ePort's time when known)
+    "Port Cargo Cut-off": f"({_DEADLINE_EXPR})",
 }
 
 
@@ -1061,11 +1068,6 @@ def get_booking_ids(col_id: int, search_query: str = None, search_field: str = N
 def get_booking_carriers(col_id: int) -> list[dict]:
     """Carriers of a collection with their booking counts ('' = no carrier), for the column filter."""
     return _value_counts("bookings", "carrier", col_id)
-
-
-# The cut-off a booking is planned by: ePort's closing time when known, else the booking's own
-_DEADLINE_EXPR = ("CASE WHEN TRIM(COALESCE(eport_cutoff, '')) NOT IN ('', 'null') "
-                  "THEN eport_cutoff ELSE cutoff_time END")
 
 
 def _calendar_day_key(day: str) -> str:
