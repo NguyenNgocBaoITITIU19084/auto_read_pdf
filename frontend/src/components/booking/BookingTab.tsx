@@ -284,7 +284,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     (b: Booking): Booking => ({ ...b, [STATUS_KEY]: t.booking.status.labels[statusOf(b[STATUS_KEY])] } as Record<string, unknown> as Booking),
     [t],
   );
-  /** Copies take the cut-off the cell shows (ePort's newer time when known). */
+  /** Copies and exports take the cut-off the cell shows (ePort's newer time when known). */
   const forCopy = useCallback(
     (b: Booking): Booking => ({ ...withStatusLabel(b), [CUTOFF_KEY]: effectiveCutoff(b) } as Record<string, unknown> as Booking),
     [withStatusLabel],
@@ -822,7 +822,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       const rows = scope === 'all'
         ? await getBookings(activeCollection.id, debouncedQuery, searchField)
         : await resolveSelectedRows();
-      setExportRows(rows.map(withStatusLabel));
+      setExportRows(rows.map(forCopy));
       setIsExportOpen(true);
     } catch (e: any) {
       addToast(e?.message || t.common.error, 'error');
