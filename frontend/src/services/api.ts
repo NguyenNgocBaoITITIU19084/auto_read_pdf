@@ -4,7 +4,7 @@ import {
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
-  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule,
+  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult,
 } from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
@@ -114,8 +114,8 @@ export const getBookings = async (collectionId: number, query?: string, field?: 
 export const getBookingLinks = async (bookingId: number): Promise<BookingLinks> =>
   (await apiClient.get<BookingLinks>(`/bookings/${bookingId}/links`)).data;
 
-export const getBookingsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<PageResult<Booking>> =>
-  (await apiClient.get<PageResult<Booking>>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
+export const getBookingsPage = async (collectionId: number, limit: number, offset: number, q: TableQuery): Promise<BookingPageResult> =>
+  (await apiClient.get<BookingPageResult>('/bookings/page', { params: tableParams(collectionId, q, { limit, offset }), paramsSerializer: listParams })).data;
 export const getBookingIds = async (collectionId: number, q: TableQuery): Promise<number[]> =>
   (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getBookingCarriers = async (collectionId: number): Promise<ColumnValueCount[]> =>

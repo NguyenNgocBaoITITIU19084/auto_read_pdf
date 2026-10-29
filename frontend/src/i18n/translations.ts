@@ -701,8 +701,11 @@ export const translations = {
         changeTitle: "Đổi trạng thái {count} booking",
         changeSuccess: "Đã chuyển {count} booking sang \"{status}\"",
         hideClosed: "Ẩn Hoàn tất / Huỷ",
-        hideClosedTooltip: "Đang ẩn các booking Hoàn tất và Huỷ. Bấm để hiện lại.",
-        showClosedTooltip: "Đang hiện cả booking Hoàn tất và Huỷ. Bấm để ẩn.",
+        hideClosedTooltip: "Đang BẬT: các booking Hoàn tất và Huỷ bị ẩn khỏi bảng và lịch. Bấm để hiện lại.",
+        showClosedTooltip: "Đang TẮT: bảng hiện cả booking Hoàn tất và Huỷ. Bấm để ẩn.",
+        hiddenMatches: "Còn {count} booking Hoàn tất / Huỷ khớp \"{query}\" đang bị ẩn.",
+        showHidden: "Hiện cả booking Hoàn tất / Huỷ",
+        hiddenCount: "{count} booking đang bị ẩn",
         autoHint: "Booking tự chuyển sang \"Đã hạ bãi\" khi tra cứu container trên ePort thấy đủ số cont đã INGATE (hàng xuất, cont đầy)."
       },
       calendar: {
@@ -2051,6 +2054,9 @@ export const translations = {
         hideClosed: "Hide Done / Cancelled",
         hideClosedTooltip: "Done and Cancelled bookings are hidden. Click to show them.",
         showClosedTooltip: "Done and Cancelled bookings are shown. Click to hide them.",
+        hiddenMatches: "{count} done / cancelled booking(s) matching \"{query}\" are hidden.",
+        showHidden: "Show done / cancelled bookings",
+        hiddenCount: "{count} booking(s) hidden",
         autoHint: "A booking moves to \"Gated in\" by itself once an ePort container lookup shows all its containers gated in (export, full)."
       },
       calendar: {

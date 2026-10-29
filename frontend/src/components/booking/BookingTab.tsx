@@ -9,9 +9,9 @@ import { useToastActions } from '../../context/ToastContext';
 import { useMobileBridge } from '../../context/MobileBridgeContext';
 import { useImageQueue } from '../../context/ImageQueueContext';
 import { useNotifications } from '../../context/NotificationsContext';
-import { Booking, BookingStatus, BOOKING_STATUSES, PageResult, TableQuery } from '../../types';
+import { Booking, BookingPageResult, BookingStatus, BOOKING_STATUSES, TableQuery } from '../../types';
 import {
-  getBookings, getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers,
+  getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers,
   deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi, getBookingTrashCount,
   getBookingStatuses, setBookingStatusApi
 } from '../../services/api';
@@ -445,7 +445,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     [debouncedQuery, searchField, sort, carrierFilter, statusFilter, hideClosed]
   );
 
-  const table = useServerTable<Booking, PageResult<Booking>>({
+  const table = useServerTable<Booking, BookingPageResult>({
     enabled: !!activeCollection,
     queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
     pageSizeStorageKey: 'booking_page_size',
@@ -456,6 +456,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     },
   });
   const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+  // Done / cancelled bookings the toolbar toggle leaves out (shown on the toggle; a search that matches them says so)
+  const closedHidden = hideClosed ? table.result?.hidden_closed ?? 0 : 0;
+  const hiddenClosed = debouncedQuery.trim() ? closedHidden : 0;
 
   const refreshTrashCount = useStableCallback(async () => {
     if (!activeCollection) return setTrashCount(0);
@@ -495,6 +498,15 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (selection.selectedRows.length === selection.count) return selection.selectedRows;
     return getBookingsByIds(selectedIdList);
   }, [selection.selectedRows, selection.count, selectedIdList]);
+
+  /** Every row the table shows across its pages (search, column filters, the done / cancelled toggle, the sort). */
+  const resolveTableRows = useCallback(async (): Promise<Booking[]> => {
+    if (!activeCollection) return [];
+    const ids = await getBookingIds(activeCollection.id, tableQuery);
+    if (ids.length === 0) return [];
+    const byId = new Map((await getBookingsByIds(ids)).map((b) => [b.id, b]));
+    return ids.map((id) => byId.get(id)).filter((b): b is Booking => !!b);
+  }, [activeCollection, tableQuery]);
 
   const handleSelectAllResults = useCallback(async () => {
     if (!activeCollection) return;
@@ -831,9 +843,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (!activeCollection) return;
     setExportScope(scope);
     try {
-      const rows = scope === 'all'
-        ? await getBookings(activeCollection.id, debouncedQuery, searchField)
-        : await resolveSelectedRows();
+      const rows = scope === 'all' ? await resolveTableRows() : await resolveSelectedRows();
       setExportRows(rows.map(forCopy));
       setIsExportOpen(true);
     } catch (e: any) {
@@ -1032,17 +1042,33 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           <Tooltip content={hideClosed ? t.booking.status.hideClosedTooltip : t.booking.status.showClosedTooltip}>
             <button
               type="button"
-              aria-pressed={hideClosed}
+              role="switch"
+              aria-checked={hideClosed}
               data-tour="booking-hide-closed"
               onClick={() => setHideClosed((v) => !v)}
-              className={`shrink-0 inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
+              className={`shrink-0 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors ${
                 hideClosed
                   ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
                   : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/80 dark:text-slate-400 dark:border-slate-700'
               }`}
             >
-              <EyeOff className="w-3.5 h-3.5" />
+              {/* A small on/off track: the label says what it does, the knob whether it is doing it */}
+              <span aria-hidden className={`relative inline-flex h-4 w-7 shrink-0 rounded-full transition-colors ${
+                hideClosed ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
+              }`}>
+                <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
+                  hideClosed ? 'translate-x-3.5' : 'translate-x-0.5'
+                }`} />
+              </span>
               {t.booking.status.hideClosed}
+              {closedHidden > 0 && (
+                <span
+                  className="rounded-full bg-amber-200/80 dark:bg-amber-900/80 px-1.5 text-[10px] font-bold tabular-nums"
+                  aria-label={tf(t.booking.status.hiddenCount, { count: closedHidden })}
+                >
+                  {closedHidden}
+                </span>
+              )}
             </button>
           </Tooltip>
         </div>
@@ -1138,6 +1164,26 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           </Tooltip>
         </div>
       </div>
+
+      {hiddenClosed > 0 && (
+        <div
+          role="status"
+          data-testid="booking-hidden-closed"
+          className="shrink-0 flex items-center justify-between gap-2 flex-wrap rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 text-[11px] text-amber-800 dark:text-amber-200"
+        >
+          <span className="flex items-center gap-1.5">
+            <EyeOff className="w-3.5 h-3.5 shrink-0" />
+            {tf(t.booking.status.hiddenMatches, { count: hiddenClosed, query: debouncedQuery.trim() })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setHideClosed(false)}
+            className="font-semibold text-amber-900 dark:text-amber-100 underline-offset-2 hover:underline"
+          >
+            {t.booking.status.showHidden}
+          </button>
+        </div>
+      )}
 
       {/* Main Table */}
       {view === 'calendar' && activeCollection ? (

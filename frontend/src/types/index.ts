@@ -473,6 +473,11 @@ export interface PageResult<T> {
   total: number;
 }
 
+/** `hidden_closed`: bookings the search also matches but the "hide done / cancelled" toggle leaves out */
+export interface BookingPageResult extends PageResult<Booking> {
+  hidden_closed?: number;
+}
+
 export interface ContainerPageResult extends PageResult<ContainerInfo> {
   event_type_counts: Record<string, number>;
 }

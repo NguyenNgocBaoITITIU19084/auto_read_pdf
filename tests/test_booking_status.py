@@ -167,3 +167,35 @@ def test_calendar_api_rejects_bad_dates(col_id):
     client = TestClient(app)
     res = client.get("/api/v1/bookings/calendar", params={"collection_id": col_id, "date_from": "19/10", "date_to": "x"})
     assert res.status_code == 400
+
+
+def test_search_matches_each_word_in_any_column(col_id):
+    _booking(col_id, "R1", Vessel="SKY RAINBOW")
+    _booking(col_id, "R2", Vessel="SKY  RAINBOW")          # two spaces, as some PDFs print it
+    _booking(col_id, "R3", Vessel="SKYRAINBOW")
+    _booking(col_id, "R4", Vessel="SKY RAINBOW 2613S")
+    _booking(col_id, "X1", Vessel="SKY HOPE", **{"Tên file PDF": "rainbow-notes.pdf"})
+    _booking(col_id, "X2", Vessel="EVER OATH")
+
+    page = db.get_bookings_page(col_id, search_query="sky rainbow")
+    assert sorted(r["Booking No"] for r in page["items"]) == ["R1", "R2", "R3", "R4", "X1"]
+    # one column picked: every word must be in that column
+    page = db.get_bookings_page(col_id, search_query="SKY RAINBOW", search_field="vessel")
+    assert sorted(r["Booking No"] for r in page["items"]) == ["R1", "R2", "R3", "R4"]
+    assert db.get_bookings_page(col_id, search_query="   ")["total"] == 6
+
+
+def test_search_says_how_many_closed_bookings_it_hides(col_id):
+    client = TestClient(app)
+    _booking(col_id, "R1", Vessel="SKY RAINBOW")
+    b = _booking(col_id, "R2", Vessel="SKY RAINBOW")
+    _booking(col_id, "R3", Vessel="EVER OATH")
+    db.set_booking_status([b], "done")
+
+    page = client.get("/api/v1/bookings/page",
+                      params={"collection_id": col_id, "search_query": "SKY RAINBOW", "hide_closed": True}).json()
+    assert [r["Booking No"] for r in page["items"]] == ["R1"] and page["hidden_closed"] == 1
+    # also counted without a search; nothing with the toggle off, or when the status filter is chosen by hand
+    assert db.get_bookings_page(col_id, hide_closed=True)["hidden_closed"] == 1
+    assert db.get_bookings_page(col_id, search_query="SKY RAINBOW")["hidden_closed"] == 0
+    assert db.get_bookings_page(col_id, search_query="SKY", statuses=["new"], hide_closed=True)["hidden_closed"] == 0

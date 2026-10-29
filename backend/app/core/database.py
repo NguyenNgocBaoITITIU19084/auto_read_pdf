@@ -926,14 +926,13 @@ def _booking_where(col_id: int, search_query: str = None, search_field: str = No
     if hide_closed and not statuses:  # statuses picked in the column filter win over the toolbar toggle
         where += f" AND {_STATUS_EXPR} NOT IN ({','.join('?' * len(_BOOKING_CLOSED_STATUSES))})"
         params.extend(_BOOKING_CLOSED_STATUSES)
-    if search_query:
-        q = f"%{search_query}%"
-        if search_field and search_field != "all" and search_field in BOOKING_SEARCH_COLUMNS:
-            where += f" AND {search_field} LIKE ?"
-            params.append(q)
-        else:
-            where += " AND (" + " OR ".join(f"{c} LIKE ?" for c in _BOOKING_ALL_FIELDS) + ")"
-            params.extend([q] * len(_BOOKING_ALL_FIELDS))
+    # Each word on its own, in any of the columns: "SKY RAINBOW" also finds "SKY  RAINBOW", "SKYRAINBOW" and a
+    # booking whose vessel is "SKY RAINBOW" but whose PDF name holds the voyage
+    fields = ((search_field,) if search_field and search_field != "all" and search_field in BOOKING_SEARCH_COLUMNS
+              else _BOOKING_ALL_FIELDS)
+    for word in (search_query or "").split():
+        where += " AND (" + " OR ".join(f"{c} LIKE ?" for c in fields) + ")"
+        params.extend([f"%{word}%"] * len(fields))
     return where, params
 
 
@@ -1067,7 +1066,13 @@ def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int 
         total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
         rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} {order} LIMIT ? OFFSET ?;",
                              (*params, limit, offset))
-    return {"items": [_booking_row_to_api(r) for r in rows], "total": total}
+        # How many done / cancelled bookings the toggle leaves out (the toolbar shows it, a search says so too)
+        hidden_closed = 0
+        if hide_closed and not statuses:
+            all_where, all_params = _booking_where(col_id, search_query, search_field, carriers, statuses, False)
+            hidden_closed = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {all_where};",
+                                         tuple(all_params)).fetchone()[0] - total
+    return {"items": [_booking_row_to_api(r) for r in rows], "total": total, "hidden_closed": hidden_closed}
 
 
 def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None,
