@@ -27,6 +27,8 @@ export interface NotificationsValue {
   closeDetail: () => void;
   /** Goes up whenever the folder auto-import added bookings (null until the first poll) */
   autoImportSeq: number | null;
+  /** Goes up whenever bookings may have met new ePort vessel schedules (null until the first poll) */
+  bookingLinksSeq: number | null;
 }
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
@@ -41,6 +43,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [autoImportSeq, setAutoImportSeq] = useState<number | null>(null);
+  const [bookingLinksSeq, setBookingLinksSeq] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const tRef = useRef(t);
@@ -76,6 +79,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       setItems(res.items);
       setUnread(res.unread);
       setAutoImportSeq(res.auto_import_seq ?? 0);
+      setBookingLinksSeq(res.booking_links_seq ?? 0);
       const maxId = res.items.reduce((m, n) => Math.max(m, n.id), 0);
       const seen = seenMaxRef.current;
       if (seen !== null && document.visibilityState === 'visible') {
@@ -187,8 +191,10 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const closeDetail = useCallback(() => setDetailId(null), []);
 
   const value = useMemo<NotificationsValue>(
-    () => ({ items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail, autoImportSeq }),
-    [items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail, autoImportSeq]
+    () => ({
+      items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail, autoImportSeq, bookingLinksSeq,
+    }),
+    [items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail, autoImportSeq, bookingLinksSeq]
   );
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
 };

@@ -23,6 +23,10 @@ interface BookingDetailModalProps {
   /** Enables "Open Vessels tab" in the quick vessel lookup */
   onNavigateTab?: (tab: TabId, query?: string) => void;
   onEdit?: (booking: Booking) => void;
+  /** Changes whenever vessel schedules were saved: the "Lịch tàu (ePort)" links are fetched again */
+  linksReloadKey?: number | null;
+  /** The quick lookup saved a vessel schedule */
+  onVesselSaved?: () => void;
 }
 
 export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
@@ -30,6 +34,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   onClose,
   booking,
   onNavigateTab,
+  linksReloadKey,
+  onVesselSaved,
   onEdit,
 }) => {
   const { t, addToast } = useApp();
@@ -262,6 +268,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           vessel={String(booking["Vessel"] ?? '')}
           labels={t.booking.links}
           onNavigateTab={onNavigateTab && ((tab, query) => { onClose(); onNavigateTab(tab, query); })}
+          reloadKey={linksReloadKey}
         />
         </div>
         </div>
@@ -281,6 +288,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
         onClose={closeQuickVessel}
         booking={booking}
         onNavigateTab={onNavigateTab}
+        onSaved={onVesselSaved}
       />
     </Modal>
   );

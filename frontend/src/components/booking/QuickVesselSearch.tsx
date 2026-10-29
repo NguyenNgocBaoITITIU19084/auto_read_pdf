@@ -22,6 +22,8 @@ export interface QuickVesselSearchProps {
   booking: Partial<Booking> | null;
   /** When provided, shows "Open Vessels tab" on results. */
   onNavigateTab?: (tab: TabId, query?: string) => void;
+  /** A result was saved into the vessel list (the bookings matching it now carry its cut-off) */
+  onSaved?: () => void;
 }
 
 const LAST_SITE_KEY = 'last_vessel_site_id';
@@ -47,7 +49,7 @@ const errorText = (e: any, fallback: string): string => {
   return (typeof detail === 'string' && detail) || e?.message || fallback;
 };
 
-export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, onClose, booking, onNavigateTab }) => {
+export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, onClose, booking, onNavigateTab, onSaved }) => {
   const { t, language, activeCollection } = useApp();
   const { addToast } = useToastActions();
   const qv = t.booking.quickVessel;
@@ -157,6 +159,7 @@ export const QuickVesselSearch: React.FC<QuickVesselSearchProps> = ({ isOpen, on
     try {
       await saveVesselResultsApi(activeCollection.id, [row]);
       setSavedKeys((prev) => new Set(prev).add(key));
+      onSaved?.();
       if (!silent) addToast(tf(qv.saveSuccess, { count: 1 }), 'success');
     } catch (err: any) {
       addToast(errorText(err, t.common.error), 'error');

@@ -586,7 +586,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   }, [pasteRequest, queueFiles, onPasteRequestHandled]);
 
   // Bookings added by the folder auto-import (seen by the notification poll): refresh this table
-  const { autoImportSeq } = useNotifications();
+  const { autoImportSeq, bookingLinksSeq, refresh: pollNotifications } = useNotifications();
   const seenAutoImport = useRef(autoImportSeq);
   useEffect(() => {
     const before = seenAutoImport.current;  // null: the first poll only tells where the count stands
@@ -595,6 +595,24 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (before !== null && autoImportSeq !== null) void loadData('refresh');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoImportSeq]);
+
+  // Vessel schedules saved anywhere (a lookup here or in the Vessels tab, a watchlist sync, auto-sync): the bookings
+  // matching them carry the ePort cut-off now, so the table and an open booking detail show it without changing tabs
+  const seenLinks = useRef(bookingLinksSeq);
+  useEffect(() => {
+    const before = seenLinks.current;  // null: the first poll only tells where the count stands
+    if (bookingLinksSeq === before) return;
+    seenLinks.current = bookingLinksSeq;
+    if (before !== null && bookingLinksSeq !== null) void loadData('refresh');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingLinksSeq]);
+  // An open booking detail follows its row when the table reloads (e.g. the ePort cut-off just arrived)
+  useEffect(() => {
+    if (!selectedBooking) return;
+    const fresh = pageRows.find((r) => r.id === selectedBooking.id);
+    if (fresh && fresh !== selectedBooking) setSelectedBooking(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageRows]);
 
   // Bookings saved from the reading queue (any tab, phone photos included): refresh this table
   const seenSavedVersion = useRef(imageQueue.savedVersion);
@@ -1390,6 +1408,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         booking={selectedBooking}
         onNavigateTab={onNavigateTab}
         onEdit={openEditBooking}
+        linksReloadKey={bookingLinksSeq}
+        onVesselSaved={() => void pollNotifications()}
       />
 
       <QuickVesselSearch
@@ -1397,6 +1417,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
         onClose={closeQuickVessel}
         booking={quickVesselBooking}
         onNavigateTab={onNavigateTab}
+        onSaved={() => void pollNotifications()}
       />
 
       <ExportModal

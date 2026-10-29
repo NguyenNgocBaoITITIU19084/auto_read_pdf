@@ -844,6 +844,33 @@ def _sync_booking_eport_cutoffs(conn: sqlite3.Connection, col_id: int, booking_i
     return changed
 
 
+# Goes up whenever bookings may have met new vessel schedules (a lookup, a sync, a move, a restore): open booking
+# tables and booking details poll it (with the notifications) and reload, so a link shows without changing tabs
+BOOKING_LINKS_SEQ_KEY = "booking_links_seq"
+
+
+def _bump_booking_links_seq(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        INSERT INTO system_settings (key, value, updated_at) VALUES (?, '1', ?)
+        ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT), updated_at = excluded.updated_at;
+    """, (BOOKING_LINKS_SEQ_KEY, _now_str()))
+
+
+def booking_links_seq() -> int:
+    try:
+        return int(get_system_setting(BOOKING_LINKS_SEQ_KEY, "0") or 0)
+    except ValueError:
+        return 0
+
+
+def _relink_collection(conn: sqlite3.Connection, col_id: int) -> None:
+    """Bookings <-> the vessel schedules and containers of their collection, after rows arrived in bulk
+    (a move / copy, a restored backup): the ePort cut-off of each booking's vessel + voyage, and "gated_in"."""
+    _sync_booking_eport_cutoffs(conn, col_id)
+    _sync_booking_gate_status(conn, col_id)
+    _bump_booking_links_seq(conn)
+
+
 def insert_booking(col_id: int, data: dict) -> int:
     with get_connection() as conn:
         booking_id = _insert_booking_row(conn.cursor(), col_id, data)
@@ -1471,6 +1498,7 @@ def import_backup_data(backup_data: dict, mode: str = "merge"):
 
     now_str = _now_str()
     # Everything runs in ONE transaction: either the whole backup is restored or nothing is.
+    restored_cols: list[int] = []
     with get_connection() as conn:
         cursor = conn.cursor()
         if mode == "replace":
@@ -1483,6 +1511,7 @@ def import_backup_data(backup_data: dict, mode: str = "merge"):
                 continue
             created_at = col_data.get("created_at") or now_str
             col_id = _merge_collection(cursor, col_data.get("name"), created_at, col_data.get("settings"))
+            restored_cols.append(col_id)
 
             for b in col_data.get("bookings") or []:
                 booking_no = (b.get("Booking No", b.get("booking_no")) or "").strip()
@@ -1537,6 +1566,10 @@ def import_backup_data(backup_data: dict, mode: str = "merge"):
                 _color_rule_params(cr, cr.get("created_at") or now_str) for cr in latest.values()
             ])
 
+        # Restored bookings meet the restored vessel schedules / containers (and those already in a merged collection)
+        for col_id in dict.fromkeys(restored_cols):
+            _relink_collection(conn, col_id)
+
 
 # ---------------------------------------------------------------------------
 # Vessel schedules
@@ -1584,6 +1617,7 @@ def insert_vessel_schedules(col_id: int, schedules: list[dict], source: str = "m
         ids = _insert_vessel_rows(conn.cursor(), col_id, schedules, _now_str())
         # every live ePort lookup / resync / auto-sync ends here: refresh the bookings' cut-off from it
         _sync_booking_eport_cutoffs(conn, col_id)
+        _bump_booking_links_seq(conn)
         _safely(_record_notifications, conn, col_id, changes or [], source)
         return ids
 
@@ -2152,6 +2186,10 @@ def move_items_to_collection(entity: str, ids: list[int], target_col_id: int, co
                     (target_col_id, *chunk, target_col_id)
                 )
             total += max(cur.rowcount, 0)
+        # Arriving bookings meet the target's vessel schedules / containers, and arriving schedules /
+        # containers meet its bookings (the source keeps what it had: a booking keeps its last known cut-off)
+        if total:
+            _relink_collection(conn, target_col_id)
     return total
 
 

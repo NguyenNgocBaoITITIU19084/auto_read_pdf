@@ -162,3 +162,46 @@ def test_startup_backfills_bookings_for_vessels_looked_up_earlier(col):
     assert _row(b)["Cut-off ePort"] == ""
     db.init_db()
     assert _row(b)["Cut-off ePort"] == "23/09/2026 11:00"
+
+
+def test_booking_moved_or_copied_meets_the_vessels_of_its_new_collection(col):
+    target = db.create_collection("target")
+    db.insert_vessel_schedules(target, [_schedule()])
+    moved, copied = _booking(col, "BK1"), _booking(col, "BK2")
+    assert _row(moved)["Cut-off ePort"] == ""              # nothing looked up where they were added
+
+    db.move_items_to_collection("bookings", [moved], target)
+    assert _row(moved)["Cut-off ePort"] == "23/09/2026 11:00"
+    db.move_items_to_collection("bookings", [copied], target, copy=True)
+    copy_row = [b for b in db.get_bookings(target) if b["Booking No"] == "BK2"][0]
+    assert copy_row["Cut-off ePort"] == "23/09/2026 11:00"
+    assert _row(copied)["Cut-off ePort"] == ""             # the original stays as it was
+
+
+def test_vessel_moved_into_a_collection_fills_its_bookings(col):
+    other = db.create_collection("vessels elsewhere")
+    db.insert_vessel_schedules(other, [_schedule()])
+    b = _booking(col)
+    schedule_id = db.get_vessel_schedules(other)[0]["id"]
+
+    db.move_items_to_collection("vessels", [schedule_id], col)
+    assert _row(b)["Cut-off ePort"] == "23/09/2026 11:00"
+
+
+def test_restored_backup_links_bookings_to_vessels_right_away(col):
+    backup = {"collections": [{
+        "name": "restored", "bookings": [{"Booking No": "BK9", "Vessel": "HMM HOPE 062E(EC2)"}],
+        "vessel_schedules": [_schedule()],
+    }]}
+    db.import_backup_data(backup, mode="merge")
+    restored = [c for c in db.get_collections() if c["name"] == "restored"][0]["id"]
+    assert db.get_bookings(restored)[0]["Cut-off ePort"] == "23/09/2026 11:00"
+
+
+def test_links_seq_goes_up_when_schedules_are_saved_or_moved(col):
+    before = db.booking_links_seq()
+    db.insert_vessel_schedules(col, [_schedule()])
+    after_save = db.booking_links_seq()
+    other = db.create_collection("other")
+    db.move_items_to_collection("vessels", [db.get_vessel_schedules(col)[0]["id"]], other)
+    assert before < after_save < db.booking_links_seq()

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Box, CheckCircle2, Loader2, Ship } from 'lucide-react';
 import { getBookingLinks } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
@@ -35,6 +35,8 @@ interface BookingLinksPanelProps {
   vessel: string;
   labels: BookingLinksLabels;
   onNavigateTab?: (tab: TabId, query?: string) => void;
+  /** Changes whenever vessel schedules were saved: the links are fetched again */
+  reloadKey?: number | null;
 }
 
 const isBlank = (v: unknown) => v === undefined || v === null || String(v).trim() === '' || String(v).trim().toLowerCase() === 'null';
@@ -71,13 +73,20 @@ const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 /** The booking's ePort vessel schedule(s) and containers, under the booking detail. */
-export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({ bookingId, bookingNo, vessel, labels, onNavigateTab }) => {
+export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
+  bookingId, bookingNo, vessel, labels, onNavigateTab, reloadKey,
+}) => {
   const [links, setLinks] = useState<BookingLinks | null>(null);
   const [failed, setFailed] = useState(false);
 
+  // A new booking starts blank; a reload of the same one (vessel schedules saved meanwhile) keeps what is shown
+  const shownIdRef = useRef<number | null>(null);
   useEffect(() => {
     let current = true; // ignore a late answer for a booking that is no longer shown
-    setLinks(null);
+    if (shownIdRef.current !== bookingId) {
+      shownIdRef.current = bookingId;
+      setLinks(null);
+    }
     setFailed(false);
     (async () => {
       try {
@@ -90,7 +99,7 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({ bookingId,
     return () => {
       current = false;
     };
-  }, [bookingId]);
+  }, [bookingId, reloadKey]);
 
   if (failed) return <Empty>{labels.loadError}</Empty>;
   if (!links) {

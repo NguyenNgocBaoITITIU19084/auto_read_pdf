@@ -712,9 +712,11 @@ export const ackMobilePhotoApi = async (id: string): Promise<void> => {
 // ---------------------------------------------------------------------------
 // Change notifications
 // ---------------------------------------------------------------------------
-/** `auto_import_seq` goes up whenever the folder auto-import added bookings */
-export const getNotificationsApi = async (limit = 50): Promise<{ items: AppNotification[]; unread: number; auto_import_seq?: number }> =>
-  (await apiClient.get<{ items: AppNotification[]; unread: number; auto_import_seq?: number }>('/notifications', { params: { limit }, timeout: 8000 })).data;
+/** `auto_import_seq` goes up whenever the folder auto-import added bookings, `booking_links_seq` whenever bookings
+ *  may have met new ePort vessel schedules (a lookup, a sync, a move, a restore) */
+type NotificationsPoll = { items: AppNotification[]; unread: number; auto_import_seq?: number; booking_links_seq?: number };
+export const getNotificationsApi = async (limit = 50): Promise<NotificationsPoll> =>
+  (await apiClient.get<NotificationsPoll>('/notifications', { params: { limit }, timeout: 8000 })).data;
 
 /** ids omitted = mark everything read */
 export const markNotificationsReadApi = async (ids?: number[]): Promise<void> => {

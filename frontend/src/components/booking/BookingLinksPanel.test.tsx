@@ -18,6 +18,24 @@ const mocked = vi.mocked(getBookingLinks);
 
 describe('BookingLinksPanel', () => {
 
+  it('fetches the links again when vessel schedules were saved, keeping the old ones on screen meanwhile', async () => {
+    const empty = { vessels: [], containers: [], gated_in: 0, qty: 1 };
+    const linked = { ...empty, vessels: [{ id: 2, site_id: 'GNL', vessel_name: 'EVER MILD', in_out_voyage: '1463-011E',
+      closing_time: '05:00 09/07/2026' } as any] };
+    mocked.mockReset().mockResolvedValueOnce(empty as any);
+    const props = { bookingId: 9, bookingNo: 'BK9', vessel: 'EVER MILD 1463-011E', labels };
+    const { rerender } = render(<BookingLinksPanel {...props} reloadKey={1} />);
+    expect(await screen.findByText(/Chưa có lịch\./)).toBeTruthy();
+
+    let answer: (v: any) => void = () => {};
+    mocked.mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+    rerender(<BookingLinksPanel {...props} reloadKey={2} />);
+    expect(screen.getByText(/Chưa có lịch\./)).toBeTruthy();    // no blank flash while it reloads
+    answer(linked);
+    expect(await screen.findByText('EVER MILD')).toBeTruthy();
+    expect(mocked).toHaveBeenCalledTimes(2);
+  });
+
   it("shows the booking's vessel schedule and containers with the gate-in count", async () => {
     mocked.mockResolvedValue({
       vessels: [{ id: 1, site_id: 'CTL', vessel_name: 'SHANGHAI VOYAGER', in_out_voyage: '2608N-2608N',

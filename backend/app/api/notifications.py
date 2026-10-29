@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from backend.app.core.database import (
     claim_os_notifications, clear_notifications, get_notification_settings, list_notifications,
-    mark_notifications_read, record_test_notification, set_notification_settings,
+    mark_notifications_read, record_test_notification, set_notification_settings, booking_links_seq,
 )
 from backend.app.services.change_detection import ALL_KINDS
 from backend.app.services.auto_import import import_seq
@@ -35,9 +35,11 @@ def _settings_payload() -> dict:
 
 @router.get("")
 def get_notifications(limit: int = Query(50, ge=1, le=500), unread_only: bool = Query(False)):
-    """Newest first, with the total number of unread ones. `auto_import_seq` goes up whenever the folder auto-import added
-    bookings (polled here so booking tables reload even with that notification switched off)."""
-    return {**list_notifications(limit, unread_only), "auto_import_seq": import_seq()}
+    """Newest first, with the total number of unread ones. Polled here so open screens reload even with the matching
+    notification switched off: `auto_import_seq` goes up whenever the folder auto-import added bookings,
+    `booking_links_seq` whenever bookings may have met new ePort vessel schedules."""
+    return {**list_notifications(limit, unread_only), "auto_import_seq": import_seq(),
+            "booking_links_seq": booking_links_seq()}
 
 
 @router.post("/mark-read")
