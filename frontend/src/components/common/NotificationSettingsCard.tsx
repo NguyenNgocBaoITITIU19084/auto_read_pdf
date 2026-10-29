@@ -15,6 +15,7 @@ type SettingKind = Exclude<NotificationKind, 'test' | 'vessel_schedule'>;
 const CONTAINER_KINDS: SettingKind[] = ['container_customs', 'container_ingate', 'container_outgate'];
 const VESSEL_KINDS: SettingKind[] = ['vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd'];
 const REMINDER_KINDS: SettingKind[] = ['booking_cutoff', 'morning_brief'];
+const IMPORT_KINDS: SettingKind[] = ['booking_auto_import'];
 
 /** Which changes raise a notification (and whether the OS may pop them up). Saved as soon as it is changed. */
 export const NotificationSettingsCard: React.FC = () => {
@@ -114,6 +115,8 @@ export const NotificationSettingsCard: React.FC = () => {
           <span className="basis-full text-[11px] text-slate-400 dark:text-slate-500">{s.briefTimeHint}</span>
         </label>
       </div>
+
+      {group(s.groupImport, IMPORT_KINDS)}
 
       <label className={`flex items-start gap-2 text-xs ${desktop ? 'text-slate-700 dark:text-slate-200 cursor-pointer' : 'text-slate-400 dark:text-slate-500'}`}>
         <input

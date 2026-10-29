@@ -581,6 +581,21 @@ def init_db():
             if not exists:
                 conn.execute(_COLOR_RULE_INSERT_SQL, _color_rule_params(r, now_str))
 
+        # PDFs the folder auto-import has handled, by content: a file is never read twice (see "Auto import")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS auto_import_files (
+                sha256 TEXT PRIMARY KEY,
+                file_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                collection_id INTEGER,
+                booking_id INTEGER,
+                booking_no TEXT,
+                message TEXT,
+                processed_at TEXT NOT NULL
+            );
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_auto_import_processed ON auto_import_files(processed_at);")
+
         # Create system_settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -3132,6 +3147,103 @@ def get_dashboard_summary(collection_id: int = None, now: datetime | None = None
                 "container_events": ev_dist
             }
         }
+
+
+# ---------------------------------------------------------------------------
+# Auto import (PDFs dropped into a watched folder)
+# ---------------------------------------------------------------------------
+AUTO_IMPORT_IMPORTED = "imported"
+AUTO_IMPORT_DUPLICATE = "duplicate"
+AUTO_IMPORT_NO_DATA = "no_data"
+AUTO_IMPORT_ERROR = "error"
+# Already in the folder when it was chosen: remembered so it is never imported, and not listed in the history
+AUTO_IMPORT_BASELINE = "baseline"
+AUTO_IMPORT_STATUSES = (AUTO_IMPORT_IMPORTED, AUTO_IMPORT_DUPLICATE, AUTO_IMPORT_NO_DATA, AUTO_IMPORT_ERROR,
+                        AUTO_IMPORT_BASELINE)
+# Files listed per category in one notification; the rest are counted
+AUTO_IMPORT_NOTIFY_LIST_MAX = 20
+
+
+def auto_import_known_hashes(hashes) -> set[str]:
+    clean = [h for h in hashes or [] if h]
+    found: set[str] = set()
+    with get_connection() as conn:
+        for chunk in _chunks(clean):
+            rows = conn.execute(f"SELECT sha256 FROM auto_import_files WHERE sha256 IN ({','.join('?' * len(chunk))});",
+                                tuple(chunk)).fetchall()
+            found.update(r[0] for r in rows)
+    return found
+
+
+def record_auto_import_file(sha256: str, file_name: str, status: str, collection_id: int | None = None,
+                            booking_id: int | None = None, booking_no: str = "", message: str = "") -> bool:
+    """Remembers a handled file; the first outcome stays (False when this content was already recorded)."""
+    if status not in AUTO_IMPORT_STATUSES:
+        raise ValueError(f"Unknown auto-import status: {status}")
+    with get_connection() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO auto_import_files (sha256, file_name, status, collection_id, booking_id, booking_no, "
+            "message, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
+            (sha256, file_name, status, collection_id, booking_id, booking_no or "", message or "", _now_str()))
+        return cur.rowcount > 0
+
+
+def list_auto_import_files(limit: int = 30) -> list[dict]:
+    """Newest first, without the files that were only remembered as already being in the folder."""
+    limit = max(1, min(int(limit or 30), 500))
+    with get_connection() as conn:
+        return _select_dicts(conn, "SELECT sha256, file_name, status, collection_id, booking_id, booking_no, message, "
+                                   "processed_at FROM auto_import_files WHERE status != ? "
+                                   "ORDER BY processed_at DESC, rowid DESC LIMIT ?;", (AUTO_IMPORT_BASELINE, limit))
+
+
+def forget_auto_import_file(sha256: str) -> bool:
+    """Lets that file be read again on the next scan (after the reason it was skipped has been dealt with)."""
+    with get_connection() as conn:
+        return conn.execute("DELETE FROM auto_import_files WHERE sha256 = ?;", (sha256,)).rowcount > 0
+
+
+def collection_exists(col_id) -> bool:
+    try:
+        col_id = int(col_id)
+    except (TypeError, ValueError):
+        return False
+    with get_connection() as conn:
+        return conn.execute("SELECT 1 FROM collections WHERE id = ?;", (col_id,)).fetchone() is not None
+
+
+def record_auto_import_notification(col_id: int, imported: list[dict], skipped: list[dict]) -> bool:
+    """One notification per scan: the bookings added and the files that need a hand (each {file, booking_no, status,
+    message}). Nothing when both are empty or the kind is switched off."""
+    if not imported and not skipped:
+        return False
+    if cd.BOOKING_AUTO_IMPORT not in get_notification_settings()["kinds"]:
+        return False
+    now = datetime.now(VN_TZ).replace(tzinfo=None)
+    stamp = now.strftime("%Y-%m-%d %H:%M:%S")
+    if imported:
+        title = f"Tự nhập {len(imported)} booking từ thư mục"
+        if skipped:
+            title += f", {len(skipped)} file cần xem lại"
+    else:
+        title = f"{len(skipped)} file PDF cần xem lại"
+    lines = [f"{i.get('booking_no') or '—'} · {i['file']}" for i in imported[:AUTO_IMPORT_NOTIFY_LIST_MAX]]
+    lines += [f"{s['file']}: {s.get('message') or s['status']}" for s in skipped[:AUTO_IMPORT_NOTIFY_LIST_MAX]]
+    nos = [i["booking_no"] for i in imported + skipped if i.get("booking_no")]
+    with get_connection() as conn:
+        _insert_notification(conn, col_id, {
+            "kind": cd.BOOKING_AUTO_IMPORT,
+            "entity_key": f"auto_import|{col_id}|{now.isoformat()}",
+            "title": title,
+            "old": "",
+            "new": "\n".join(lines),
+            "nav_tab": "booking",
+            "nav_query": nos[0] if len(set(nos)) == 1 else None,
+            "detail": {"count": len(imported), "skipped_count": len(skipped),
+                       "imported": imported[:AUTO_IMPORT_NOTIFY_LIST_MAX], "skipped": skipped[:AUTO_IMPORT_NOTIFY_LIST_MAX]},
+        }, NOTIFY_SOURCE_AUTO, stamp)
+        _trim_notifications(conn, now)
+    return True
 
 
 # ---------------------------------------------------------------------------

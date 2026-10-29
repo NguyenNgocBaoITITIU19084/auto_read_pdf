@@ -5,6 +5,7 @@ const {
   Notification,
   Tray,
   clipboard,
+  dialog,
   ipcMain,
   nativeTheme,
   powerMonitor,
@@ -385,6 +386,15 @@ function registerIpc() {
     if (!isFromMainWindow(event)) throw new Error('Forbidden');
     if (typeof url !== 'string' || !isHttpUrl(url)) throw new Error('Only http/https URLs are allowed');
     await shell.openExternal(url);
+  });
+
+  ipcMain.handle('select-folder', async (event, defaultPath) => {
+    if (!isFromMainWindow(event)) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : undefined,
+    });
+    return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
   });
 
   ipcMain.handle('read-clipboard-image', (event) => {

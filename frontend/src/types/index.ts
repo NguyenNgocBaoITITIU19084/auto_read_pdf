@@ -435,6 +435,8 @@ export interface ElectronAPI {
   getAppMetrics?: () => Promise<AppMetrics>;
   /** Clear the UI session caches → working-set bytes before/after. */
   clearRendererCache?: () => Promise<{ before: number; after: number }>;
+  /** Desktop only: native folder picker → the chosen path, or null when cancelled. */
+  selectFolder?: (defaultPath?: string) => Promise<string | null>;
   /** Restart the backend owned by Electron. */
   restartBackend?: () => Promise<{ ok: boolean; reason?: 'not_owned' | 'busy' | 'failed' }>;
 }
@@ -532,6 +534,8 @@ export type NotificationKind =
   | 'booking_cutoff'
   /** the daily summary of today's cut-offs (detail.today / late / tomorrow / items) */
   | 'morning_brief'
+  /** PDFs read from the watched folder (detail.imported / detail.skipped) */
+  | 'booking_auto_import'
   /** the sample sent by the "send a test" button */
   | 'test';
 
@@ -541,6 +545,14 @@ export interface BriefItem {
   time: string;
   vessel: string;
   collection: string;
+}
+
+/** One file of an auto-import notification */
+export interface AutoImportNoticeItem {
+  file: string;
+  booking_no: string;
+  status?: AutoImportStatus;
+  message?: string;
 }
 
 /** One changed time inside a 'vessel_schedule' notification (old/new as dd/mm/yyyy HH:MM) */
@@ -567,12 +579,62 @@ export interface AppNotification {
     // morning_brief
     date?: string; today?: number; late?: number; tomorrow?: number; vessels_today?: number; items?: BriefItem[];
     collections?: { name: string; today: number; late: number; tomorrow: number }[];
+    // booking_auto_import (count = bookings added)
+    skipped_count?: number; imported?: AutoImportNoticeItem[]; skipped?: AutoImportNoticeItem[];
   };
   nav_tab: 'vessel' | 'container' | 'booking' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
   read: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Auto import (booking PDFs saved into a watched folder)
+// ---------------------------------------------------------------------------
+export type AutoImportStatus = 'imported' | 'duplicate' | 'no_data' | 'error';
+
+export interface AutoImportSettings {
+  enabled: boolean;
+  folder: string;
+  /** the folder exists and can be read */
+  folder_ok: boolean;
+  collection_id: number | null;
+  collection_ok: boolean;
+  last_scan_at: string | null;
+  last_result: { status: 'ok' | 'error'; imported: number; skipped: number; waiting: number; message: string } | null;
+  /** When the folder is scanned: every `interval_minutes`, or at the fixed `times` (HH:MM, Vietnam time) */
+  mode: AutoSyncMode;
+  interval_minutes: number;
+  times: string[];
+  /** dd/mm/yyyy HH:MM:SS, null while switched off */
+  next_scan_at: string | null;
+}
+
+export interface AutoImportSchedule {
+  mode: AutoSyncMode;
+  interval_minutes: number;
+  times: string[];
+}
+
+export interface AutoImportFile {
+  sha256: string;
+  file_name: string;
+  status: AutoImportStatus;
+  collection_id: number | null;
+  booking_id: number | null;
+  booking_no: string;
+  message: string;
+  processed_at: string;
+}
+
+export interface AutoImportRunResult {
+  status: 'ok' | 'error' | 'busy' | 'disabled';
+  imported: AutoImportNoticeItem[];
+  skipped: AutoImportNoticeItem[];
+  waiting: number;
+  message: string;
+  settings: AutoImportSettings;
 }
 
 // ---------------------------------------------------------------------------

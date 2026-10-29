@@ -40,7 +40,7 @@ def test_collections_crud():
     assert res_del.status_code == 200
     assert res_del.json()["status"] == "success"
 
-@patch("backend.app.api.bookings.extract_booking_data")
+@patch("backend.app.services.extractor.extract_booking_data")
 def test_bookings_upload_and_list(mock_extract):
     mock_extract.return_value = {
         "STT": "",

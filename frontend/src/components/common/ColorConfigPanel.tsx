@@ -3,7 +3,6 @@ import {
   Palette, Plus, Edit2, Trash2, RotateCcw, 
   Check, Eye, Sparkles, Filter, X
 } from 'lucide-react';
-import { Modal } from './Modal';
 import { useApp } from '../../context/AppContext';
 import { ColorRule, MatchType, TargetTable } from '../../types';
 import { COLOR_PRESETS, getColorPreset } from '../../utils/colorPresets';
@@ -19,12 +18,8 @@ const LIST_FILTERS: { value: TargetTable | 'every'; label: string }[] = [
   { value: 'all', label: 'Mọi bảng' },
 ];
 
-interface ColorConfigModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
-
-export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onClose }) => {
+/** Color rules editor (a section of the Settings center): add / edit rules and the list of existing ones. */
+export const ColorConfigPanel: React.FC = () => {
   const { 
     t, colorRules, saveColorRule, deleteColorRuleById, 
     toggleColorRule, resetColorRulesDefault 
@@ -134,7 +129,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
 
   useEffect(() => {
     setVisibleCount(RULES_PAGE_SIZE);
-  }, [listFilter, isOpen]);
+  }, [listFilter]);
 
   const visibleRules = filteredRules.length > visibleCount ? filteredRules.slice(0, visibleCount) : filteredRules;
 
@@ -230,8 +225,7 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
     : (matchValue.trim() || 'Giá trị mẫu');
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t.common.colorConfig} maxWidth="max-w-4xl">
-      <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+      <div className="space-y-4">
         {/* Rule Form (Add / Edit) */}
         <form onSubmit={handleSubmit} className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 space-y-3.5 shadow-2xs">
           <div className="flex items-center justify-between">
@@ -656,18 +650,6 @@ export const ColorConfigModal: React.FC<ColorConfigModalProps> = ({ isOpen, onCl
             </div>
           )}
         </div>
-
-        {/* Footer */}
-        <div className="flex justify-end pt-3 border-t border-slate-100 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl transition-all"
-          >
-            {t.common.close}
-          </button>
-        </div>
       </div>
-    </Modal>
   );
 };

@@ -2,7 +2,6 @@ import base64
 import os
 import asyncio
 import logging
-import tempfile
 from typing import List, Optional, Dict, Any, Tuple
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
@@ -15,7 +14,9 @@ from backend.app.core.database import (
     get_bookings_calendar, get_booking_links,
 )
 from backend.app.schemas.models import BatchIdsRequest
-from backend.app.services.extractor import extract_booking_data, has_booking_fields
+from backend.app.services.extractor import (
+    has_booking_fields, extract_booking_from_pdf_bytes as _extract_pdf_bytes, resolve_vessel_etd as _resolve_vessel_etd,
+)
 from backend.app.services.image_extractor import extract_booking_from_image
 from backend.app.services.booking_validation import normalize_manual_booking
 from backend.app.services.pdf_preview import render_pdf_pages, render_pdf_for_ocr
@@ -52,27 +53,6 @@ class SetStatusRequest(BaseModel):
 def _duplicate_warnings(col_id: int, booking_no: str, exclude_id: Optional[int]) -> List[str]:
     dups = find_duplicate_booking_ids(col_id, booking_no, exclude_id)
     return [f"Booking No '{booking_no.strip()}' đã có trong bộ sưu tập ({len(dups)} dòng)"] if dups else []
-
-def _resolve_vessel_etd(data: dict) -> None:
-    """Vessel/ETD = Pre Carrier/ETD_Pre if present, else Trunk Vessel/ETD_Trunk."""
-    vessel = data.get("Pre Carrier", "null")
-    etd = data.get("ETD_Pre", "null")
-    if vessel == "null" or not vessel:
-        vessel = data.get("Trunk Vessel", "null")
-        etd = data.get("ETD_Trunk", "null")
-    if vessel != "null" and vessel:
-        data["Vessel"] = vessel
-        data["ETD"] = etd
-
-def _extract_pdf_bytes(file_bytes: bytes) -> dict:
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
-        tmp_pdf.write(file_bytes)
-        tmp_pdf_path = tmp_pdf.name
-    try:
-        return extract_booking_data(tmp_pdf_path)
-    finally:
-        if os.path.exists(tmp_pdf_path):
-            os.remove(tmp_pdf_path)
 
 def _process_uploads(collection_id: int, uploads: List[Tuple[str, bytes]]) -> List[dict]:
     """Blocking work (pdfplumber / Gemini / OCR / sqlite) — run in a worker thread."""

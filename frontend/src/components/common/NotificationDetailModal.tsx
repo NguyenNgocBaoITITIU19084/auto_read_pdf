@@ -4,6 +4,7 @@ import { useNotifications } from '../../context/NotificationsContext';
 import { notificationChange, notificationChanges, notificationTitle } from '../../utils/notifications';
 import { Modal } from './Modal';
 import { CutoffReminderDetail, MorningBriefDetail, formatStamp } from './ReminderViews';
+import { AutoImportDetail } from './AutoImportDetail';
 import { VesselChangeList } from './VesselChangeList';
 import type { TabId } from './Tabs';
 
@@ -24,14 +25,15 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   const changes = notificationChanges(item, t);
   const isBrief = item.kind === 'morning_brief';
   const isCutoff = item.kind === 'booking_cutoff';
-  const isReminder = isBrief || isCutoff;
+  const isAutoImport = item.kind === 'booking_auto_import';
+  const isReminder = isBrief || isCutoff || isAutoImport;
   const rows: [string, string | undefined][] = [
     [d.vessel, isReminder ? undefined : info.vessel],
     [d.voyage, info.voyage],
     [d.container, info.container],
     [d.event, info.event_type],
     [d.bookings, !isReminder && info.bookings && info.bookings.length > 0 ? info.bookings.join(', ') : undefined],
-    [d.source, item.source === 'auto_sync' ? t.notifications.sourceAuto : t.notifications.sourceManual],
+    [d.source, isAutoImport ? undefined : item.source === 'auto_sync' ? t.notifications.sourceAuto : t.notifications.sourceManual],
     [d.time, formatStamp(item.created_at)],
   ];
 
@@ -52,6 +54,8 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           <MorningBriefDetail item={item} />
         ) : isCutoff ? (
           <CutoffReminderDetail item={item} />
+        ) : isAutoImport ? (
+          <AutoImportDetail item={item} />
         ) : changes.length > 0 ? (
           <VesselChangeList item={item} variant="full" />
         ) : item.old_value ? (

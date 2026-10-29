@@ -9,6 +9,7 @@ from backend.app.core.database import (
     mark_notifications_read, record_test_notification, set_notification_settings,
 )
 from backend.app.services.change_detection import ALL_KINDS
+from backend.app.services.auto_import import import_seq
 
 logger = logging.getLogger("backend.api.notifications")
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
@@ -34,8 +35,9 @@ def _settings_payload() -> dict:
 
 @router.get("")
 def get_notifications(limit: int = Query(50, ge=1, le=500), unread_only: bool = Query(False)):
-    """Newest first, with the total number of unread ones."""
-    return list_notifications(limit, unread_only)
+    """Newest first, with the total number of unread ones. `auto_import_seq` goes up whenever the folder auto-import added
+    bookings (polled here so booking tables reload even with that notification switched off)."""
+    return {**list_notifications(limit, unread_only), "auto_import_seq": import_seq()}
 
 
 @router.post("/mark-read")

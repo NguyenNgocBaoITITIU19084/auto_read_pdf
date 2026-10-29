@@ -8,6 +8,7 @@ import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useMobileBridge } from '../../context/MobileBridgeContext';
 import { useImageQueue } from '../../context/ImageQueueContext';
+import { useNotifications } from '../../context/NotificationsContext';
 import { Booking, BookingStatus, BOOKING_STATUSES, PageResult, TableQuery } from '../../types';
 import {
   getBookings, getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers,
@@ -568,6 +569,17 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     if (files.length > 0) queueFiles(files, 'paste');
     onPasteRequestHandled?.(id);
   }, [pasteRequest, queueFiles, onPasteRequestHandled]);
+
+  // Bookings added by the folder auto-import (seen by the notification poll): refresh this table
+  const { autoImportSeq } = useNotifications();
+  const seenAutoImport = useRef(autoImportSeq);
+  useEffect(() => {
+    const before = seenAutoImport.current;  // null: the first poll only tells where the count stands
+    if (autoImportSeq === before) return;
+    seenAutoImport.current = autoImportSeq;
+    if (before !== null && autoImportSeq !== null) void loadData('refresh');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoImportSeq]);
 
   // Bookings saved from the reading queue (any tab, phone photos included): refresh this table
   const seenSavedVersion = useRef(imageQueue.savedVersion);

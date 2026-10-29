@@ -5,7 +5,7 @@ import { translations } from '../../i18n/translations';
 const addToast = vi.fn();
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
 
-const ALL = ['container_customs', 'container_ingate', 'container_outgate', 'vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd', 'booking_cutoff', 'morning_brief'];
+const ALL = ['container_customs', 'container_ingate', 'container_outgate', 'vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd', 'booking_cutoff', 'morning_brief', 'booking_auto_import'];
 const refresh = vi.fn();
 vi.mock('../../context/NotificationsContext', () => ({ useNotifications: () => ({ refresh }) }));
 const sendTest = vi.fn();
@@ -53,7 +53,7 @@ describe('NotificationSettingsCard', () => {
     render(<NotificationSettingsCard />);
     const box = await screen.findByLabelText(k.container_outgate);
     await waitFor(() => expect(box).toBeChecked());
-    expect(screen.getAllByRole('checkbox')).toHaveLength(11);         // 10 kinds + the OS popup switch
+    expect(screen.getAllByRole('checkbox')).toHaveLength(12);         // 11 kinds + the OS popup switch
   });
 
   it('saves the new selection as soon as a kind is toggled', async () => {

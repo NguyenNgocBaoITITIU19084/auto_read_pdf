@@ -1,27 +1,19 @@
 import React, { useState } from 'react';
 import { Download, Upload, Database, ScrollText, FileArchive, FolderOpen } from 'lucide-react';
-import { Modal } from './Modal';
 import { useApp } from '../../context/AppContext';
 import { useConfirm } from '../../hooks/useConfirm';
-import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
-import { AISettingsCard } from './AISettingsCard';
-import { UpdateSettingsCard } from './UpdateSettingsCard';
-import { NotificationSettingsCard } from './NotificationSettingsCard';
 import { getBackupDb, restoreBackupDb, RestoreMode, downloadLogsZipApi } from '../../services/api';
 import { errorMessage } from '../vessel/tableHelpers';
 
-interface BackupModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  /** Navigate to the standalone Logs tab (closes this modal too). Falls back to no-op button behavior if omitted. */
+interface DataBackupPanelProps {
+  /** Called after a backup was restored (the Settings center closes, the app shows the restored data) */
+  onRestored?: () => void;
+  /** Navigate to the standalone Logs tab. The button is disabled if omitted. */
   onNavigateToLogs?: () => void;
 }
 
-export const BackupModal: React.FC<BackupModalProps> = ({
-  isOpen,
-  onClose,
-  onNavigateToLogs,
-}) => {
+/** Settings center section: JSON backup / restore of the whole database and the system logs. */
+export const DataBackupPanel: React.FC<DataBackupPanelProps> = ({ onRestored, onNavigateToLogs }) => {
   const { t, addToast, refreshCollections } = useApp();
   const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
@@ -87,7 +79,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
       await restoreBackupDb(jsonData, restoreMode);
       addToast(t.common.success, 'success');
       await refreshCollections();
-      onClose();
+      onRestored?.();
     } catch (err: any) {
       addToast(err?.response?.data?.detail || err.message || 'Invalid JSON backup file', 'error');
     } finally {
@@ -97,20 +89,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t.common.settings} maxWidth="max-w-xl">
-      <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
-        {/* Gemini Vision AI & OCR Configuration */}
-        <AISettingsCard />
-
-        {/* Auto Sync & Interval Configuration */}
-        <AutoSyncSettingsCard />
-
-        {/* Which vessel / container changes raise notifications */}
-        <NotificationSettingsCard />
-
-        {/* App auto-update (Windows) */}
-        <UpdateSettingsCard />
-
+      <div className="space-y-4">
         {/* Export Backup JSON */}
         <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl">
           <div className="flex items-center gap-3 mb-2">
@@ -222,6 +201,5 @@ export const BackupModal: React.FC<BackupModalProps> = ({
           </div>
         </div>
       </div>
-    </Modal>
   );
 };

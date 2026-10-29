@@ -10,6 +10,25 @@ export const translations = {
       container: "ePort SNP (Tra cứu Cont)",
       logs: "Nhật ký"
     },
+    settingsCenter: {
+      title: "Cấu hình",
+      open: "Mở Cấu hình (giao diện, đồng bộ, tự nhập PDF, thông báo, màu sắc, sao lưu)",
+      sections: {
+        general: { label: "Giao diện & ứng dụng", desc: "Ngôn ngữ, chế độ sáng/tối và cập nhật ứng dụng" },
+        sync: { label: "Đồng bộ ePort", desc: "Lịch tự động tra cứu lại lịch tàu và container trên ePort" },
+        autoImport: { label: "Tự nhập PDF", desc: "Tự đọc PDF booking được lưu vào thư mục theo dõi" },
+        notifications: { label: "Thông báo", desc: "Chọn thay đổi nào sẽ báo, giờ gửi bản tin sáng" },
+        colors: { label: "Màu sắc", desc: "Tô màu dòng / ô theo giá trị trong bảng" },
+        reading: { label: "Đọc dữ liệu (AI & OCR)", desc: "Khoá Gemini và cách đọc ảnh, PDF scan" },
+        data: { label: "Dữ liệu & sao lưu", desc: "Sao lưu, khôi phục và nhật ký hệ thống" },
+      },
+      language: "Ngôn ngữ",
+      languageDesc: "Ngôn ngữ hiển thị của toàn bộ ứng dụng",
+      theme: "Chế độ hiển thị",
+      themeDesc: "Giao diện sáng hoặc tối",
+      themeLight: "Sáng",
+      themeDark: "Tối",
+    },
     dashboard: {
       title: "Bảng Điều Hành Logistics Tổng Quan",
       scopeAll: "Toàn bộ hệ thống (Tất cả BST)",
@@ -159,6 +178,13 @@ export const translations = {
         vessel_etd: "Tàu đổi lịch rời bến (ETD)",
         booking_cutoff: "Nhắc cut-off booking (còn 24 giờ, 6 giờ, 2 giờ)",
         morning_brief: "Bản tin buổi sáng",
+        booking_auto_import: "Booking tự nhập từ thư mục theo dõi",
+      },
+      autoImport: {
+        imported: "Đã thêm vào bộ sưu tập",
+        skipped: "Cần xem lại",
+        more: "và {count} file khác",
+        status: { imported: "Đã thêm", duplicate: "Trùng Booking No", no_data: "Không đọc được", error: "Lỗi" },
       },
       reminder: {
         bookingCount: "{count} booking",
@@ -198,6 +224,9 @@ export const translations = {
         vessel_schedule: "{name} đã đổi",
         booking_cutoff: "Cut-off còn {hours} giờ: {name}",
         morning_brief: "Bản tin sáng {date}",
+        booking_auto_import: "Tự nhập {count} booking từ thư mục",
+        booking_auto_import_skipped: "Tự nhập {count} booking, {skipped} file cần xem lại",
+        booking_auto_import_only_skipped: "{skipped} file PDF cần xem lại",
       },
       changeLabels: {
         vessel_etd: "ETD",
@@ -213,6 +242,7 @@ export const translations = {
         groupContainer: "Container",
         groupVessel: "Tàu",
         groupReminder: "Nhắc việc",
+        groupImport: "Tự nhập booking",
         briefTime: "Giờ gửi bản tin",
         briefTimeHint: "Nếu lúc đó app đang tắt, bản tin vẫn được gửi khi mở app trong vòng 5 giờ sau.",
         os: "Hiện popup của hệ điều hành (kể cả khi app thu nhỏ xuống khay)",
@@ -394,7 +424,7 @@ export const translations = {
       watchlist: "Danh sách theo dõi",
       autoSync: "Tự động đồng bộ",
       autoSyncDesc: "Tự động tra cứu lại sau mỗi 10 phút",
-      settings: "Cài đặt & Sao lưu",
+      settings: "Cấu hình",
       backup: "Sao lưu DB (JSON)",
       restore: "Khôi phục DB (JSON)",
       restoreDesc: "Nhập file JSON sao lưu để phục hồi dữ liệu vào hệ thống.",
@@ -560,8 +590,6 @@ export const translations = {
       description: "Tự động truy vấn ePort làm mới toàn bộ danh sách theo dõi.",
       on: "ON",
       off: "OFF",
-      enabledButton: "ĐANG BẬT",
-      disabledButton: "BẬT NGAY",
       modeInterval: "Theo chu kỳ",
       modeTimes: "Theo giờ cố định",
       intervalLabel: "Chu kỳ làm mới (phút):",
@@ -762,7 +790,7 @@ export const translations = {
         resume: "Tiếp tục",
         pausedUser: "Đã tạm dừng đọc ảnh (PDF vẫn được đọc). Ảnh đang đọc vẫn sẽ hoàn tất.",
         pausedQuota: "Gemini đã hết hạn mức (quota) nên tạm dừng đọc ảnh (PDF vẫn được đọc). Chờ một lúc rồi bấm Tiếp tục.",
-        pausedInvalidKey: "Gemini API key không hợp lệ hoặc không có quyền. Kiểm tra key trong Cài đặt AI rồi bấm Tiếp tục.",
+        pausedInvalidKey: "Gemini API key không hợp lệ hoặc không có quyền. Kiểm tra key trong Cấu hình › Đọc dữ liệu rồi bấm Tiếp tục.",
         pausedUnavailable: "Gemini đang quá tải (lỗi tạm thời từ Google) nên hàng đợi tạm dừng. Chờ ít phút rồi bấm Tiếp tục.",
         noKey: "Chưa cấu hình Gemini API key: ảnh được đọc bằng OCR offline (kém chính xác hơn, nên kiểm tra kỹ từng ảnh).",
         saveAll: "Lưu tất cả file Thành công ({count})",
@@ -1115,7 +1143,7 @@ export const translations = {
         resume: "Tiếp tục",
         pausedUser: "Đã tạm dừng. Ảnh đang đọc vẫn sẽ hoàn tất.",
         pausedQuota: "Gemini đã hết hạn mức (quota) nên hàng đợi tạm dừng. Chờ một lúc rồi bấm Tiếp tục.",
-        pausedInvalidKey: "Gemini API key không hợp lệ hoặc không có quyền. Kiểm tra key trong Cài đặt AI rồi bấm Tiếp tục.",
+        pausedInvalidKey: "Gemini API key không hợp lệ hoặc không có quyền. Kiểm tra key trong Cấu hình › Đọc dữ liệu rồi bấm Tiếp tục.",
         pausedUnavailable: "Gemini đang quá tải (lỗi tạm thời từ Google) nên hàng đợi tạm dừng. Chờ ít phút rồi bấm Tiếp tục.",
         noKey: "Chưa cấu hình Gemini API key: ảnh được đọc bằng OCR offline (kém chính xác hơn, nên kiểm tra kỹ từng ảnh).",
         retry: "Đọc lại",
@@ -1312,7 +1340,7 @@ export const translations = {
         },
         reminderSettings: {
           title: "Cài đặt nhắc việc",
-          desc: "Trong Cài đặt & Sao lưu, mục Thông báo thay đổi → Nhắc việc: bật/tắt nhắc cut-off, bản tin sáng và chọn giờ gửi bản tin. Nhắc việc chạy khi app đang mở."
+          desc: "Trong Cấu hình › Thông báo → Nhắc việc: bật/tắt nhắc cut-off, bản tin sáng và chọn giờ gửi bản tin. Nhắc việc chạy khi app đang mở."
         },
         helpTour: {
           title: "Xem lại bất cứ lúc nào",
@@ -1329,6 +1357,25 @@ export const translations = {
       vessel: "ePort SNP (Vessel Schedule)",
       container: "ePort SNP (Container Tracking)",
       logs: "Logs"
+    },
+    settingsCenter: {
+      title: "Settings",
+      open: "Open Settings (appearance, sync, PDF auto-import, notifications, colors, backup)",
+      sections: {
+        general: { label: "Appearance & app", desc: "Language, light/dark mode and app updates" },
+        sync: { label: "ePort sync", desc: "When vessel and container data is looked up again on ePort" },
+        autoImport: { label: "PDF auto-import", desc: "Booking PDFs saved into the watched folder are read on their own" },
+        notifications: { label: "Notifications", desc: "Which changes notify you, morning brief time" },
+        colors: { label: "Colors", desc: "Highlight rows / cells by their values" },
+        reading: { label: "Data reading (AI & OCR)", desc: "Gemini key and how images / scanned PDFs are read" },
+        data: { label: "Data & backup", desc: "Backup, restore and system logs" },
+      },
+      language: "Language",
+      languageDesc: "Display language of the whole app",
+      theme: "Display mode",
+      themeDesc: "Light or dark interface",
+      themeLight: "Light",
+      themeDark: "Dark",
     },
     dashboard: {
       title: "Logistics Operations Dashboard",
@@ -1479,6 +1526,13 @@ export const translations = {
         vessel_etd: "Vessel ETD changed",
         booking_cutoff: "Booking cut-off reminders (24h, 6h, 2h before)",
         morning_brief: "Morning brief",
+        booking_auto_import: "Bookings imported from the watched folder",
+      },
+      autoImport: {
+        imported: "Added to the collection",
+        skipped: "To check",
+        more: "and {count} more file(s)",
+        status: { imported: "Added", duplicate: "Booking No exists", no_data: "Could not read", error: "Error" },
       },
       reminder: {
         bookingCount: "{count} bookings",
@@ -1518,6 +1572,9 @@ export const translations = {
         vessel_schedule: "{name} changed",
         booking_cutoff: "Cut-off in {hours}h: {name}",
         morning_brief: "Morning brief {date}",
+        booking_auto_import: "Imported {count} booking(s) from the folder",
+        booking_auto_import_skipped: "Imported {count} booking(s), {skipped} file(s) to check",
+        booking_auto_import_only_skipped: "{skipped} PDF file(s) to check",
       },
       changeLabels: {
         vessel_etd: "ETD",
@@ -1533,6 +1590,7 @@ export const translations = {
         groupContainer: "Containers",
         groupVessel: "Vessels",
         groupReminder: "Reminders",
+        groupImport: "Booking auto-import",
         briefTime: "Brief time",
         briefTimeHint: "If the app is closed then, the brief still goes out when it opens within the next 5 hours.",
         os: "Show operating-system popups (also while the app is minimized to the tray)",
@@ -1714,7 +1772,7 @@ export const translations = {
       watchlist: "Watchlist",
       autoSync: "Auto Sync",
       autoSyncDesc: "Automatically poll every 10 minutes",
-      settings: "Settings & Backup",
+      settings: "Settings",
       backup: "Backup DB (JSON)",
       restore: "Restore DB (JSON)",
       restoreDesc: "Import a JSON backup file to restore data.",
@@ -1880,8 +1938,6 @@ export const translations = {
       description: "Automatically re-query ePort for every watchlist item.",
       on: "ON",
       off: "OFF",
-      enabledButton: "ENABLED",
-      disabledButton: "TURN ON",
       modeInterval: "Every N minutes",
       modeTimes: "Fixed times",
       intervalLabel: "Refresh interval (minutes):",
@@ -2632,7 +2688,7 @@ export const translations = {
         },
         reminderSettings: {
           title: "Reminder settings",
-          desc: "In Settings & Backup, Change notifications → Reminders: turn cut-off reminders and the morning brief on or off and pick the brief time. Reminders run while the app is open."
+          desc: "In Settings › Notifications → Reminders: turn cut-off reminders and the morning brief on or off and pick the brief time. Reminders run while the app is open."
         },
         helpTour: {
           title: "Replay any time",

@@ -21,6 +21,7 @@ from backend.app.core.database import (
 from backend.app.services.change_detection import extra_gate_rows
 from backend.app.services.eport_client import search_vessels_detailed, search_containers
 from backend.app.core.logging_setup import purge_old_logs
+from backend.app.services import auto_import
 
 logger = logging.getLogger("backend.background_tasks")
 
@@ -32,6 +33,10 @@ LOG_RETENTION_STARTUP_DELAY_SECONDS = 10
 REMINDER_JOB_ID = "reminders"
 REMINDER_INTERVAL_MINUTES = 5
 REMINDER_STARTUP_DELAY_SECONDS = 30
+AUTO_IMPORT_JOB_ID = "auto_import"
+AUTO_IMPORT_RECHECK_JOB_ID = "auto_import_recheck"
+# A file still being written at a scheduled scan is looked at again this soon, not at the next slot (maybe hours later)
+AUTO_IMPORT_RECHECK_SECONDS = 30
 DEFAULT_INTERVAL_MINUTES = 10
 MAX_INTERVAL_MINUTES = 10080  # 1 week
 VALID_MODES = ("interval", "times")
@@ -464,6 +469,57 @@ def register_reminder_job(startup_delay_seconds: float = REMINDER_STARTUP_DELAY_
         run_at = datetime.now(VN_TZ) + timedelta(seconds=max(0, startup_delay_seconds))
         scheduler.add_job(_run_reminders, DateTrigger(run_date=run_at, timezone=VN_TZ),
                           id="reminders_kick", name="reminders_kick", **JOB_OPTIONS)
+
+
+async def _run_auto_import(recheck: bool = True):
+    try:
+        result = await asyncio.to_thread(auto_import.scan_once)
+    except Exception:
+        logger.exception("Auto import scan failed")
+        return
+    if recheck and result.get("waiting"):
+        _schedule_auto_import_recheck()
+
+
+def _schedule_auto_import_recheck():
+    """One extra scan shortly after, unless the next scheduled one comes first (the recheck itself never asks again)."""
+    run_at = datetime.now(VN_TZ) + timedelta(seconds=AUTO_IMPORT_RECHECK_SECONDS)
+    job = scheduler.get_job(AUTO_IMPORT_JOB_ID)
+    if job and job.next_run_time and job.next_run_time <= run_at:
+        return
+    scheduler.add_job(_run_auto_import, DateTrigger(run_date=run_at, timezone=VN_TZ), kwargs={"recheck": False},
+                      id=AUTO_IMPORT_RECHECK_JOB_ID, name="auto_import_recheck", **JOB_OPTIONS)
+
+
+def register_auto_import_job():
+    """Schedules the folder scan as the user chose it (every N minutes / at fixed times). Called at startup and after
+    each settings change; while the auto import is off there is no job at all."""
+    setup_scheduler()
+    _remove_job(AUTO_IMPORT_JOB_ID)
+    _remove_job(AUTO_IMPORT_RECHECK_JOB_ID)
+    settings = auto_import.get_settings()
+    if not settings["enabled"]:
+        return
+    try:
+        trigger = build_trigger(settings["mode"], settings["interval_minutes"], settings["times"])
+    except ValueError:
+        logger.warning("Auto import: saved schedule is invalid, scanning every %s minutes",
+                       auto_import.DEFAULT_INTERVAL_MINUTES)
+        trigger = build_trigger("interval", auto_import.DEFAULT_INTERVAL_MINUTES, [])
+    scheduler.add_job(_run_auto_import, trigger, id=AUTO_IMPORT_JOB_ID, name="auto_import", **JOB_OPTIONS)
+
+
+def auto_import_next_run() -> str | None:
+    """When the folder is scanned next (dd/mm/yyyy HH:MM:SS, Vietnam time), None while the auto import is off."""
+    times = []
+    for job_id in (AUTO_IMPORT_JOB_ID, AUTO_IMPORT_RECHECK_JOB_ID):
+        try:
+            job = scheduler.get_job(job_id)
+        except Exception:
+            job = None
+        if job and job.next_run_time:
+            times.append(job.next_run_time)
+    return min(times).astimezone(VN_TZ).strftime(DATETIME_FMT) if times else None
 
 
 def shutdown_scheduler():

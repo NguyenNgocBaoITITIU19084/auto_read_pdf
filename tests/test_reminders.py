@@ -146,7 +146,7 @@ def test_new_kinds_are_on_for_settings_saved_before_them():
     db.set_system_setting("notify_kinds", json.dumps(["container_customs"]))
     db.set_system_setting("notify_kinds_known", "")
     kinds = db.get_notification_settings()["kinds"]
-    assert kinds == {"container_customs", cd.BOOKING_CUTOFF, cd.MORNING_BRIEF}
+    assert kinds == {"container_customs", cd.BOOKING_CUTOFF, cd.MORNING_BRIEF, cd.BOOKING_AUTO_IMPORT}
     db.set_notification_settings(["container_customs"], True)   # now offered and left off
     assert db.get_notification_settings()["kinds"] == {"container_customs"}
 

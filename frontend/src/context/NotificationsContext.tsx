@@ -25,6 +25,8 @@ export interface NotificationsValue {
   /** Opens the detail dialog and marks the notification read */
   openDetail: (id: number) => void;
   closeDetail: () => void;
+  /** Goes up whenever the folder auto-import added bookings (null until the first poll) */
+  autoImportSeq: number | null;
 }
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
@@ -38,6 +40,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const { addToast } = useToastActions();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unread, setUnread] = useState(0);
+  const [autoImportSeq, setAutoImportSeq] = useState<number | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
 
   const tRef = useRef(t);
@@ -72,6 +75,7 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
       if (!mountedRef.current) return;
       setItems(res.items);
       setUnread(res.unread);
+      setAutoImportSeq(res.auto_import_seq ?? 0);
       const maxId = res.items.reduce((m, n) => Math.max(m, n.id), 0);
       const seen = seenMaxRef.current;
       if (seen !== null && document.visibilityState === 'visible') {
@@ -183,8 +187,8 @@ export const NotificationsProvider: React.FC<{ children: React.ReactNode }> = ({
   const closeDetail = useCallback(() => setDetailId(null), []);
 
   const value = useMemo<NotificationsValue>(
-    () => ({ items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail }),
-    [items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail]
+    () => ({ items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail, autoImportSeq }),
+    [items, unread, refresh, markRead, markAllRead, clearRead, detailId, openDetail, closeDetail, autoImportSeq]
   );
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
 };

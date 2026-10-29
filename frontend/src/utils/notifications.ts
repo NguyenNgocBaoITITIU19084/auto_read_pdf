@@ -20,9 +20,22 @@ export function notificationTitle(n: AppNotification, t: Translations): string {
     return tf(t.notifications.titles.booking_cutoff, { hours: d.hours, name });
   }
   if (n.kind === 'morning_brief' && d.date) return tf(t.notifications.titles.morning_brief, { date: d.date.slice(0, 5) });
+  if (n.kind === 'booking_auto_import') {
+    const titles = t.notifications.titles;
+    const vars = { count: d.count || 0, skipped: d.skipped_count || 0 };
+    if (!vars.count) return tf(titles.booking_auto_import_only_skipped, vars);
+    return tf(vars.skipped ? titles.booking_auto_import_skipped : titles.booking_auto_import, vars);
+  }
   const template = (t.notifications.titles as Record<string, string>)[n.kind];
   const subject = notificationSubject(n);
   return template && subject ? tf(template, { name: subject }) : n.title;
+}
+
+/** One line for the bell: the bookings an auto-import added, else the files it could not add. */
+export function autoImportSummary(n: AppNotification): string {
+  const d = n.detail || {};
+  const nos = (d.imported || []).map((i) => i.booking_no || i.file);
+  return (nos.length ? nos : (d.skipped || []).map((i) => i.file)).join(', ');
 }
 
 /** The changed times of a grouped vessel notification, with localized labels ([] for any other kind). */

@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlarmClock, Sunrise, Bell, BellOff, Box, CheckCheck, Clock, LogIn, LogOut, Ship, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlarmClock, Sunrise, Bell, FolderInput, BellOff, Box, CheckCheck, Clock, LogIn, LogOut, Ship, ShieldCheck, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../context/NotificationsContext';
 import { AppNotification, NotificationKind } from '../../types';
 import { formatTimeAgo } from '../../utils/formatters';
-import { notificationChange, notificationTitle } from '../../utils/notifications';
+import { autoImportSummary, notificationChange, notificationTitle } from '../../utils/notifications';
 import { VesselChangeList } from './VesselChangeList';
 import { ReminderSummary } from './ReminderViews';
 import { tf } from '../../services/i18nFormat';
@@ -22,6 +22,7 @@ const KIND_ICON: Record<NotificationKind, React.ReactNode> = {
   vessel_schedule: <Ship className="w-4 h-4" />,
   booking_cutoff: <AlarmClock className="w-4 h-4" />,
   morning_brief: <Sunrise className="w-4 h-4" />,
+  booking_auto_import: <FolderInput className="w-4 h-4" />,
   test: <Bell className="w-4 h-4" />,
 };
 
@@ -33,6 +34,8 @@ const kindTone = (kind: string) =>
     ? 'bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400'
     : kind === 'booking_cutoff' || kind === 'morning_brief'
     ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400'
+    : kind === 'booking_auto_import'
+    ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400'
     : 'bg-sky-50 dark:bg-sky-950/50 text-sky-600 dark:text-sky-400';
 
 /** Header bell: unread badge + a panel with the latest vessel / container changes; a click opens its detail dialog. */
@@ -161,6 +164,8 @@ export const NotificationBell: React.FC = () => {
                           </span>
                           {isReminder(item) ? (
                             <ReminderSummary item={item} />
+                          ) : item.kind === 'booking_auto_import' ? (
+                            <span className="block text-[11px] font-mono text-slate-600 dark:text-slate-300 mt-0.5 truncate">{autoImportSummary(item)}</span>
                           ) : item.detail?.changes?.length ? (
                             <VesselChangeList item={item} variant="compact" />
                           ) : (

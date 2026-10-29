@@ -4,6 +4,7 @@ import {
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
+  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule,
 } from '../types';
 
 const API_BASE = 'http://127.0.0.1:8000/api/v1';
@@ -711,8 +712,9 @@ export const ackMobilePhotoApi = async (id: string): Promise<void> => {
 // ---------------------------------------------------------------------------
 // Change notifications
 // ---------------------------------------------------------------------------
-export const getNotificationsApi = async (limit = 50): Promise<{ items: AppNotification[]; unread: number }> =>
-  (await apiClient.get<{ items: AppNotification[]; unread: number }>('/notifications', { params: { limit }, timeout: 8000 })).data;
+/** `auto_import_seq` goes up whenever the folder auto-import added bookings */
+export const getNotificationsApi = async (limit = 50): Promise<{ items: AppNotification[]; unread: number; auto_import_seq?: number }> =>
+  (await apiClient.get<{ items: AppNotification[]; unread: number; auto_import_seq?: number }>('/notifications', { params: { limit }, timeout: 8000 })).data;
 
 /** ids omitted = mark everything read */
 export const markNotificationsReadApi = async (ids?: number[]): Promise<void> => {
@@ -735,3 +737,29 @@ export const saveNotificationSettingsApi = async (kinds: string[], osEnabled: bo
   (await apiClient.put<NotificationSettings>('/notifications/settings', {
     kinds, os_enabled: osEnabled, ...(briefTime ? { brief_time: briefTime } : {}),
   })).data;
+
+// ---------------------------------------------------------------------------
+// Auto import (watched folder)
+// ---------------------------------------------------------------------------
+export const getAutoImportSettingsApi = async (): Promise<AutoImportSettings> =>
+  (await apiClient.get<AutoImportSettings>('/auto-import/settings')).data;
+
+/** `importExisting`: also read the PDFs already in a newly chosen folder (default: they are left as they are).
+ *  `schedule` left out: the scan schedule stays as it is. */
+export const saveAutoImportSettingsApi = async (
+  enabled: boolean, folder: string, collectionId: number | null, importExisting = false, schedule?: AutoImportSchedule,
+): Promise<AutoImportSettings> =>
+  (await apiClient.put<AutoImportSettings>('/auto-import/settings', {
+    enabled, folder, collection_id: collectionId, import_existing: importExisting, ...(schedule || {}),
+  })).data;
+
+export const runAutoImportNowApi = async (): Promise<AutoImportRunResult> =>
+  (await apiClient.post<AutoImportRunResult>('/auto-import/run', null, { timeout: LONG_TIMEOUT })).data;
+
+export const getAutoImportHistoryApi = async (limit = 30): Promise<AutoImportFile[]> =>
+  (await apiClient.get<{ items: AutoImportFile[] }>('/auto-import/history', { params: { limit } })).data.items;
+
+/** The file is read again on the next scan */
+export const forgetAutoImportFileApi = async (sha256: string): Promise<void> => {
+  await apiClient.delete(`/auto-import/history/${encodeURIComponent(sha256)}`);
+};

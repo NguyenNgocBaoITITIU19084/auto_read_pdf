@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return ipcRenderer.invoke('open-external', String(url)).then(() => undefined);
   },
 
+  /** Native folder picker (auto-import folder) → the chosen path, or null when cancelled. */
+  selectFolder: (defaultPath) => ipcRenderer.invoke('select-folder', defaultPath ? String(defaultPath) : ''),
+
   /** PNG data URL of the image currently on the clipboard, or null. */
   readClipboardImage: () => ipcRenderer.invoke('read-clipboard-image'),
 

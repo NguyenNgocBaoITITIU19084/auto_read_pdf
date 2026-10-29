@@ -22,6 +22,7 @@ from backend.app.core.database import init_db, get_collections, create_collectio
 from backend.app.core.version import APP_VERSION
 from backend.app.services.background_tasks import (
     restore_auto_sync, shutdown_scheduler, register_log_retention_job, register_reminder_job,
+    register_auto_import_job,
 )
 from backend.app.api.collections import router as collections_router
 from backend.app.api.bookings import router as bookings_router
@@ -35,6 +36,7 @@ from backend.app.api.logs import router as logs_router
 from backend.app.api.mobile import router as mobile_router
 from backend.app.api.system import router as system_router
 from backend.app.api.notifications import router as notifications_router
+from backend.app.api.auto_import import router as auto_import_router
 from backend.app.services.mobile_bridge import bridge
 from backend.app.services.lan_server import lan_server
 
@@ -51,6 +53,8 @@ async def lifespan(app: FastAPI):
     register_log_retention_job()
     # Cut-off reminders (24h / 6h / 2h) and the morning brief, checked every few minutes
     register_reminder_job()
+    # PDFs saved into the watched folder are read every minute (idle while the auto import is off)
+    register_auto_import_job()
     yield
     # Shutdown
     bridge.stop()
@@ -94,6 +98,7 @@ app.include_router(logs_router, prefix="/api/v1")
 app.include_router(mobile_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
+app.include_router(auto_import_router, prefix="/api/v1")
 
 if __name__ == "__main__":
     import multiprocessing

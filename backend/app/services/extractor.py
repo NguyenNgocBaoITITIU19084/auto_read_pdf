@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import tempfile
 from datetime import datetime
 from typing import List, Optional, Pattern, Tuple
 
@@ -571,3 +572,27 @@ def extract_booking_data(pdf_path: str) -> dict:
     if text.strip() and not has_booking_fields(result):
         logger.warning(f"PDF {filename}: {len(text)} chars of text but no booking fields matched; head={text[:200]!r}")
     return result
+
+
+def extract_booking_from_pdf_bytes(file_bytes: bytes) -> dict:
+    """extract_booking_data for a PDF held in memory (an upload, a file picked up by the auto-import)."""
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        tmp_pdf.write(file_bytes)
+        tmp_pdf_path = tmp_pdf.name
+    try:
+        return extract_booking_data(tmp_pdf_path)
+    finally:
+        if os.path.exists(tmp_pdf_path):
+            os.remove(tmp_pdf_path)
+
+
+def resolve_vessel_etd(data: dict) -> None:
+    """Vessel/ETD = Pre Carrier/ETD_Pre if present, else Trunk Vessel/ETD_Trunk."""
+    vessel = data.get("Pre Carrier", "null")
+    etd = data.get("ETD_Pre", "null")
+    if vessel == "null" or not vessel:
+        vessel = data.get("Trunk Vessel", "null")
+        etd = data.get("ETD_Trunk", "null")
+    if vessel != "null" and vessel:
+        data["Vessel"] = vessel
+        data["ETD"] = etd

@@ -199,7 +199,7 @@ def test_upload_does_not_block_event_loop(monkeypatch, col_id):
 
 
 def test_upload_pdf_and_image(monkeypatch, col_id):
-    monkeypatch.setattr(bookings_api, "extract_booking_data", lambda path: dict(SAMPLE, **{"Booking No": "PDF1"}))
+    monkeypatch.setattr("backend.app.services.extractor.extract_booking_data", lambda path: dict(SAMPLE, **{"Booking No": "PDF1"}))
     monkeypatch.setattr(bookings_api, "extract_booking_from_image", lambda b, filename="", **k: dict(SAMPLE, **{"Booking No": "IMG1"}))
     files = [
         ("files", ("x.pdf", io.BytesIO(b"%PDF"), "application/pdf")),

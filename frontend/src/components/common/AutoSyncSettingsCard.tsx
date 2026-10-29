@@ -6,6 +6,7 @@ import { useApp } from '../../context/AppContext';
 import { AutoSyncMode, AutoSyncSchedule } from '../../types';
 import { formatDateTimeShort } from '../../services/i18nFormat';
 import { normalizeSyncTimes, scheduleFromStatus, isValidSyncTime } from '../../services/autoSync';
+import { Switch } from './Switch';
 
 const PRESETS = [
   { label: '5p', value: 5 },
@@ -168,21 +169,13 @@ export const AutoSyncSettingsCard: React.FC = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          role="switch"
-          aria-checked={autoSyncEnabled}
+        <Switch
+          checked={autoSyncEnabled}
+          busy={toggling}
+          label={L.title}
           disabled={toggling || autoSyncStatus === null}
-          onClick={handleToggle}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 disabled:opacity-60 ${
-            autoSyncEnabled
-              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-              : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200'
-          }`}
-        >
-          {toggling && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          {autoSyncEnabled ? L.enabledButton : L.disabledButton}
-        </button>
+          onChange={handleToggle}
+        />
       </div>
 
       {/* Mode switch */}

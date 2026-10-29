@@ -286,7 +286,8 @@ def test_list_mark_read_and_clear(client, col):
     assert client.get(f"{API}/notifications", params={"unread_only": True}).json()["unread"] == 1
     assert client.post(f"{API}/notifications/mark-read", json={}).json() == {"updated": 1}   # everything else
     assert client.delete(f"{API}/notifications").json() == {"deleted": 2}
-    assert client.get(f"{API}/notifications").json() == {"items": [], "unread": 0}
+    body = client.get(f"{API}/notifications").json()
+    assert body["items"] == [] and body["unread"] == 0
 
 
 def test_settings_round_trip(client):
