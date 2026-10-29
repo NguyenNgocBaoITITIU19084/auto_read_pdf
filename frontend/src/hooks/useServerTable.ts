@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PageResult } from '../types';
 import { rowsSignature } from '../components/vessel/tableHelpers';
 
-export type LoadMode = 'loading' | 'refresh' | 'silent';
+/** loading: skeleton · refine: keep the rows, flag `refreshing` · refresh: keep the rows · silent: background poll */
+export type LoadMode = 'loading' | 'refine' | 'refresh' | 'silent';
 
 export interface ServerTableOptions<T, R extends PageResult<T>> {
   enabled: boolean;
   /** Serialized filters (collection, search, event type…). A change resets to page 1. */
   queryKey: string;
+  /** Part of queryKey whose change shows the skeleton (e.g. the collection). Any other change (search, filters)
+   *  keeps the current rows on screen, dimmed via `refreshing`, until the new ones arrive: no flash while typing. */
+  resetKey?: string;
   pageSizeStorageKey: string;
   fetchPage: (limit: number, offset: number) => Promise<R>;
   onError?: (e: unknown) => void;
@@ -24,10 +28,12 @@ const readPageSize = (key: string, fallback: number) => {
 };
 
 export function useServerTable<T extends { id?: number | null }, R extends PageResult<T>>({
-  enabled, queryKey, pageSizeStorageKey, fetchPage, onError, defaultPageSize = 50,
+  enabled, queryKey, resetKey, pageSizeStorageKey, fetchPage, onError, defaultPageSize = 50,
 }: ServerTableOptions<T, R>) {
   const [result, setResult] = useState<R | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasResultRef = useRef(false);
   const [currentPage, setCurrentPageState] = useState(1);
   const [pageSize, setPageSizeState] = useState(() => readPageSize(pageSizeStorageKey, defaultPageSize));
 
@@ -49,6 +55,7 @@ export function useServerTable<T extends { id?: number | null }, R extends PageR
     const seq = ++seqRef.current;
     inFlightRef.current = true;
     if (mode === 'loading') setLoading(true);
+    if (mode === 'refine') setRefreshing(true);
     const size = sizeRef.current;
     const page = pageRef.current;
     try {
@@ -62,6 +69,7 @@ export function useServerTable<T extends { id?: number | null }, R extends PageR
       const sig = `${data.total}|${rowsSignature(data.items as { id?: number | null; queried_at?: string | null }[])}`;
       if (mode !== 'silent' || sig !== sigRef.current) {
         sigRef.current = sig;
+        hasResultRef.current = true;
         setResult(data);
       }
     } catch (e) {
@@ -70,22 +78,26 @@ export function useServerTable<T extends { id?: number | null }, R extends PageR
       if (seq === seqRef.current) {
         inFlightRef.current = false;
         setLoading(false);
+        setRefreshing(false);
       }
     }
   }, [enabled]);
 
-  // Filters changed -> page 1 with skeleton
+  // Filters changed -> page 1: the skeleton on a first load or a new resetKey, else the old rows stay until replaced
   const lastQueryRef = useRef<string | null>(null);
+  const lastResetRef = useRef<string | undefined>(resetKey);
   useEffect(() => {
     if (!enabled) return;
     const queryChanged = lastQueryRef.current !== queryKey;
+    const reset = resetKey === undefined || lastResetRef.current !== resetKey || !hasResultRef.current;
     lastQueryRef.current = queryKey;
+    lastResetRef.current = resetKey;
     if (queryChanged) {
       pageRef.current = 1;
       setCurrentPageState(1);
-      void reload('loading');
+      void reload(reset ? 'loading' : 'refine');
     }
-  }, [enabled, queryKey, reload]);
+  }, [enabled, queryKey, resetKey, reload]);
 
   // Page / page size changed -> keep old rows until the new page arrives
   const firstPageEffect = useRef(true);
@@ -114,6 +126,8 @@ export function useServerTable<T extends { id?: number | null }, R extends PageR
     total: result?.total ?? 0,
     result,
     loading,
+    /** New search / filter results are on their way; the rows shown are the previous ones */
+    refreshing,
     currentPage,
     setCurrentPage,
     pageSize,

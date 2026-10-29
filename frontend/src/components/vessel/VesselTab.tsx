@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Ship, Search, RefreshCw, Trash2, FileSpreadsheet, Eye, Copy, BookmarkCheck,
-  SlidersHorizontal, BookmarkPlus, BookmarkMinus, ClipboardCopy, FolderInput, RotateCw, ArchiveRestore
+  SlidersHorizontal, BookmarkPlus, BookmarkMinus, ClipboardCopy, FolderInput, RotateCw, ArchiveRestore,
+  Loader2,
 } from 'lucide-react';
+import { TableRefreshBar } from '../common/TableRefreshBar';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -164,11 +166,13 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
   const table = useServerTable<VesselSchedule, PageResult<VesselSchedule>>({
     enabled: !!activeCollection,
     queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
+    // Searching / filtering keeps the rows on screen until the new ones arrive; only a new collection shows the skeleton
+    resetKey: String(activeCollection?.id ?? ''),
     pageSizeStorageKey: 'vessel_page_size',
     fetchPage: (limit, offset) => getVesselsPage(activeCollection!.id, limit, offset, tableQuery),
     onError: (e) => addToast(errorMessage(e, t.common.error), 'error'),
   });
-  const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+  const { rows: pageRows, total, loading, refreshing, currentPage, setCurrentPage, pageSize, setPageSize } = table;
   // Table or week calendar by closing time; the calendar refetches whenever the table reloads
   const [view, setView] = useTableView('vessel_view');
   useTourView(view, setView, VESSEL_TOUR_VIEWS);
@@ -652,7 +656,9 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
           </select>
 
           <div className="relative flex-1 min-w-[150px]">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            {refreshing
+              ? <Loader2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-primary-500 animate-spin" />
+              : <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />}
             <input
               type="text"
               value={searchQuery}
@@ -739,7 +745,8 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
           filterLabels={t.common.columnFilter}
         />
       ) : (
-      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl relative overflow-hidden flex flex-col shadow-sm min-h-0">
+        <TableRefreshBar active={refreshing} />
         <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
@@ -774,7 +781,10 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+            <tbody
+              aria-busy={refreshing}
+              className={`divide-y divide-slate-100 dark:divide-slate-800/80 transition-opacity duration-150 ${refreshing ? 'opacity-60' : ''}`}
+            >
               {loading ? (
                 <TableSkeleton
                   columns={columns}

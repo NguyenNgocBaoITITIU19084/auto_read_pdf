@@ -4,6 +4,7 @@ import {
   SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2,
   ArchiveRestore, ListChecks, EyeOff
 } from 'lucide-react';
+import { TableRefreshBar } from '../common/TableRefreshBar';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useMobileBridge } from '../../context/MobileBridgeContext';
@@ -448,6 +449,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const table = useServerTable<Booking, BookingPageResult>({
     enabled: !!activeCollection,
     queryKey: JSON.stringify([activeCollection?.id, tableQuery]),
+    // Searching / filtering keeps the rows on screen until the new ones arrive; only a new collection shows the skeleton
+    resetKey: String(activeCollection?.id ?? ''),
     pageSizeStorageKey: 'booking_page_size',
     fetchPage: (limit, offset) => getBookingsPage(activeCollection!.id, limit, offset, tableQuery),
     onError: (e: any) => {
@@ -455,7 +458,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
       addToast((typeof detail === 'string' && detail) || e?.message || t.common.error, 'error');
     },
   });
-  const { rows: pageRows, total, loading, currentPage, setCurrentPage, pageSize, setPageSize } = table;
+  const { rows: pageRows, total, loading, refreshing, currentPage, setCurrentPage, pageSize, setPageSize } = table;
   // Done / cancelled bookings the toolbar toggle leaves out (shown on the toggle; a search that matches them says so)
   const closedHidden = hideClosed ? table.result?.hidden_closed ?? 0 : 0;
   const hiddenClosed = debouncedQuery.trim() ? closedHidden : 0;
@@ -1025,7 +1028,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           </select>
 
           <div className="relative flex-1 min-w-[150px]">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            {refreshing
+              ? <Loader2 className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-primary-500 animate-spin" />
+              : <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />}
             <input
               type="text"
               value={searchQuery}
@@ -1206,7 +1211,8 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           filterLabels={t.common.columnFilter}
         />
       ) : (
-      <div data-tour="booking-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col shadow-sm min-h-0">
+      <div data-tour="booking-table" className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl relative overflow-hidden flex flex-col shadow-sm min-h-0">
+        <TableRefreshBar active={refreshing} />
         <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto w-full">
           <table className="min-w-full text-left text-xs border-collapse">
             <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 shadow-sm">
@@ -1262,7 +1268,10 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+            <tbody
+              aria-busy={refreshing}
+              className={`divide-y divide-slate-100 dark:divide-slate-800/80 transition-opacity duration-150 ${refreshing ? 'opacity-60' : ''}`}
+            >
               {loading ? (
                 <TableSkeleton
                   columns={columns}
