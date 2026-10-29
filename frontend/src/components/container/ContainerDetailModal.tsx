@@ -182,7 +182,7 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
         <FieldCopyBar entries={entries} {...picked.barProps} />
 
         {/* Detailed Sections */}
-        <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="space-y-4">
           {sections.map((section, sIdx) => {
             return (
               <div key={sIdx} className="space-y-2">

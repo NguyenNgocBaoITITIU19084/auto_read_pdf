@@ -199,3 +199,25 @@ def test_search_says_how_many_closed_bookings_it_hides(col_id):
     assert db.get_bookings_page(col_id, hide_closed=True)["hidden_closed"] == 1
     assert db.get_bookings_page(col_id, search_query="SKY RAINBOW")["hidden_closed"] == 0
     assert db.get_bookings_page(col_id, search_query="SKY", statuses=["new"], hide_closed=True)["hidden_closed"] == 0
+
+
+def test_saved_containers_tell_open_booking_screens(col_id):
+    before = db.booking_links_seq()
+    db.insert_containers(col_id, [_gate_in("ABCU1111111", "BKC1")])
+    assert db.booking_links_seq() > before
+
+
+def test_booking_number_corrected_meets_its_gated_in_containers(col_id):
+    db.insert_containers(col_id, [_gate_in("ABCU1111111", "BKC2"), _gate_in("ABCU2222222", "BKC2")])
+    b = _booking(col_id, "BKC2-TYPO", **{"Q'ty": "2"})
+    assert _status(b) == "new"
+    db.update_booking(b, {"Booking No": "BKC2"})               # the number read wrong, fixed by hand
+    assert _status(b) == "gated_in"
+
+
+def test_quantity_lowered_to_what_is_gated_in(col_id):
+    db.insert_containers(col_id, [_gate_in("ABCU3333333", "BKC3")])
+    b = _booking(col_id, "BKC3", **{"Q'ty": "2"})
+    assert _status(b) == "new"                                # 1 of 2 gated in
+    db.update_booking(b, {"Q'ty": "1"})
+    assert _status(b) == "gated_in"

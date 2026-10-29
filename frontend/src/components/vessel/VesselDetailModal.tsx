@@ -110,7 +110,7 @@ export const VesselDetailModal: React.FC<VesselDetailModalProps> = ({
         <FieldCopyBar entries={entries} {...picked.barProps} />
 
         {/* Detailed Fields Grid */}
-        <div className="grid grid-cols-2 gap-2.5 max-h-[55vh] overflow-y-auto pr-1">
+        <div className="grid grid-cols-2 gap-2.5">
           {fields.map((f) => {
             const val = schedule[f.key] || 'null';
             const isNull = val === 'null' || !val;

@@ -910,6 +910,9 @@ def update_booking(booking_id: int, data: dict) -> dict | None:
             conn.execute(f"UPDATE bookings SET {assignments} WHERE id = ?;", (*updates.values(), booking_id))
         if "vessel" in updates:
             _sync_booking_eport_cutoffs(conn, current[0], [booking_id])
+        if "booking_no" in updates or "qty" in updates:
+            # another booking number / container count: its containers may now be all gated in
+            _sync_booking_gate_status(conn, current[0])
     rows = get_bookings_by_ids([booking_id])
     return rows[0] if rows else None
 
@@ -1971,6 +1974,8 @@ def insert_containers(col_id: int, containers: list[dict], source: str = "manual
         ids = _insert_container_rows(conn.cursor(), col_id, containers, _now_str())
         _safely(_record_notifications, conn, col_id, changes or [], source)
         _safely(_sync_booking_gate_status, conn, col_id)
+        # open booking screens show the containers of their booking (and "gated_in") without changing tabs
+        _bump_booking_links_seq(conn)
         return ids
 
 

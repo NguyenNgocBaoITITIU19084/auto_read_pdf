@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Box, CheckCircle2, Loader2, Ship } from 'lucide-react';
-import { getBookingLinks } from '../../services/api';
+import { ArrowUpRight, Box, CheckCircle2, Loader2, RefreshCw, Ship } from 'lucide-react';
+import { getBookingLinks, resyncContainersApi, resyncVesselsApi } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import { ValueBadge } from '../common/ValueBadge';
 import type { TabId } from '../common/Tabs';
@@ -27,6 +27,12 @@ export interface BookingLinksLabels {
   openVesselTab: string;
   openContainerTab: string;
   loadError: string;
+  refresh: string;
+  refreshTooltip: string;
+  refreshNothing: string;
+  refreshDone: string;
+  refreshNotFound: string;
+  refreshError: string;
 }
 
 interface BookingLinksPanelProps {
@@ -37,6 +43,8 @@ interface BookingLinksPanelProps {
   onNavigateTab?: (tab: TabId, query?: string) => void;
   /** Changes whenever vessel schedules were saved: the links are fetched again */
   reloadKey?: number | null;
+  /** "Cập nhật ePort" saved fresh vessel / container data (other screens can reload) */
+  onUpdated?: () => void;
 }
 
 const isBlank = (v: unknown) => v === undefined || v === null || String(v).trim() === '' || String(v).trim().toLowerCase() === 'null';
@@ -74,10 +82,13 @@ const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 /** The booking's ePort vessel schedule(s) and containers, under the booking detail. */
 export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
-  bookingId, bookingNo, vessel, labels, onNavigateTab, reloadKey,
+  bookingId, bookingNo, vessel, labels, onNavigateTab, reloadKey, onUpdated,
 }) => {
   const [links, setLinks] = useState<BookingLinks | null>(null);
   const [failed, setFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNote, setRefreshNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [localReload, setLocalReload] = useState(0);
 
   // A new booking starts blank; a reload of the same one (vessel schedules saved meanwhile) keeps what is shown
   const shownIdRef = useRef<number | null>(null);
@@ -86,6 +97,7 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
     if (shownIdRef.current !== bookingId) {
       shownIdRef.current = bookingId;
       setLinks(null);
+      setRefreshNote(null);
     }
     setFailed(false);
     (async () => {
@@ -99,7 +111,44 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
     return () => {
       current = false;
     };
-  }, [bookingId, reloadKey]);
+  }, [bookingId, reloadKey, localReload]);
+
+  /** Looks the linked vessel schedules and containers up on ePort again (the same as "resync" in their tabs). */
+  const refreshFromEport = async () => {
+    if (!links) return;
+    const vesselIds = links.vessels.map((v) => v.id).filter((id): id is number => typeof id === 'number');
+    const containerIds = links.containers.map((c) => c.id).filter((id): id is number => typeof id === 'number');
+    if (!vesselIds.length && !containerIds.length) {
+      setRefreshNote({ ok: false, text: labels.refreshNothing });
+      return;
+    }
+    setRefreshing(true);
+    setRefreshNote(null);
+    const [v, c] = await Promise.allSettled([
+      vesselIds.length ? resyncVesselsApi(vesselIds) : Promise.resolve(null),
+      containerIds.length ? resyncContainersApi(containerIds) : Promise.resolve(null),
+    ]);
+    const errors: string[] = [];
+    const notFound: string[] = [];
+    const count = (r: PromiseSettledResult<{ updated: number; not_found: string[]; errors: string[] } | null>) => {
+      if (r.status === 'rejected') {
+        errors.push(String((r.reason as any)?.response?.data?.detail || (r.reason as any)?.message || r.reason));
+        return 0;
+      }
+      if (!r.value) return 0;
+      notFound.push(...(r.value.not_found || []));
+      errors.push(...(r.value.errors || []));
+      return r.value.updated || 0;
+    };
+    const vessels = count(v);
+    const containers = count(c);
+    let text = errors.length ? tf(labels.refreshError, { message: errors[0] }) : tf(labels.refreshDone, { vessels, containers });
+    if (notFound.length) text += ` ${tf(labels.refreshNotFound, { items: notFound.join(', ') })}`;
+    setRefreshNote({ ok: !errors.length, text });
+    setRefreshing(false);
+    setLocalReload((k) => k + 1);
+    if (vessels || containers) onUpdated?.();
+  };
 
   if (failed) return <Empty>{labels.loadError}</Empty>;
   if (!links) {
@@ -114,8 +163,30 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
   const vesselName = vessels[0]?.vessel_name;
   const allGated = qty !== null && gated >= qty && qty > 0;
 
+  const hasLinks = vessels.length > 0 || containers.length > 0;
+
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-end gap-2 flex-wrap">
+        {refreshNote && (
+          <span
+            role="status"
+            className={`mr-auto text-[11px] ${refreshNote.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300'}`}
+          >
+            {refreshNote.text}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={refreshFromEport}
+          disabled={refreshing || !hasLinks}
+          title={hasLinks ? labels.refreshTooltip : labels.refreshNothing}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          {labels.refresh}
+        </button>
+      </div>
       <section>
         <SectionHeader
           icon={Ship}

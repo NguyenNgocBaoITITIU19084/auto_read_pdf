@@ -978,7 +978,13 @@ export const translations = {
         gatedBadge: "Đã hạ bãi",
         openVesselTab: "Mở tab Tàu",
         openContainerTab: "Mở tab Container",
-        loadError: "Không tải được lịch tàu / container"
+        loadError: "Không tải được lịch tàu / container",
+        refresh: "Cập nhật ePort",
+        refreshTooltip: "Tra lại trên ePort lịch tàu và các container đang liên kết với booking này",
+        refreshNothing: "Chưa có lịch tàu hay container nào liên kết để cập nhật. Bấm \"Tra tàu\" để tìm tàu.",
+        refreshDone: "Đã cập nhật từ ePort: {vessels} lịch tàu, {containers} container.",
+        refreshNotFound: "Không thấy trên ePort: {items}.",
+        refreshError: "Không cập nhật được: {message}"
       }
     },
     vessel: {
@@ -2329,7 +2335,13 @@ export const translations = {
         gatedBadge: "Gated in",
         openVesselTab: "Open Vessels tab",
         openContainerTab: "Open Containers tab",
-        loadError: "Could not load vessel / container info"
+        loadError: "Could not load vessel / container info",
+        refresh: "Update from ePort",
+        refreshTooltip: "Look this booking's linked vessel schedule and containers up on ePort again",
+        refreshNothing: "No linked vessel schedule or container to update yet. Use \"Look up vessel\" to find the vessel.",
+        refreshDone: "Updated from ePort: {vessels} vessel schedule(s), {containers} container(s).",
+        refreshNotFound: "Not found on ePort: {items}.",
+        refreshError: "Could not update: {message}"
       }
     },
     vessel: {

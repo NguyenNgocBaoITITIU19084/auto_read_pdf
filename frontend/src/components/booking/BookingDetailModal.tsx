@@ -182,7 +182,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
 
         <FieldCopyBar entries={entries} {...picked.barProps} />
 
-        <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-4">
+        <div className="space-y-4">
         {/* Detailed Fields Grid */}
         <div className="grid grid-cols-2 gap-2.5">
           {fields.map((f) => {
@@ -269,6 +269,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           labels={t.booking.links}
           onNavigateTab={onNavigateTab && ((tab, query) => { onClose(); onNavigateTab(tab, query); })}
           reloadKey={linksReloadKey}
+          onUpdated={onVesselSaved}
         />
         </div>
         </div>
