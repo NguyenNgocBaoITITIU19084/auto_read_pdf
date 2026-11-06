@@ -198,3 +198,36 @@ def test_maersk_feeder_leg_is_the_first_vessel():
     r = extract_booking_from_text(MAERSK_TEXT, "DB_aabhijfedgid0x081A.pdf", [words])
     _assert_common(r)
     assert r["T/S Port"] == "PELABUHAN TANJUNG PELEPAS TERMINAL"
+
+
+# DB_aabhjbhjgdhj0x0032.pdf: booking number printed above its label, the plan title ends page 3 and
+# its table runs on page 4, broken by the repeated page header (barge leg, then the vessel leg)
+SPLIT_TEXT = """BOOKING CONFIRMATION
+279591958
+Booking No.: Print Date: 2026-10-12 09:12 UTC
+Booked by Party: HO CHI MINH CITY BRANCH- HECNY SHIPP Service Mode: CY/CY
+Contact Name: SANG HOANG HA 2 From: Ho Chi Minh City,Ho Chi Minh,Vietnam
+Booked by Ref. No: To: Los Angeles,California,United States
+Business Unit: Maersk Line Ho Chi Minh
+Equipment
+Quantity Size/Type/Height (ft.in) Collapsible Sub. Equip Gross Weight Pack. Qty/Kind Cargo Volume
+1 40 DRY 9 6 19000.000 KGS 1 Piece(s)
+Load Itinerary
+Type Location Release Date From To Return Date Time Load Ref.
+Empty Container MacStar Tan Van 2026-11-02 00:00
+Return Equip ICD Tanamexco 2026-11-07 11:00
+Intended Transport Plan
+"""
+
+
+def test_maersk_plan_split_across_pages_and_number_above_label():
+    pages = json.loads((FIXTURES / "maersk_plan_split_words.json").read_text(encoding="utf-8"))
+    r = extract_booking_from_text(SPLIT_TEXT, "DB_aabhjbhjgdhj0x0032.pdf", [[], []] + pages)
+    assert r["Booking No"] == "279591958"
+    assert r["Vessel"] == r["Trunk Vessel"] == "MAERSK ALTAIR 645E"
+    assert r["ETD"] == r["ETD_Trunk"] == "08/11/2026"
+    assert r["Pre Carrier"] == "null"
+    assert r["T/S Port"] == "null"
+    assert r["Port of Discharging"] == "LSA APM TERMINAL PIER 400( W185 )"
+    assert r["Place of Delivery"] == "LOS ANGELES,CALIFORNIA,UNITED STATES"
+    assert r["Equipment Type"] == "40'HC" and r["Q'ty"] == "1"

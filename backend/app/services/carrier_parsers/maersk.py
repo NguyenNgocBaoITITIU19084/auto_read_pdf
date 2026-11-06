@@ -41,39 +41,52 @@ def matches(text: str) -> bool:
 
 
 def _plan_from_words(pages_words) -> List[Dict[str, str]]:
-    """Legs of the Intended Transport Plan, columns split by its header; wrapped names join their leg."""
+    """
+    Legs of the Intended Transport Plan, columns split by its header; wrapped names join their leg.
+    The title can end a page with the table on the next one, and the table can break around the
+    repeated page header ('279591958 / Booking No.:') with its column header printed again.
+    """
+    legs: List[Dict[str, List[str]]] = []
+    bounds = None
+    started = False
     for words in pages_words or ():
         rows = group_rows(words)
-        title = find_phrase(rows, "Intended Transport Plan")
-        if not title:
-            continue
-        header = next((r for r in rows if row_top(r) > title["top"] + 2
-                       and {"From", "To", "Mode", "Vessel", "ETD"} <= {w["text"] for w in r}), None)
-        if not header:
-            continue
-        x = {w["text"]: w["x0"] for w in header}
-        bounds = [("from", -1.0), ("to", x["To"] - 4), ("mode", x["Mode"] - 4), ("vessel", x["Vessel"] - 4),
-                  ("voyage", x.get("Voy", x["ETD"]) - 4), ("etd", x["ETD"] - 4), ("eta", x.get("ETA", 1e9) - 4)]
-        legs: List[Dict[str, List[str]]] = []
-        prev = row_top(header)
+        if not started:
+            title = find_phrase(rows, "Intended Transport Plan")
+            if not title:
+                continue
+            started = True
+            rows = [r for r in rows if row_top(r) > title["top"] + 2]
+        prev = None  # top of the last table row on this page; None outside the table
         for row in rows:
             top = row_top(row)
-            if top <= prev or top - prev > 16:  # rows before the header / the gap after the table
-                if top > row_top(header):
-                    break
+            if {"From", "To", "Mode", "Vessel", "ETD"} <= {w["text"] for w in row}:
+                x = {w["text"]: w["x0"] for w in row}
+                bounds = [("from", -1.0), ("to", x["To"] - 4), ("mode", x["Mode"] - 4),
+                          ("vessel", x["Vessel"] - 4), ("voyage", x.get("Voy", x["ETD"]) - 4),
+                          ("etd", x["ETD"] - 4), ("eta", x.get("ETA", 1e9) - 4)]
+                prev = top
                 continue
-            prev = top
+            if bounds is None or prev is None:
+                continue
+            if top - prev > 16:  # the gap after the table (or before a repeated page header)
+                prev = None
+                continue
             cells: Dict[str, List[str]] = {name: [] for name, _ in bounds}
             for w in row:
                 cells[[name for name, bx in bounds if w["x0"] >= bx][-1]].append(w["text"])
-            # A leg row has a mode or an ETD; other rows are wrapped place names of the leg above
-            if cells["mode"] or cells["etd"] or not legs:
+            # A leg row has a mode or an ETD; a row with only From / To words wraps the leg above;
+            # anything else ('Description Quantity Additional Info') ends the table
+            if cells["mode"] or re.fullmatch(_DATE, " ".join(cells["etd"])):
                 legs.append(cells)
-            else:
+            elif legs and not any(cells[k] for k in ("mode", "vessel", "voyage", "etd", "eta")):
                 for name in ("from", "to"):
                     legs[-1][name] += cells[name]
-        return [{k: " ".join(v) for k, v in leg.items()} for leg in legs]
-    return []
+            else:
+                prev = None
+                continue
+            prev = top
+    return [{k: " ".join(v) for k, v in leg.items()} for leg in legs]
 
 
 def _plan_from_ocr(text: str) -> List[Dict[str, str]]:
@@ -142,7 +155,9 @@ def _ocr_itinerary(text: str) -> Dict[str, str]:
 def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict[str, str]:
     out: Dict[str, str] = {"Carrier": "MAERSK"}
 
-    m = re.search(r"Booking\s+No\.?\s*:\s*(\d{6,})", text, re.IGNORECASE)
+    # 'Booking No.: 277374922', or the number printed on the line above the label (newer layout)
+    m = (re.search(r"Booking\s+No\.?\s*:\s*(\d{6,})", text, re.IGNORECASE)
+         or re.search(r"^\s*(\d{6,})\s*\n\s*Booking\s+No\.?\s*:", text, re.IGNORECASE | re.MULTILINE))
     if m:
         out["Booking No"] = m.group(1)
 
