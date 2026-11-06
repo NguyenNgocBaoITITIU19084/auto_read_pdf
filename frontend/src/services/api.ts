@@ -654,6 +654,15 @@ export const getSystemResourcesApi = async (): Promise<import('../types').System
 export const freeBackendMemoryApi = async (): Promise<{ rss_before: number; rss_after: number }> =>
   (await apiClient.post<{ rss_before: number; rss_after: number }>('/system/free-memory')).data;
 
+// Gate-open hours before the cut-off, per port and cargo type: {"ITC": {"dry": 144, "reefer": 72, "haz": 48}}
+export type PortGateHours = Record<string, { dry: number; reefer: number; haz: number }>;
+
+export const getPortGateHoursApi = async (): Promise<PortGateHours> =>
+  (await apiClient.get<{ hours: PortGateHours }>('/settings/port-gate-hours')).data.hours;
+
+export const savePortGateHoursApi = async (hours: PortGateHours): Promise<PortGateHours> =>
+  (await apiClient.put<{ hours: PortGateHours }>('/settings/port-gate-hours', { hours })).data.hours;
+
 // AI & System Settings
 export const getAISettingsApi = async (): Promise<import('../types').AISettings> => {
   const res = await apiClient.get<import('../types').AISettings>('/settings/ai');

@@ -518,3 +518,48 @@ def test_real_import_by_barge_links_to_its_booking_without_a_gate_in_alert():
     assert [c["containerno"] for c in links["containers"]] == ["MEDU5049541"]
     assert links["gated_in"] == 0                       # an import is never an export gate-in
     assert [event_kind(r["EVENT_TYPE"]) for r in rows] == [None, "container_outgate"]
+
+
+def test_sp_itc_gate_open_times_from_cut_off(monkeypatch):
+    """SP-ITC gives only the cut-off; the gate opens 144h (dry) / 72h (reefer) / 48h (DG) before it."""
+    from backend.app.services import port_gate_rules
+    monkeypatch.setattr(port_gate_rules, "get_gate_open_hours", lambda: port_gate_rules._clean({}))
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = [dict(SAMPLE_SP_ITC_VESSELS[0], YARD_CLOSE="2026-11-16 07:00:00.000")]
+    monkeypatch.setattr(sp_itc_client, "_create_session", lambda: MagicMock(post=lambda *a, **k: mock_resp))
+
+    row = sp_itc_client.fetch_sp_itc_vessel_schedules()[0]
+    assert row["CLOSING_TIME"] == "2026-11-16 07:00:00"
+    assert row["OPEN_TS"] == row["open_ts"] == "2026-11-10 07:00:00"
+    assert row["REEFER_OPEN_TS"] == "2026-11-13 07:00:00"
+    assert row["HAZ_OPEN_TS"] == "2026-11-14 07:00:00"
+    assert row["OOG_OPEN_TS"] == ""
+
+
+def test_sp_itc_gate_open_times_follow_saved_hours(monkeypatch):
+    from backend.app.services import port_gate_rules
+    saved = {"ITC": {"dry": 120, "reefer": -5, "haz": "x"}, "XYZ": {"dry": 1}}
+    monkeypatch.setattr(port_gate_rules, "get_gate_open_hours", lambda: port_gate_rules._clean(saved))
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = [dict(SAMPLE_SP_ITC_VESSELS[0], YARD_CLOSE="2026-11-16 07:00:00.000")]
+    monkeypatch.setattr(sp_itc_client, "_create_session", lambda: MagicMock(post=lambda *a, **k: mock_resp))
+
+    row = sp_itc_client.fetch_sp_itc_vessel_schedules()[0]
+    assert row["OPEN_TS"] == "2026-11-11 07:00:00"  # edited to 120h
+    assert row["REEFER_OPEN_TS"] == "2026-11-13 07:00:00"  # bad values keep the default
+    assert row["HAZ_OPEN_TS"] == "2026-11-14 07:00:00"
+
+
+def test_sp_itc_no_cut_off_means_no_gate_open():
+    from backend.app.services.port_gate_rules import gate_open_times
+    assert gate_open_times("", {"dry": 144}) == {}
+
+
+def test_port_gate_hours_settings_roundtrip(tmp_path, monkeypatch):
+    from backend.app.services import port_gate_rules
+    store = {}
+    monkeypatch.setattr("backend.app.core.database.get_system_setting", lambda k, d="": store.get(k, d))
+    monkeypatch.setattr("backend.app.core.database.set_system_setting", lambda k, v: store.__setitem__(k, v))
+    assert port_gate_rules.get_gate_open_hours() == {"ITC": {"dry": 144, "reefer": 72, "haz": 48}}
+    port_gate_rules.set_gate_open_hours({"ITC": {"dry": 168, "reefer": 72, "haz": 48}})
+    assert port_gate_rules.get_gate_open_hours()["ITC"]["dry"] == 168

@@ -16,6 +16,7 @@ export const translations = {
       sections: {
         general: { label: "Giao diện & ứng dụng", desc: "Ngôn ngữ, chế độ sáng/tối và cập nhật ứng dụng" },
         sync: { label: "Đồng bộ ePort", desc: "Lịch tự động tra cứu lại lịch tàu và container trên ePort" },
+        portGate: { label: "Giờ mở cổng hạ", desc: "Số giờ trước cắt máng cảng mở cổng cho hạ hàng, theo loại cont" },
         autoImport: { label: "Tự nhập PDF", desc: "Tự đọc PDF booking được lưu vào thư mục theo dõi" },
         notifications: { label: "Thông báo", desc: "Chọn thay đổi nào sẽ báo, giờ gửi bản tin sáng" },
         colors: { label: "Màu sắc", desc: "Tô màu dòng / ô theo giá trị trong bảng" },
@@ -584,6 +585,18 @@ export const translations = {
       deleteConfirm: "Xoá vĩnh viễn",
       lastOneHint: "Cần giữ lại ít nhất một bộ sưu tập",
       empty: "Chưa có bộ sưu tập nào"
+    },
+    portGate: {
+      title: "Giờ mở cổng hạ SP-ITC",
+      desc: "SP-ITC không công bố giờ mở cổng: app lấy giờ cắt máng trừ đi số giờ dưới đây (VD: cắt máng 07:00 16/11 − 144h = mở cổng 07:00 10/11). Cảng đổi quy định thì sửa ở đây, lần đồng bộ lịch tàu sau sẽ tính lại.",
+      dry: "Cont khô",
+      reefer: "Cont lạnh",
+      haz: "Cont nguy hiểm (DG)",
+      hours: "giờ",
+      days: "ngày",
+      save: "Lưu",
+      saved: "Đã lưu giờ mở cổng SP-ITC",
+      invalid: "Số giờ phải từ 1 đến 720",
     },
     autoSync: {
       title: "Tự động đồng bộ (Auto Sync)",
@@ -1385,6 +1398,7 @@ export const translations = {
       sections: {
         general: { label: "Appearance & app", desc: "Language, light/dark mode and app updates" },
         sync: { label: "ePort sync", desc: "When vessel and container data is looked up again on ePort" },
+        portGate: { label: "Gate-open hours", desc: "How many hours before the cut-off a port opens its gate, by container type" },
         autoImport: { label: "PDF auto-import", desc: "Booking PDFs saved into the watched folder are read on their own" },
         notifications: { label: "Notifications", desc: "Which changes notify you, morning brief time" },
         colors: { label: "Colors", desc: "Highlight rows / cells by their values" },
@@ -1953,6 +1967,18 @@ export const translations = {
       deleteConfirm: "Delete permanently",
       lastOneHint: "Keep at least one collection",
       empty: "No collections yet"
+    },
+    portGate: {
+      title: "SP-ITC gate-open hours",
+      desc: "SP-ITC publishes no gate-open time: the app takes the cut-off minus the hours below (e.g. cut-off 07:00 16/11 − 144h = gate opens 07:00 10/11). If the port changes its rule, edit it here; the next vessel schedule sync recomputes it.",
+      dry: "Dry",
+      reefer: "Reefer",
+      haz: "Dangerous goods (DG)",
+      hours: "hours",
+      days: "days",
+      save: "Save",
+      saved: "SP-ITC gate-open hours saved",
+      invalid: "Hours must be between 1 and 720",
     },
     autoSync: {
       title: "Auto Sync",

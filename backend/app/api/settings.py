@@ -2,7 +2,10 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from typing import Dict
+
 from backend.app.core.database import get_system_setting, set_system_setting
+from backend.app.services.port_gate_rules import get_gate_open_hours, set_gate_open_hours
 from backend.app.services.image_extractor import (
     verify_gemini_api_key, list_gemini_models, DEFAULT_MODEL
 )
@@ -69,3 +72,16 @@ def test_ai_key(req: TestKeyRequest):
     model = (req.gemini_model or "").strip() or get_system_setting("gemini_model", DEFAULT_MODEL) or DEFAULT_MODEL
     result = verify_gemini_api_key(key, model)
     return result
+
+
+class PortGateHoursRequest(BaseModel):
+    # {"ITC": {"dry": 144, "reefer": 72, "haz": 48}}: hours before the cut-off the gate opens
+    hours: Dict[str, Dict[str, int]]
+
+@router.get("/port-gate-hours")
+def get_port_gate_hours():
+    return {"hours": get_gate_open_hours()}
+
+@router.put("/port-gate-hours")
+def update_port_gate_hours(req: PortGateHoursRequest):
+    return {"hours": set_gate_open_hours(req.hours)}

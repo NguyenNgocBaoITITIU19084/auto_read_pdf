@@ -63,6 +63,8 @@ def fetch_sp_itc_vessel_schedules(from_days_ago: int = 15, to_days_ahead: int = 
             logger.warning(f"[SP-ITC VESSEL] Unexpected response format: {data}")
             return []
         logger.info(f"[SP-ITC VESSEL] Retrieved {len(data)} schedules ({elapsed_ms}ms)")
+        from backend.app.services.port_gate_rules import gate_open_times, get_gate_open_hours
+        itc_hours = get_gate_open_hours().get("ITC", {})
         mapped_results = []
         for it in data:
             if not isinstance(it, dict):
@@ -77,6 +79,11 @@ def fetch_sp_itc_vessel_schedules(from_days_ago: int = 15, to_days_ahead: int = 
 
             closing_raw = (it.get("YARD_CLOSE") or "").strip()
             closing = closing_raw.split(".")[0].strip() if closing_raw else ""
+            # SP-ITC gives no opening time: the gate opens a fixed number of hours before the cut-off
+            opens = gate_open_times(closing, itc_hours)
+            open_dry = opens.get("OPEN_TS", "")
+            open_reefer = opens.get("REEFER_OPEN_TS", "")
+            open_haz = opens.get("HAZ_OPEN_TS", "")
 
             eta_raw = (it.get("ETA") or "").strip()
             etd_raw = (it.get("ETD") or "").strip()
@@ -111,14 +118,14 @@ def fetch_sp_itc_vessel_schedules(from_days_ago: int = 15, to_days_ahead: int = 
                 "closing_time_icd": "",
                 "IN_GATE": "",
                 "in_gate": "",
-                "OPEN_TS": "",
-                "open_ts": "",
-                "REEFER_OPEN_TS": "",
-                "reefer_open_ts": "",
+                "OPEN_TS": open_dry,
+                "open_ts": open_dry,
+                "REEFER_OPEN_TS": open_reefer,
+                "reefer_open_ts": open_reefer,
                 "OOG_OPEN_TS": "",
                 "oog_open_ts": "",
-                "HAZ_OPEN_TS": "",
-                "haz_open_ts": "",
+                "HAZ_OPEN_TS": open_haz,
+                "haz_open_ts": open_haz,
                 "REMARKS": " | ".join(remarks_parts),
                 "remarks": " | ".join(remarks_parts),
             })

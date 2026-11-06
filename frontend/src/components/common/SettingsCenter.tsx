@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Bell, Database, FolderInput, MonitorCog, Moon, Palette, RefreshCw, ScanText, Sun } from 'lucide-react';
+import { Bell, Database, DoorOpen, FolderInput, MonitorCog, Moon, Palette, RefreshCw, ScanText, Sun } from 'lucide-react';
 import { Modal } from './Modal';
 import { useApp } from '../../context/AppContext';
 import { AutoSyncSettingsCard } from './AutoSyncSettingsCard';
+import { PortGateSettingsCard } from './PortGateSettingsCard';
 import { AutoImportSettingsCard } from './AutoImportSettingsCard';
 import { AISettingsCard } from './AISettingsCard';
 import { UpdateSettingsCard } from './UpdateSettingsCard';
@@ -10,11 +11,12 @@ import { NotificationSettingsCard } from './NotificationSettingsCard';
 import { ColorConfigPanel } from './ColorConfigPanel';
 import { DataBackupPanel } from './DataBackupPanel';
 
-export type SettingsSection = 'general' | 'sync' | 'autoImport' | 'notifications' | 'colors' | 'reading' | 'data';
+export type SettingsSection = 'general' | 'sync' | 'portGate' | 'autoImport' | 'notifications' | 'colors' | 'reading' | 'data';
 
 const SECTIONS: { id: SettingsSection; icon: React.ReactNode }[] = [
   { id: 'general', icon: <MonitorCog className="w-4 h-4" /> },
   { id: 'sync', icon: <RefreshCw className="w-4 h-4" /> },
+  { id: 'portGate', icon: <DoorOpen className="w-4 h-4" /> },
   { id: 'autoImport', icon: <FolderInput className="w-4 h-4" /> },
   { id: 'notifications', icon: <Bell className="w-4 h-4" /> },
   { id: 'colors', icon: <Palette className="w-4 h-4" /> },
@@ -112,6 +114,7 @@ export const SettingsCenter: React.FC<SettingsCenterProps> = ({ isOpen, onClose,
   const body: Record<SettingsSection, React.ReactNode> = {
     general: <><AppearanceCard /><UpdateSettingsCard /></>,
     sync: <AutoSyncSettingsCard />,
+    portGate: <PortGateSettingsCard />,
     autoImport: <AutoImportSettingsCard />,
     notifications: <NotificationSettingsCard />,
     colors: <ColorConfigPanel />,
