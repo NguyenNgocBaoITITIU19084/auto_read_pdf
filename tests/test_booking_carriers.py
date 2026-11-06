@@ -392,3 +392,81 @@ def test_oocl_depots_on_the_next_page():
     res = extract_booking_from_text(OOCL1_TEXT, "2174309940.pdf", [page1, page2])
     assert res["Empty Pick Up CY"] == "SINOVNL TAN VAN"
     assert res["Full return CY"] == "CAT LAI"
+
+
+# Newer Hapag-Lloyd layout ('Booking Confirmation Update (n)', 'Booking Number:'), lines kept from:
+# - HL-Booking Update 2-94045713-VNSGN-USFRR.pdf (ICD Dong Nai -> Cai Mep inland leg, one vessel, US inland ramp)
+# - HPL NEW.pdf (three vessel legs via Tanjung Pelepas and Tanger Med)
+HAPAG_NEW_INLAND_TEXT = """Booking Confirmation Update (2)
+HAPAG-LLOYD (VIETNAM) LTD
+Booking Number:
+94045713
+From To Vessel V261001547775
+29-OCT-2026 00:00 02-NOV-2026 00:00
+12-NOV-2026 11:00 18-DEC-2026 18:00 WAN HAI A08 1 x 45GP
+Deadline Location Date/Time (local) Action
+Shipping instruction closing VNVUT 09-NOV-2026 12:00 Provide your final BL/SWB Instructions
+VGM cut off VNVUT 10-NOV-2026 07:00 Submit VGM details
+FCL delivery date VNVUT 11-NOV-2026 07:00 Last possible delivery of container at loading terminal
+BL/SWB (No)s.:
+HLCUSGN2610CFMR4
+Customer Reference:THAO Booking Number:94045713 BOBC0401-1.1 Page 1 of 5
+"""
+
+HAPAG_NEW_TS_TEXT = """Booking Confirmation Update (6)
+HAPAG-LLOYD (VIETNAM) LTD
+Booking Number:
+94361468
+Quotation/Contract No.:
+156171300
+02-NOV-2026 17:00 04-NOV-2026 10:00 CAT LAI EXPRESS Equipment(s):
+1 x 45GP
+Earliest Receiving date VNSGN 27-OCT-2026 23:00 Earliest date to delivery of container at loading terminal
+Shipping instruction closing VNSGN 30-OCT-2026 10:00 Provide your final BL/SWB Instructions
+FCL delivery date VNSGN 01-NOV-2026 23:00 Last possible delivery of container at loading terminal
+VGM cut off VNSGN 30-OCT-2026 10:00 Submit VGM details
+Customer Reference: 156171300-MR MUNQFP 1 Booking Number: 94361468 BOBC0401-1.1 Page 1 of 4
+"""
+
+
+def test_hapag_new_layout_inland_legs():
+    res = extract_booking_from_text(HAPAG_NEW_INLAND_TEXT, "HL-Booking Update 2.pdf", words("hapag_new_inland"))
+    assert res["Carrier"] == "HAPAG-LLOYD"
+    assert res["Booking No"] == "94045713"  # not the HLCU BL number
+    # The ICD -> Cai Mep leg and the Norfolk -> Front Royal leg have no vessel and are skipped
+    assert res["Vessel"] == "WAN HAI A08 E018"
+    assert res["ETD"] == "12/11/2026 11:00"
+    assert res["Trunk Vessel"] == "WAN HAI A08 E018"
+    assert res["T/S Port"] == "null"
+    assert res["Port of Discharging"] == "NORFOLK, VA"
+    assert res["Place of Delivery"] == "FRONT ROYAL, VA"  # last leg of any mode
+    assert res["Equipment Type"] == "45GP"
+    assert res["Q'ty"] == "1"
+    assert res["Empty Pick Up CY"] == "G-FORTUNE TAN VAN 2 DEPOT"
+    assert res["Full return CY"] == "ICD DONG NAI"  # right-hand 'Import:' panel not merged in
+    assert res["Port Cargo Cut-off"] == "11/11/2026 07:00"  # 'FCL delivery date'
+
+
+def test_hapag_new_layout_transshipment():
+    res = extract_booking_from_text(HAPAG_NEW_TS_TEXT, "HPL NEW.pdf", words("hapag_new_ts"))
+    assert res["Booking No"] == "94361468"
+    assert res["Vessel"] == "CAT LAI EXPRESS 2641S"
+    assert res["ETD"] == "02/11/2026 17:00"
+    assert res["T/S Port"] == "TANJUNG PELEPAS"
+    assert res["Pre Carrier"] == "CAT LAI EXPRESS 2641S"
+    assert res["ETD_Pre"] == "02/11/2026 17:00"
+    assert res["Trunk Vessel"] == "MANCHESTER MAERSK 642W"
+    assert res["ETD_Trunk"] == "08/11/2026 04:30"
+    assert res["Port of Discharging"] == "LEIXOES"
+    assert res["Place of Delivery"] == "LEIXOES"
+    assert res["Empty Pick Up CY"] == "G-FORTUNE TAN VAN 2 DEPOT"
+    assert res["Full return CY"] == "CAT LAI TERMINAL IN HCM"
+    assert res["Port Cargo Cut-off"] == "01/11/2026 23:00"
+
+
+def test_hapag_new_layout_text_only_fallback():
+    res = extract_booking_from_text(HAPAG_NEW_TS_TEXT, "HPL NEW.jpg")
+    assert res["Carrier"] == "HAPAG-LLOYD"
+    assert res["Booking No"] == "94361468"
+    assert res["Equipment Type"] == "45GP"
+    assert res["Port Cargo Cut-off"] == "01/11/2026 23:00"
