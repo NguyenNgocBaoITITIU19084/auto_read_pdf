@@ -98,10 +98,18 @@ export function batchDuplicateIds(items: QueueItem[]): Set<string> {
   return dups;
 }
 
-/** Same rule as the edit form: a Pre Carrier / Trunk Vessel change drives Vessel and ETD. */
+/**
+ * A Pre Carrier / Trunk Vessel change drives Vessel and ETD. Editing the ETD of the leg that drives
+ * Vessel (ETD_Pre, or ETD_Trunk without a Pre Carrier) fixes ETD too, so a misread date corrected
+ * in the vessel details does not leave the saved ETD invalid.
+ */
 export function applyFieldChange(fields: Partial<Booking>, key: string, value: string): Partial<Booking> {
   const updated: Partial<Booking> = { ...fields, [key]: value };
-  if (key === 'Pre Carrier' && value && value !== 'null') {
+  const hasPre = !!updated['Pre Carrier'] && updated['Pre Carrier'] !== 'null';
+  if ((key === 'ETD_Pre' && hasPre) || (key === 'ETD_Trunk' && !hasPre)) {
+    // Only while ETD still follows that leg (the user may have typed a different ETD on purpose)
+    if (!hasValue(fields['ETD']) || fields['ETD'] === fields[key as 'ETD_Pre' | 'ETD_Trunk']) updated['ETD'] = value;
+  } else if (key === 'Pre Carrier' && value && value !== 'null') {
     updated['Vessel'] = value;
     if (updated['ETD_Pre'] && updated['ETD_Pre'] !== 'null') updated['ETD'] = updated['ETD_Pre'];
   } else if (key === 'Trunk Vessel' && (!updated['Pre Carrier'] || updated['Pre Carrier'] === 'null')) {

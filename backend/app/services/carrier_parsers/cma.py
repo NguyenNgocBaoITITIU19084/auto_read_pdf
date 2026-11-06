@@ -69,7 +69,14 @@ def _route_from_words(pages_words) -> List[Dict[str, str]]:
             i = min(range(len(legs)), key=lambda k: abs(legs[k] - w["top"]))
             col = [name for name, x in bounds if w["x0"] >= x][-1]
             cells[i][col].append(w)
-        route = [{k: row_text(sorted(v, key=lambda w: (round(w["top"]), w["x0"]))) for k, v in c.items()}
+        # Vessel names are centred under their header, so a long name starts left of it and its first
+        # word lands in the ETD column ('11-NOV-2026 ZHONG' / 'GU BEI JING'): only dates stay there
+        for c in cells:
+            stray = [w for w in c["etd"] if not re.fullmatch(_DATE, w["text"])]
+            if stray:
+                c["etd"] = [w for w in c["etd"] if w not in stray]
+                c["vessel"] = stray + c["vessel"]
+        route =[{k: row_text(sorted(v, key=lambda w: (round(w["top"]), w["x0"]))) for k, v in c.items()}
                  for c in cells]
         for row in route:
             # The LVR voyage is printed left of its header, so it can land in the vessel cell

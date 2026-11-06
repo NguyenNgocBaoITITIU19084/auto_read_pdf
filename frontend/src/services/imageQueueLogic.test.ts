@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ImageExtractResult } from '../types';
 import {
-  QueueItem, batchDuplicateIds, classifyResult, dedupeIncoming, isPdfItem, makeQueueItem, queueReducer, queueStats,
+  QueueItem, applyFieldChange, batchDuplicateIds, classifyResult, dedupeIncoming, isPdfItem, makeQueueItem, queueReducer, queueStats,
 } from './imageQueueLogic';
 
 const file = (name: string, size = 10, lastModified = 1) => new File([new Uint8Array(size)], name, { type: 'image/png', lastModified });
@@ -143,5 +143,30 @@ describe('dedupeIncoming / queueStats', () => {
   it('counts by status', () => {
     const stats = queueStats([item('a', { status: 'success' }), item('b', { status: 'failed' }), item('c'), item('d', { status: 'saved' })]);
     expect(stats).toMatchObject({ total: 4, success: 1, failed: 1, queued: 1, saved: 1, finished: 3 });
+  });
+});
+
+describe('applyFieldChange', () => {
+  const misread = {
+    'Pre Carrier': 'GU BEI JING TVI000W19', 'ETD_Pre': '11-NOV-2026 ZHONG',
+    'Trunk Vessel': 'CGM ZHENG HE 0FLNFW1MA', 'ETD_Trunk': '20-NOV-2026 CMA',
+    'Vessel': 'GU BEI JING TVI000W19', 'ETD': '11-NOV-2026 ZHONG',
+  };
+
+  it('fixing ETD Pre Carrier also fixes the ETD it drives', () => {
+    const r = applyFieldChange(misread, 'ETD_Pre', '11/11/2026');
+    expect(r['ETD_Pre']).toBe('11/11/2026');
+    expect(r['ETD']).toBe('11/11/2026');
+  });
+
+  it('ETD Trunk drives ETD only without a Pre Carrier', () => {
+    expect(applyFieldChange(misread, 'ETD_Trunk', '20/11/2026')['ETD']).toBe('11-NOV-2026 ZHONG');
+    const direct = { ...misread, 'Pre Carrier': '', 'ETD': '20-NOV-2026 CMA' };
+    expect(applyFieldChange(direct, 'ETD_Trunk', '20/11/2026')['ETD']).toBe('20/11/2026');
+  });
+
+  it('keeps an ETD the user set apart from the leg', () => {
+    const own = { ...misread, 'ETD': '12/11/2026' };
+    expect(applyFieldChange(own, 'ETD_Pre', '11/11/2026')['ETD']).toBe('12/11/2026');
   });
 });

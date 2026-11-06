@@ -211,3 +211,29 @@ TERMINAL
     assert r["Port of Discharging"] == r["Place of Delivery"] == "LIVERPOOL"
     assert r["T/S Port"] == "SINGAPORE"
     assert r["Trunk Vessel"] == "CMA CGM VENDOME 0FLN9W1MA"
+
+
+# BKGCONF_SGN3527323.pdf: long vessel names start left of their centred header ('ZHONG GU BEI JING',
+# 'CMA CGM ZHENG HE'); their first word must not stick to the ETD
+CENTRED_TEXT = """Booking Confirmation
+From: CMA CGM VIETNAM To: NESTLE INTEGRATED BUSINESS SERVICES
+Booking Number: SGN3527323 Customer Ref: 4134-VNNguyenHu2
+ROUTE INFORMATION
+CUT-OFF INFORMATION
+SI Cut-Off VGM Cut-Off Port Cut-Off
+09-NOV-2026 11:59 09-NOV-2026 11:59 10-NOV-2026 09:00
+CARGO INFORMATION 1
+1 x 40'HC Foodstuff 630532 Flexible 15000 KGM 18900 KGM
+"""
+
+
+def test_cma_vessel_name_left_of_its_header_stays_whole():
+    words = json.loads((FIXTURES / "cma_centred_vessel_words.json").read_text(encoding="utf-8"))
+    r = extract_booking_from_text(CENTRED_TEXT, "BKGCONF_SGN3527323.pdf", [[], words])
+    assert r["Vessel"] == r["Pre Carrier"] == "ZHONG GU BEI JING TVI000W19"
+    assert r["ETD"] == r["ETD_Pre"] == "11/11/2026"
+    assert r["Trunk Vessel"] == "CMA CGM ZHENG HE 0FLNFW1MA"
+    assert r["ETD_Trunk"] == "20/11/2026"
+    assert r["T/S Port"] == "SINGAPORE"
+    assert r["Full return CY"] == "GEMALINK PORT"
+    assert r["Port of Discharging"] == "LIVERPOOL"
