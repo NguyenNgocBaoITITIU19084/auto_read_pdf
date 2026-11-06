@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    image: auto-read-pdf:latest
+    container_name: auto-read-pdf
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      # Optional: Gemini key for reading booking/container images (can also be set in the app's settings)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      # Database + logs live here and survive rebuilds
+      - app-data:/data
+      # Optional: folder for "Auto import" PDFs; set the path /import in the app
+      # - ./import:/import
+
+volumes:
+  app-data:

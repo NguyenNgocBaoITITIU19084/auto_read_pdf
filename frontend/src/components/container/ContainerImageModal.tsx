@@ -32,7 +32,7 @@ interface Props {
   onLookup: (containerNo: string) => Promise<ContainerLookupResult>;
 }
 
-const SITES = ['CTL', 'GNL', 'THP', 'CMS', 'IST', 'TNT'] as const;
+const SITES = ['CTL', 'GNL', 'THP', 'CMS', 'IST', 'TNT', 'ITC'] as const;
 const inputCls = 'w-full text-sm font-mono font-semibold rounded-lg px-3 py-1.5 border focus:ring-2 focus:ring-purple-500 focus:outline-none text-slate-900 dark:text-slate-100';
 const editedCls = 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700';
 const plainCls = 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700';

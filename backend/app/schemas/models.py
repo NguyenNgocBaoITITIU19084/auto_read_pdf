@@ -53,12 +53,17 @@ class VesselWatchlistAddRequest(BaseModel):
     vessel_name: str
     voyage: Optional[str] = ""
 
+class SpItcBookingSyncRequest(BaseModel):
+    booking_id: int
+
 class ContainerSearchRequest(BaseModel):
     collection_id: int
     site_id: str
     container_nos: str
     is_search_by_in_yard: Optional[bool] = False
     is_search_by_batch: Optional[bool] = False
+    captcha_code: Optional[str] = None
+    captcha_session_id: Optional[str] = None
 
 class ContainerWatchlistAddRequest(BaseModel):
     collection_id: int

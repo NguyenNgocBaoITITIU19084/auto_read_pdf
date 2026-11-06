@@ -7,7 +7,8 @@ import {
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult,
 } from '../types';
 
-const API_BASE = 'http://127.0.0.1:8000/api/v1';
+// The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
+const API_BASE: string = (import.meta as any).env?.VITE_API_BASE || 'http://127.0.0.1:8000/api/v1';
 
 /** Timeout for long-running calls (ePort resync, PDF upload, image extraction). */
 export const LONG_TIMEOUT = 180000;
@@ -398,12 +399,26 @@ export const getContainerLineOpers = async (collectionId: number): Promise<Colum
 export const getContainersByIds = async (ids: number[]): Promise<ContainerInfo[]> =>
   (await apiClient.post<ContainerInfo[]>('/containers/by-ids', { ids }, { timeout: LONG_TIMEOUT })).data;
 
+export interface SpItcCaptchaResponse {
+  session_id: string;
+  image_data: string;
+  /** Seconds until the app forgets this captcha (a code typed after that is refused as expired) */
+  expires_in?: number;
+}
+
+export const getSpItcCaptchaApi = async (): Promise<SpItcCaptchaResponse> => {
+  const res = await apiClient.get<SpItcCaptchaResponse>('/containers/sp-itc-captcha');
+  return res.data;
+};
+
 export const searchContainersApi = async (
   collectionId: number,
   siteId: string,
   containerNos: string,
   isSearchByInYard: boolean = false,
-  isSearchByBatch: boolean = false
+  isSearchByBatch: boolean = false,
+  captchaCode?: string,
+  captchaSessionId?: string,
 ): Promise<any> => {
   const res = await apiClient.post('/containers/search', {
     collection_id: collectionId,
@@ -411,6 +426,8 @@ export const searchContainersApi = async (
     container_nos: containerNos,
     is_search_by_in_yard: isSearchByInYard,
     is_search_by_batch: isSearchByBatch,
+    captcha_code: captchaCode || undefined,
+    captcha_session_id: captchaSessionId || undefined,
   });
   return res.data;
 };
@@ -469,6 +486,13 @@ export const removeContainerWatchlistBatch = async (ids: number[]): Promise<{ st
 /** Re-query ePort for the given containers ids. */
 export const resyncContainersApi = async (ids: number[], options: { allEvents?: boolean } = {}): Promise<ResyncResult> => {
   const res = await apiClient.post<ResyncResult>('/containers/resync', { ids, all_events: !!options.allEvents }, { timeout: LONG_TIMEOUT });
+  return res.data;
+};
+
+/** SP-ITC: look the booking up and save its containers linked to it (SP-ITC's container search has no booking no.) */
+export const syncSpItcBookingApi = async (bookingId: number): Promise<ResyncResult> => {
+  const res = await apiClient.post<ResyncResult>('/containers/sp-itc-booking',
+    { booking_id: bookingId }, { timeout: LONG_TIMEOUT });
   return res.data;
 };
 

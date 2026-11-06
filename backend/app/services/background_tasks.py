@@ -19,7 +19,7 @@ from backend.app.core.database import (
     purge_expired_trash, run_reminders,
 )
 from backend.app.services.change_detection import extra_gate_rows
-from backend.app.services.eport_client import search_vessels_detailed, search_containers
+from backend.app.services.eport_client import search_vessels_detailed, search_containers, failed_containers
 from backend.app.core.logging_setup import purge_old_logs
 from backend.app.services import auto_import
 
@@ -254,6 +254,7 @@ async def sync_container_watchlists() -> dict:
             logger.info(f"[Auto-Sync Containers] Syncing {len(unique_cont_nos)} container(s) for Collection {col_id} at site '{site_id}': {cont_str}")
             try:
                 results = await asyncio.to_thread(search_containers, site_id, cont_str) or []
+                failed = failed_containers(results)
                 # Only keep results strictly matching watched container_no AND event_type (if specified)
                 filtered_results = []
                 matched_ids = set()
@@ -285,6 +286,10 @@ async def sync_container_watchlists() -> dict:
                     if it.get("id") in matched_ids:
                         result["containers_ok"] += 1
                         await asyncio.to_thread(_report_watchlist_status, "container", it.get("id"), "ok", "")
+                    elif it["container_no"].strip().upper() in failed:
+                        result["errors"] += 1
+                        await asyncio.to_thread(_report_watchlist_status, "container", it.get("id"), "error",
+                                                failed[it["container_no"].strip().upper()])
                     else:
                         ev = (it.get("event_type") or "").strip()
                         msg = (f"Không có sự kiện '{ev}' cho container {it['container_no']} trên ePort"

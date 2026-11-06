@@ -1,9 +1,11 @@
 import logging
+import os
 import sys
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from pathlib import Path
 
@@ -99,6 +101,11 @@ app.include_router(mobile_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(auto_import_router, prefix="/api/v1")
+
+# Docker: serve the built React app from the same origin. Mounted last so API routes win.
+FRONTEND_DIST = os.environ.get("FRONTEND_DIST", "")
+if FRONTEND_DIST and Path(FRONTEND_DIST).is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
 
 if __name__ == "__main__":
     import multiprocessing

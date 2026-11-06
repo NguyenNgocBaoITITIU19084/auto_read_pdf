@@ -1,0 +1,36 @@
+# Real user data must never end up in the image
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Dependencies and build output
+**/node_modules
+**/__pycache__
+*.py[cod]
+.venv
+venv
+dist
+dist_electron
+build
+frontend/dist
+.pyinstaller_cache
+
+# Logs, caches, tooling
+logs
+**/logs
+!frontend/src/components/logs
+*.log
+.pytest_cache
+graphify-out
+.superpowers
+.claude
+.git
+.github
+.DS_Store
+.env
+*.pdf
+*.xlsx
+*.xls

@@ -550,22 +550,24 @@ def _ocr_windows(image_bytes: bytes, timeout: float) -> str:
                 pass
 
 
-def _ocr_tesseract(image_bytes: bytes, timeout: float) -> str:
+def _ocr_tesseract(image_bytes: bytes, timeout: float, config: str = "") -> str:
     try:
         import pytesseract
         from PIL import Image
 
         image = Image.open(io.BytesIO(image_bytes))
-        return (pytesseract.image_to_string(image, timeout=max(1.0, timeout)) or "").strip()
+        return (pytesseract.image_to_string(image, config=config, timeout=max(1.0, timeout)) or "").strip()
     except Exception as e:
         print(f"Tesseract OCR failed: {e}")
         return ""
 
 
-def run_local_ocr(image_bytes: bytes, total_timeout: float = OCR_TIMEOUT_S) -> Tuple[str, List[str]]:
+def run_local_ocr(image_bytes: bytes, total_timeout: float = OCR_TIMEOUT_S,
+                  tesseract_config: str = "") -> Tuple[str, List[str]]:
     """
     Runs available local OCR engines within a total time budget.
     Returns (text, engines_tried). engines_tried == [] means no OCR engine available.
+    `tesseract_config` is passed to Tesseract only (e.g. "--psm 7" for a one-line captcha).
     """
     engines = available_ocr_engines()
     tried: List[str] = []
@@ -585,7 +587,7 @@ def run_local_ocr(image_bytes: bytes, total_timeout: float = OCR_TIMEOUT_S) -> T
                 tried.remove(engine)  # reported to the caller as "no OCR engine", with the fix in no_ocr_warning()
                 text = ""
         elif engine == "tesseract":
-            text = _ocr_tesseract(image_bytes, remaining)
+            text = _ocr_tesseract(image_bytes, remaining, tesseract_config)
         if text:
             break
     return text, tried

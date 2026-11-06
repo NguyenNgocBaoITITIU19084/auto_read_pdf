@@ -14,10 +14,12 @@ import {
   getContainers, getContainersPage, getContainerIds, getContainersByIds, getContainerLineOpers, searchContainersApi, deleteContainer, deleteContainersBatch, clearContainers,
   addContainerWatchlist, getContainerWatchlist, deleteContainerWatchlist,
   addContainerWatchlistBatch, removeContainerWatchlistBatch, resyncContainersApi,
-  containerTrashApi,
+  containerTrashApi, getSpItcCaptchaApi, SpItcCaptchaResponse,
 } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import { ExportModal } from '../common/ExportModal';
+import { CaptchaCountdown } from './CaptchaCountdown';
+import { recallSpItcCaptcha, rememberSpItcCaptcha } from './spItcCaptchaMemory';
 import { ColumnConfigModal, ColumnDef } from '../common/ColumnConfigModal';
 import { BulkActionBar, BulkAction } from '../common/BulkActionBar';
 import { RowContextMenu, MenuGroup, bulkMenuItems, useRowContextMenu } from '../common/RowContextMenu';
@@ -101,9 +103,30 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
   }, [initialSearchQuery]);
 
   const [siteId, setSiteId] = useState<string>(() => localStorage.getItem('last_container_site_id') || 'CTL');
-  const [containerNosInput, setContainerNosInput] = useState('');
+  // Manual SP-ITC searches one container per code: the ones left are kept across tab switches
+  const [containerNosInput, setContainerNosInput] = useState(() => recallSpItcCaptcha().pendingContainers);
   const [isSearchByInYard, setIsSearchByInYard] = useState<boolean>(() => localStorage.getItem('last_container_is_in_yard') === 'true');
   const [isSearchByBatch, setIsSearchByBatch] = useState<boolean>(() => localStorage.getItem('last_container_is_batch') === 'true');
+
+  // SP-ITC captcha state: auto (OCR) vs manual
+  const [captchaMode, setCaptchaMode] = useState<'auto' | 'manual'>(() => {
+    return (localStorage.getItem('itc_captcha_mode') as 'auto' | 'manual') || 'auto';
+  });
+  // Starts from the captcha shown before the tab was left, while it is still valid (no new SP-ITC request)
+  const [manualCaptcha, setManualCaptcha] = useState<SpItcCaptchaResponse | null>(() => recallSpItcCaptcha().captcha);
+  // Date.now() ms when the shown captcha expires (from its expires_in), null when unknown
+  const [captchaExpiresAt, setCaptchaExpiresAt] = useState<number | null>(() => recallSpItcCaptcha().expiresAt);
+  const [captchaInput, setCaptchaInput] = useState(() => recallSpItcCaptcha().code);
+  useEffect(() => {
+    rememberSpItcCaptcha({ captcha: manualCaptcha, expiresAt: captchaExpiresAt, code: captchaInput });
+  }, [manualCaptcha, captchaExpiresAt, captchaInput]);
+  useEffect(() => {
+    // while a manual multi-container search is under way, edits to the list are what comes back after a tab switch
+    if (recallSpItcCaptcha().pendingContainers) rememberSpItcCaptcha({ pendingContainers: containerNosInput });
+  }, [containerNosInput]);
+  const [loadingCaptcha, setLoadingCaptcha] = useState(false);
+  // A failed captcha fetch is not retried on its own (that looped thousands of times a minute): the user presses ⟳
+  const [captchaFailed, setCaptchaFailed] = useState(false);
 
   const [selectedContainer, setSelectedContainer] = useState<ContainerInfo | null>(null);
   const [isWatchlistOpen, setIsWatchlistOpen] = useState(false);
@@ -438,6 +461,39 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
     return () => window.removeEventListener('paste', onPaste);
   }, [enqueueContainerImages]);
 
+  const showCaptcha = useCallback((data: SpItcCaptchaResponse | null) => {
+    setManualCaptcha(data);
+    setCaptchaExpiresAt(data && data.expires_in ? Date.now() + data.expires_in * 1000 : null);
+    setCaptchaInput('');
+  }, []);
+
+  // One captcha request at a time: each opens a new SP-ITC session, and the auto-load effect plus a click (or
+  // React's dev double effects) used to fire two at once, the first one wasted
+  const captchaInFlightRef = useRef(false);
+  const loadManualCaptcha = useCallback(async () => {
+    if (siteId !== 'ITC' || captchaMode !== 'manual' || captchaInFlightRef.current) return;
+    captchaInFlightRef.current = true;
+    setLoadingCaptcha(true);
+    try {
+      const data = await getSpItcCaptchaApi();
+      showCaptcha(data);
+      setCaptchaFailed(false);
+    } catch (err: any) {
+      showCaptcha(null);
+      setCaptchaFailed(true);
+      addToast(errorMessage(err, 'Không lấy được mã xác nhận SP-ITC'), 'error');
+    } finally {
+      captchaInFlightRef.current = false;
+      setLoadingCaptcha(false);
+    }
+  }, [siteId, captchaMode, addToast, showCaptcha]);
+
+  useEffect(() => {
+    if (siteId === 'ITC' && captchaMode === 'manual' && !manualCaptcha && !loadingCaptcha && !captchaFailed) {
+      loadManualCaptcha();
+    }
+  }, [siteId, captchaMode, manualCaptcha, loadingCaptcha, captchaFailed, loadManualCaptcha]);
+
   const handleQueryEport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCollection) return;
@@ -446,6 +502,19 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       return;
     }
 
+    if (siteId === 'ITC' && captchaMode === 'manual' && !captchaInput.trim()) {
+      addToast(t.container.captchaRequired, 'error');
+      return;
+    }
+    if (siteId === 'ITC' && captchaMode === 'manual' && captchaExpiresAt !== null && Date.now() >= captchaExpiresAt) {
+      // SP-ITC would refuse it anyway: show a new one instead of sending the old code
+      addToast(t.container.captchaExpired, 'error');
+      loadManualCaptcha();
+      return;
+    }
+
+    const isManual = siteId === 'ITC' && captchaMode === 'manual';
+    let nextCaptcha: SpItcCaptchaResponse | null = null;
     try {
       setQuerying(true);
       localStorage.setItem('last_container_site_id', siteId);
@@ -460,12 +529,23 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
         siteId,
         cleaned,
         isSearchByInYard,
-        isSearchByBatch
+        isSearchByBatch,
+        isManual ? captchaInput.trim() : undefined,
+        isManual ? manualCaptcha?.session_id : undefined,
       );
       if (res.count > 0) {
         addToast(`Tìm thấy ${res.count} kết quả tra cứu container!`, 'success');
       } else {
         addToast(res.message || 'Không tìm thấy thông tin container trên ePort', 'info');
+      }
+      // Manual SP-ITC: one container per typed code. The rest stay in the box with the next code to type.
+      const remaining: string[] = isManual && Array.isArray(res.remaining) ? res.remaining : [];
+      if (remaining.length === 0) rememberSpItcCaptcha({ pendingContainers: '' });
+      if (remaining.length > 0) {
+        setContainerNosInput(remaining.join(', ')); // one-line input: a newline would glue the numbers together
+        rememberSpItcCaptcha({ pendingContainers: remaining.join(', ') });
+        nextCaptcha = res.next_captcha || null;
+        addToast(tf(t.container.captchaNext, { done: res.searched || '', count: remaining.length }), 'info');
       }
       selection.clear(); // re-queried rows get new ids (ON CONFLICT REPLACE)
       await loadData('refresh');
@@ -473,6 +553,14 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
       addToast(errorMessage(e, t.common.error), 'error');
     } finally {
       setQuerying(false);
+      if (isManual) {
+        // Every answer uses up the code, so show a new one (the next one SP-ITC handed out, else a fresh one)
+        if (nextCaptcha) {
+          showCaptcha(nextCaptcha);
+        } else {
+          loadManualCaptcha();
+        }
+      }
     }
   };
 
@@ -742,6 +830,7 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
                 <option value="CMS">{t.vessel.siteCMS}</option>
                 <option value="IST">{t.vessel.siteIST}</option>
                 <option value="TNT">{t.vessel.siteTNT}</option>
+                <option value="ITC">{t.vessel.siteITC}</option>
               </select>
             </div>
 
@@ -818,6 +907,91 @@ export const ContainerTab: React.FC<ContainerTabProps> = ({ initialSearchQuery }
               />
               <span title={t.container.searchByBatchTooltip}>{t.container.searchByBatch}</span>
             </label>
+
+            {siteId === 'ITC' && (
+              <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 sm:pl-3 sm:border-l border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500 dark:text-slate-400 font-medium">
+                  {t.container.captchaMode}
+                </span>
+                <div className="inline-flex rounded-lg p-0.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCaptchaMode('auto');
+                      localStorage.setItem('itc_captcha_mode', 'auto');
+                    }}
+                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all ${
+                      captchaMode === 'auto'
+                        ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {t.container.captchaAuto}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCaptchaMode('manual');
+                      localStorage.setItem('itc_captcha_mode', 'manual');
+                      if (!manualCaptcha) loadManualCaptcha();
+                    }}
+                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all ${
+                      captchaMode === 'manual'
+                        ? 'bg-white dark:bg-slate-700 text-primary-600 dark:text-primary-400 shadow-sm'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {t.container.captchaManual}
+                  </button>
+                </div>
+
+                {captchaMode === 'manual' && (
+                  <div className="flex items-center gap-1.5">
+                    {manualCaptcha?.image_data ? (
+                      <div className="relative border border-slate-300 dark:border-slate-600 rounded bg-white overflow-hidden h-7 flex items-center">
+                        <img
+                          src={manualCaptcha.image_data}
+                          alt="Captcha"
+                          className="h-7 w-auto select-none"
+                        />
+                      </div>
+                    ) : (
+                      <div className="h-7 w-20 border border-dashed border-slate-300 dark:border-slate-700 rounded flex items-center justify-center text-[10px] text-slate-400">
+                        {loadingCaptcha ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Chưa có ảnh'}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={loadManualCaptcha}
+                      disabled={loadingCaptcha}
+                      title={t.container.captchaRefresh}
+                      className="p-1 rounded text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      <RotateCw className={`w-3.5 h-3.5 ${loadingCaptcha ? 'animate-spin' : ''}`} />
+                    </button>
+
+                    {manualCaptcha && captchaExpiresAt !== null && (
+                      <CaptchaCountdown
+                        expiresAt={captchaExpiresAt}
+                        tooltip={t.container.captchaExpiresIn}
+                        expiredText={t.container.captchaExpiredShort}
+                        expiredTooltip={t.container.captchaExpiredHint}
+                      />
+                    )}
+
+                    <input
+                      type="text"
+                      value={captchaInput}
+                      onChange={(e) => setCaptchaInput(e.target.value.trim())}
+                      placeholder={t.container.captchaPlaceholder}
+                      maxLength={6}
+                      className="w-24 text-center font-mono font-bold text-xs uppercase bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1 focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </form>
       </div>

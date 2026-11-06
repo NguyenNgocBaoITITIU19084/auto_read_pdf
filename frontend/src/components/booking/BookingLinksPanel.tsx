@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Box, CheckCircle2, Loader2, RefreshCw, Ship } from 'lucide-react';
-import { getBookingLinks, resyncContainersApi, resyncVesselsApi } from '../../services/api';
+import { getBookingLinks, resyncContainersApi, resyncVesselsApi, syncSpItcBookingApi } from '../../services/api';
+import { guessSiteFromDepot } from '../../utils/vessel';
 import { tf } from '../../services/i18nFormat';
 import { ValueBadge } from '../common/ValueBadge';
 import type { TabId } from '../common/Tabs';
@@ -39,6 +40,8 @@ interface BookingLinksPanelProps {
   bookingId: number;
   bookingNo: string;
   vessel: string;
+  /** "Full return CY": says which port the booking is at (SP-ITC needs a booking lookup, see refreshFromEport) */
+  fullReturnCy?: string;
   labels: BookingLinksLabels;
   onNavigateTab?: (tab: TabId, query?: string) => void;
   /** Changes whenever vessel schedules were saved: the links are fetched again */
@@ -82,7 +85,7 @@ const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 /** The booking's ePort vessel schedule(s) and containers, under the booking detail. */
 export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
-  bookingId, bookingNo, vessel, labels, onNavigateTab, reloadKey, onUpdated,
+  bookingId, bookingNo, vessel, fullReturnCy, labels, onNavigateTab, reloadKey, onUpdated,
 }) => {
   const [links, setLinks] = useState<BookingLinks | null>(null);
   const [failed, setFailed] = useState(false);
@@ -113,20 +116,33 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
     };
   }, [bookingId, reloadKey, localReload]);
 
+  /** SP-ITC containers carry no booking number: at ITC the booking itself is looked up, which brings all its
+   *  containers. At ITC = "Full return CY" names SP-ITC, or a linked vessel schedule is at ITC. */
+  const bookingAtItc = (l: BookingLinks) => {
+    const no = bookingNo.trim();
+    return !!no && no.toLowerCase() !== 'null'
+      && (guessSiteFromDepot(fullReturnCy) === 'ITC' || l.vessels.some((v) => String(v.site_id || '').toUpperCase() === 'ITC'));
+  };
+
   /** Looks the linked vessel schedules and containers up on ePort again (the same as "resync" in their tabs). */
   const refreshFromEport = async () => {
     if (!links) return;
+    // At ITC the booking lookup brings its already linked ITC containers too: they are not looked up twice
+    const atItc = bookingAtItc(links);
     const vesselIds = links.vessels.map((v) => v.id).filter((id): id is number => typeof id === 'number');
-    const containerIds = links.containers.map((c) => c.id).filter((id): id is number => typeof id === 'number');
-    if (!vesselIds.length && !containerIds.length) {
+    const containerIds = links.containers
+      .filter((c) => !(atItc && String(c.site_id || '').toUpperCase() === 'ITC'))
+      .map((c) => c.id).filter((id): id is number => typeof id === 'number');
+    if (!vesselIds.length && !containerIds.length && !atItc) {
       setRefreshNote({ ok: false, text: labels.refreshNothing });
       return;
     }
     setRefreshing(true);
     setRefreshNote(null);
-    const [v, c] = await Promise.allSettled([
+    const [v, c, itc] = await Promise.allSettled([
       vesselIds.length ? resyncVesselsApi(vesselIds) : Promise.resolve(null),
       containerIds.length ? resyncContainersApi(containerIds) : Promise.resolve(null),
+      atItc ? syncSpItcBookingApi(bookingId) : Promise.resolve(null),
     ]);
     const errors: string[] = [];
     const notFound: string[] = [];
@@ -141,7 +157,7 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
       return r.value.updated || 0;
     };
     const vessels = count(v);
-    const containers = count(c);
+    const containers = count(c) + count(itc);
     let text = errors.length ? tf(labels.refreshError, { message: errors[0] }) : tf(labels.refreshDone, { vessels, containers });
     if (notFound.length) text += ` ${tf(labels.refreshNotFound, { items: notFound.join(', ') })}`;
     setRefreshNote({ ok: !errors.length, text });
@@ -164,6 +180,7 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
   const allGated = qty !== null && gated >= qty && qty > 0;
 
   const hasLinks = vessels.length > 0 || containers.length > 0;
+  const canRefresh = hasLinks || bookingAtItc(links);
 
   return (
     <div className="space-y-3">
@@ -179,8 +196,8 @@ export const BookingLinksPanel: React.FC<BookingLinksPanelProps> = ({
         <button
           type="button"
           onClick={refreshFromEport}
-          disabled={refreshing || !hasLinks}
-          title={hasLinks ? labels.refreshTooltip : labels.refreshNothing}
+          disabled={refreshing || !canRefresh}
+          title={canRefresh ? labels.refreshTooltip : labels.refreshNothing}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />

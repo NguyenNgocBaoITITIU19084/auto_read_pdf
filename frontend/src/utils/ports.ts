@@ -11,6 +11,7 @@ export const PORT_OPTIONS: PortOption[] = [
   { siteId: 'CMS', nameVi: 'CMS ICD Nhơn Trạch (CMS)', nameEn: 'CMS ICD Nhon Trach (CMS)' },
   { siteId: 'IST', nameVi: 'ICD Tân Cảng Sóng Thần (IST)', nameEn: 'ICD Tan Cang Song Than (IST)' },
   { siteId: 'TNT', nameVi: 'ICD Tân Cảng Nhơn Trạch (TNT)', nameEn: 'ICD Tan Cang Nhon Trach (TNT)' },
+  { siteId: 'ITC', nameVi: 'Cảng Quốc tế SP-ITC (ITC)', nameEn: 'SP-ITC International Container Terminal (ITC)' },
 ];
 
 export const getPortDisplayName = (siteId?: string, lang: 'vi' | 'en' = 'vi'): string => {

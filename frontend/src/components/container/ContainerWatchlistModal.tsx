@@ -172,6 +172,7 @@ export const ContainerWatchlistModal: React.FC<ContainerWatchlistModalProps> = (
                 <option value="CMS">{t.vessel.siteCMS}</option>
                 <option value="IST">{t.vessel.siteIST}</option>
                 <option value="TNT">{t.vessel.siteTNT}</option>
+                <option value="ITC">{t.vessel.siteITC}</option>
               </select>
             </div>
             <div className="sm:col-span-2">

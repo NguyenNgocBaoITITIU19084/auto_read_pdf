@@ -266,6 +266,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
           bookingId={booking.id}
           bookingNo={String(booking["Booking No"] ?? '')}
           vessel={String(booking["Vessel"] ?? '')}
+          fullReturnCy={String(booking["Full return CY"] ?? '')}
           labels={t.booking.links}
           onNavigateTab={onNavigateTab && ((tab, query) => { onClose(); onNavigateTab(tab, query); })}
           reloadKey={linksReloadKey}

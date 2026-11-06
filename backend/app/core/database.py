@@ -928,6 +928,13 @@ def find_duplicate_booking_ids(col_id: int, booking_no: str, exclude_id: int | N
     return [r[0] for r in rows]
 
 
+def get_booking_number_and_collection(booking_id: int) -> tuple[str, int] | None:
+    """(booking_no, collection_id) of a booking, None when there is no such booking."""
+    with get_connection() as conn:
+        row = conn.execute("SELECT booking_no, collection_id FROM bookings WHERE id = ?;", (booking_id,)).fetchone()
+    return (_s(row[0]), row[1]) if row else None
+
+
 def get_booking_collection_id(booking_id: int) -> int | None:
     with get_connection() as conn:
         row = conn.execute("SELECT collection_id FROM bookings WHERE id = ?;", (booking_id,)).fetchone()
@@ -1910,6 +1917,17 @@ def _insert_container_rows(cursor: sqlite3.Cursor, col_id: int, containers: list
         if not cont_val:
             continue
         row_queried_at = (c.get("queried_at") or queried_at) if preserve_queried_at else queried_at
+        bill_book = _s(c.get("BILL_BOOK", c.get("bill_book", "")))
+        if not bill_book:
+            # A port answering without the booking number (SP-ITC's container search) must not wipe the one this
+            # same event row already has (from SP-ITC's booking search): it is what links it to the booking
+            kept = cursor.execute(
+                "SELECT bill_book FROM containers WHERE collection_id = ? AND containerno = ? AND event_time = ? "
+                "AND event_type = ? AND TRIM(COALESCE(bill_book, '')) != '' LIMIT 1;",
+                (col_id, cont_val, _s(c.get("EVENT_TIME", c.get("event_time", ""))),
+                 _s(c.get("EVENT_TYPE", c.get("event_type", ""))))).fetchone()
+            if kept:
+                bill_book = kept[0]
 
         cursor.execute("""
             INSERT OR REPLACE INTO containers (
@@ -1952,7 +1970,7 @@ def _insert_container_rows(cursor: sqlite3.Cursor, col_id: int, containers: list
             _s(c.get("CONT_OUT_TS", c.get("cont_out_ts", ""))),
             _s(c.get("LINE_OPER", c.get("line_oper", ""))),
             _s(c.get("IM_EXP", c.get("im_exp", ""))),
-            _s(c.get("BILL_BOOK", c.get("bill_book", ""))),
+            bill_book,
             _s(c.get("CUST_APPROVAL_DATE", c.get("cust_approval_date", ""))),
             _s(c.get("NOTE", c.get("note", ""))),
             _s(c.get("ITEM_SEAL_NO", c.get("item_seal_no", ""))),

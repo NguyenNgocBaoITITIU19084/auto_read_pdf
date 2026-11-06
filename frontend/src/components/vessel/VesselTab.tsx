@@ -592,6 +592,7 @@ export const VesselTab: React.FC<VesselTabProps> = ({ initialSearchQuery, onNavi
               <option value="CMS">{t.vessel.siteCMS}</option>
               <option value="IST">{t.vessel.siteIST}</option>
               <option value="TNT">{t.vessel.siteTNT}</option>
+              <option value="ITC">{t.vessel.siteITC}</option>
             </select>
           </div>
 

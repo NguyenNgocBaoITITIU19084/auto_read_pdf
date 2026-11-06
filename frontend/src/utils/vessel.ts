@@ -97,6 +97,7 @@ export function guessSiteFromDepot(text?: string | null): string | null {
   if (has('TNT', 'TCNT')) return 'TNT';
   if (has('CMS')) return 'CMS';
   if (has('NHON TRACH')) return has('TAN CANG') ? 'TNT' : 'CMS';
+  if (has('ITC', 'SPITC', 'SP ITC')) return 'ITC';
   if (has('CTL', 'TCCL', 'CAT LAI')) return 'CTL';
   // Cai Mep terminals are not ePort sites
   if (has('CAI MEP', 'TCIT', 'TCTT', 'CMIT', 'TCCT')) return null;

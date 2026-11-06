@@ -10,14 +10,14 @@ from backend.app.core.database import (
     update_watchlist_sync_status, get_containers_page, get_container_ids, get_container_line_opers
 )
 from backend.app.api.trash import add_trash_routes
-from backend.app.services.eport_client import search_containers
+from backend.app.services.eport_client import search_containers, failed_containers
 from backend.app.services.container_image_extractor import extract_container_from_image_detailed
 from backend.app.services.change_detection import extra_gate_rows
 from backend.app.core.database import get_notification_settings
 from backend.app.schemas.models import (
     ContainerSearchRequest, ContainerWatchlistAddRequest, BatchDeleteRequest,
     ContainerWatchlistBatchAddRequest, BatchIdsRequest, ResyncRequest, ResyncResponse,
-    ContainerResyncRequest
+    ContainerResyncRequest, SpItcBookingSyncRequest
 )
 
 logger = logging.getLogger("backend.api.containers")
@@ -72,12 +72,43 @@ def list_container_line_opers(collection_id: int = Query(...)):
 def list_containers_by_ids(payload: BatchIdsRequest):
     return get_containers_by_ids(payload.ids)
 
+@router.get("/sp-itc-captcha")
+def fetch_sp_itc_captcha():
+    """Fetch a fresh captcha image for manual solving on SP-ITC."""
+    try:
+        from backend.app.services.sp_itc_client import get_manual_captcha
+        return get_manual_captcha()
+    except Exception as e:
+        logger.exception(f"[API /containers/sp-itc-captcha] Error: {e}")
+        raise HTTPException(status_code=400, detail=f"Không lấy được mã xác nhận từ SP-ITC: {e}")
+
+
+def _query_sp_itc_manual(payload: ContainerSearchRequest) -> dict:
+    """SP-ITC with a code the user typed: one container per code (see search_sp_itc_manual).
+    "remaining" are the containers still to search, "next_captcha" the image to type for the next one."""
+    from backend.app.services.sp_itc_client import search_sp_itc_manual
+    try:
+        res = search_sp_itc_manual(payload.container_nos, payload.captcha_code, payload.captcha_session_id)
+    except Exception as e:
+        logger.warning(f"[API /containers/search] SP-ITC manual search failed: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    rows = res["rows"]
+    if rows:
+        insert_containers(payload.collection_id, rows)
+        logger.info(f"[API /containers/search] ✅ SP-ITC '{res['searched']}': saved {len(rows)} container event(s)")
+    message = "" if rows else f"Không tìm thấy thông tin container {res['searched']} trên ePort SP-ITC"
+    return {"count": len(rows), "items": rows, "message": message, "searched": res["searched"],
+            "remaining": res["remaining"], "next_captcha": res["captcha"]}
+
+
 @router.post("/search")
 def query_containers(payload: ContainerSearchRequest):
     logger.info(
         f"[API /containers/search] User searching: site='{payload.site_id}', containers='{payload.container_nos}', "
         f"is_in_yard={payload.is_search_by_in_yard}, is_batch={payload.is_search_by_batch}, collection_id={payload.collection_id}"
     )
+    if (payload.site_id or "").strip().upper() == "ITC" and (payload.captcha_code or "").strip():
+        return _query_sp_itc_manual(payload)
     try:
         results = search_containers(
             payload.site_id,
@@ -95,6 +126,32 @@ def query_containers(payload: ContainerSearchRequest):
     except Exception as e:
         logger.exception(f"[API /containers/search] ❌ Error querying containers: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/sp-itc-booking")
+def sync_sp_itc_booking(payload: SpItcBookingSyncRequest):
+    """Looks a booking up on SP-ITC and saves its containers with BILL_BOOK = the booking number, so they link
+    to the booking (SP-ITC's container search has no booking number). Same answer shape as /resync."""
+    from backend.app.services.sp_itc_client import search_sp_itc_booking
+    from backend.app.core.database import get_booking_number_and_collection
+    found = get_booking_number_and_collection(payload.booking_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    booking_no, collection_id = found
+    booking_no = booking_no.strip().upper()
+    if not booking_no or booking_no == "NULL":
+        return {"status": "success", "updated": 0, "not_found": [], "errors": []}
+    try:
+        rows = search_sp_itc_booking(booking_no)
+    except Exception as e:
+        logger.warning(f"[API /containers/sp-itc-booking] '{booking_no}' failed: {e}")
+        return {"status": "error", "updated": 0, "not_found": [], "errors": [f"ITC: {e}"]}
+    if not rows:
+        return {"status": "success", "updated": 0, "not_found": [booking_no], "errors": []}
+    insert_containers(collection_id, rows)
+    count = len({r["CONTAINERNO"] for r in rows})
+    logger.info(f"[API /containers/sp-itc-booking] '{booking_no}': saved {count} container(s), {len(rows)} event(s)")
+    return {"status": "success", "updated": count, "not_found": [], "errors": []}
+
 
 @router.post("/batch-delete")
 def remove_containers_batch(payload: BatchDeleteRequest):
@@ -156,7 +213,9 @@ def resync_containers(payload: ContainerResyncRequest):
             logger.exception(f"[API /containers/resync] ❌ Error saving results for site '{site_id}': {e}")
             errors.append(f"{site_id or '-'}: {e}")
 
-        not_found.extend(c for c in cont_nos if c not in found)
+        failed = failed_containers(results)
+        errors.extend(f"{site_id or '-'} {c}: {e}" for c, e in failed.items())
+        not_found.extend(c for c in cont_nos if c not in found and c not in failed)
 
     logger.info(f"[API /containers/resync] Done. all_events={payload.all_events}, updated={updated}, not_found={len(not_found)}, errors={len(errors)}")
     return {"status": "success", "updated": updated, "not_found": not_found, "errors": errors}
@@ -245,9 +304,13 @@ def sync_collection_container_watchlist(collection_id: int = Query(...)):
             if filtered_res:
                 insert_containers(collection_id, filtered_res)
                 updated_count += len(filtered_res)
+            failed = failed_containers(res)
             for it in items:
                 if it["id"] in matched_ids:
                     _record_status(it["id"], "ok")
+                elif it["container_no"].strip().upper() in failed:
+                    _record_status(it["id"], "error", failed[it["container_no"].strip().upper()])
+                    errors.append(f"Site {site}: {failed[it['container_no'].strip().upper()]}")
                 else:
                     _record_status(it["id"], "not_found", "Không tìm thấy thông tin container phù hợp trên ePort")
         except Exception as e:

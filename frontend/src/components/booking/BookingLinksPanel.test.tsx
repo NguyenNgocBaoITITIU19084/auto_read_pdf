@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { BookingLinksPanel, BookingLinksLabels } from './BookingLinksPanel';
-import { getBookingLinks, resyncContainersApi, resyncVesselsApi } from '../../services/api';
+import { getBookingLinks, resyncContainersApi, resyncVesselsApi, syncSpItcBookingApi } from '../../services/api';
 
-vi.mock('../../services/api', () => ({ getBookingLinks: vi.fn(), resyncVesselsApi: vi.fn(), resyncContainersApi: vi.fn() }));
+vi.mock('../../services/api', () => ({
+  getBookingLinks: vi.fn(), resyncVesselsApi: vi.fn(), resyncContainersApi: vi.fn(), syncSpItcBookingApi: vi.fn(),
+}));
 vi.mock('../common/ValueBadge', () => ({ ValueBadge: ({ value }: { value: string }) => <span>{value}</span> }));
 
 const labels: BookingLinksLabels = {
@@ -21,7 +23,48 @@ const mocked = vi.mocked(getBookingLinks);
 const vesselResync = vi.mocked(resyncVesselsApi);
 const containerResync = vi.mocked(resyncContainersApi);
 
+const itcSync = vi.mocked(syncSpItcBookingApi);
+
 describe('BookingLinksPanel', () => {
+
+  it('at SP-ITC looks the booking itself up, even before anything is linked', async () => {
+    mocked.mockReset().mockResolvedValue({ vessels: [], containers: [], gated_in: 0, qty: 1 } as any);
+    itcSync.mockReset().mockResolvedValue({ status: 'success', updated: 2, not_found: [], errors: [] });
+    vesselResync.mockReset(); containerResync.mockReset();
+    render(<BookingLinksPanel bookingId={31} bookingNo="BKITC1" vessel="EVER OUTWIT" fullReturnCy="SP-ITC Phú Hữu" labels={labels} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Cập nhật ePort/ }));
+
+    expect(await screen.findByText('Đã cập nhật 0 tàu, 2 cont.')).toBeTruthy();
+    expect(itcSync).toHaveBeenCalledWith(31);
+    expect(vesselResync).not.toHaveBeenCalled();
+    expect(containerResync).not.toHaveBeenCalled();
+  });
+
+  it('at SP-ITC (vessel schedule there) does not look its ITC containers up a second time', async () => {
+    mocked.mockReset().mockResolvedValue({
+      vessels: [{ id: 41, site_id: 'ITC', vessel_name: 'EVER OUTWIT' } as any],
+      containers: [{ id: 51, site_id: 'ITC', containerno: 'TEMU1234567', gated_in: true } as any,
+        { id: 52, site_id: 'CTL', containerno: 'DEMU1000001', gated_in: false } as any],
+      gated_in: 1, qty: 2,
+    } as any);
+    itcSync.mockReset().mockResolvedValue({ status: 'success', updated: 1, not_found: [], errors: [] });
+    vesselResync.mockReset().mockResolvedValue({ status: 'success', updated: 1, not_found: [], errors: [] });
+    containerResync.mockReset().mockResolvedValue({ status: 'success', updated: 1, not_found: [], errors: [] });
+    render(<BookingLinksPanel bookingId={32} bookingNo="BKITC2" vessel="EVER OUTWIT" labels={labels} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Cập nhật ePort/ }));
+
+    expect(await screen.findByText('Đã cập nhật 1 tàu, 2 cont.')).toBeTruthy();
+    expect(itcSync).toHaveBeenCalledWith(32);
+    expect(containerResync).toHaveBeenCalledWith([52]);
+  });
+
+  it('other ports never look the booking up on SP-ITC', async () => {
+    mocked.mockReset().mockResolvedValue({ vessels: [], containers: [], gated_in: 0, qty: 1 } as any);
+    itcSync.mockReset();
+    render(<BookingLinksPanel bookingId={33} bookingNo="BKCTL" vessel="X 1N" fullReturnCy="Cát Lái" labels={labels} />);
+    expect(await screen.findByRole('button', { name: /Cập nhật ePort/ })).toBeDisabled();
+    expect(itcSync).not.toHaveBeenCalled();
+  });
 
   it('updates the linked vessel schedule and containers from ePort, then shows what came back', async () => {
     const linked = {

@@ -95,7 +95,7 @@ def is_vessel_name_match(query_vessel: str, model_vessel: str) -> bool:
     return q_norm == m_norm or q_norm in m_norm or m_norm in q_norm
 
 # ePort sites that /ships/Searcher accepts as siteId (mirrors frontend/src/utils/ports.ts).
-EPORT_VESSEL_SITES = {"CTL", "GNL", "THP", "CMS", "IST", "TNT"}
+EPORT_VESSEL_SITES = {"CTL", "GNL", "THP", "CMS", "IST", "TNT", "ITC"}
 
 def search_vessels(site_id: str, vessel_name: str, voyage: str = None) -> list[dict]:
     """
@@ -122,9 +122,12 @@ def search_vessels_detailed(site_id: str, vessel_name: str, voyage: str = None) 
     }
     Raises ConnectionError on network failure (same as search_vessels).
     """
-    url = "https://eport.saigonnewport.com.vn/ships/Searcher"
-    
     site_id_query = site_id.strip().upper() if (site_id and site_id.strip()) else "CTL"
+    if site_id_query == "ITC":
+        from backend.app.services.sp_itc_client import search_sp_itc_vessels_detailed
+        return search_sp_itc_vessels_detailed(vessel_name, voyage)
+
+    url = "https://eport.saigonnewport.com.vn/ships/Searcher"
     raw_vessel = vessel_name.strip() if vessel_name else ""
     voyage_query = voyage.strip() if voyage else ""
     
@@ -239,6 +242,12 @@ def search_vessels_detailed(site_id: str, vessel_name: str, voyage: str = None) 
         logger.error(f"[ePort API ERROR] Failed to connect to ePort ({elapsed_ms}ms): {e}")
         raise ConnectionError(f"Không thể kết nối tới máy chủ ePort: {e}")
 
+def failed_containers(results) -> dict:
+    """{container_no: error} of the containers a search could not ask the port about (SP-ITC only; ePort
+    answers for the whole list at once). Those are errors, not "not found"."""
+    return dict(getattr(results, "failed", None) or {})
+
+
 def search_containers(
     site_id: str,
     container_nos: str,
@@ -248,8 +257,12 @@ def search_containers(
     """
     Call the Saigon Newport ePort API to search for container information.
     """
-    url = "https://eport.saigonnewport.com.vn/ContainerInformation/FindContInfo"
     site_query = site_id.strip().upper() if site_id else "CTL"
+    if site_query == "ITC":
+        from backend.app.services.sp_itc_client import search_sp_itc_containers
+        return search_sp_itc_containers(container_nos)
+
+    url = "https://eport.saigonnewport.com.vn/ContainerInformation/FindContInfo"
     cleaned_conts = container_nos.strip()
     
     payload = {
