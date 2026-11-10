@@ -744,6 +744,7 @@ export const translations = {
         error: "Không tải được lịch",
         filterCarrier: "Hãng tàu",
         filterStatus: "Trạng thái",
+        filterReturnCy: "Nơi hạ bãi",
         onlyLate: "Chỉ booking trễ",
         filtersActive: "Đang lọc {count} điều kiện",
         clearFilters: "Xóa lọc"
@@ -2126,6 +2127,7 @@ export const translations = {
         error: "Could not load the calendar",
         filterCarrier: "Shipping line",
         filterStatus: "Status",
+        filterReturnCy: "Return CY",
         onlyLate: "Late only",
         filtersActive: "{count} filter(s) on",
         clearFilters: "Clear filters"

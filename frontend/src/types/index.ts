@@ -492,6 +492,8 @@ export interface TableQuery {
   carriers?: string[];
   /** Booking statuses to keep */
   statuses?: string[];
+  /** Booking full-return CYs to keep ('' = none) */
+  return_cys?: string[];
   /** Leave out done / cancelled bookings */
   hide_closed?: boolean;
 }

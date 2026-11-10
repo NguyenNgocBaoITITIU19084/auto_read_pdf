@@ -7,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from backend.app.core.database import (
     insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
-    get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers,
+    get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers, get_booking_return_cys,
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
     BOOKING_TRASH_KEEP_DAYS, BOOKING_STATUSES, set_booking_status, get_booking_status_counts,
@@ -94,9 +94,10 @@ def list_bookings_page(
     carriers: Optional[List[str]] = Query(None, description="Only these carriers ('' = no carrier)"),
     statuses: Optional[List[str]] = Query(None, description="Only these statuses (new, dispatched, ...)"),
     hide_closed: bool = Query(False, description="Leave out done and cancelled bookings"),
+    return_cys: Optional[List[str]] = Query(None, description="Only these full-return CYs ('' = none)"),
 ):
     return get_bookings_page(collection_id, limit, offset, search_query, search_field, sort_by, sort_dir, carriers,
-                             statuses, hide_closed)
+                             statuses, hide_closed, return_cys)
 
 @router.get("/ids")
 def list_booking_ids(
@@ -108,13 +109,18 @@ def list_booking_ids(
     carriers: Optional[List[str]] = Query(None),
     statuses: Optional[List[str]] = Query(None),
     hide_closed: bool = Query(False),
+    return_cys: Optional[List[str]] = Query(None),
 ):
     return {"ids": get_booking_ids(collection_id, search_query, search_field, sort_by, sort_dir, carriers,
-                                   statuses, hide_closed)}
+                                   statuses, hide_closed, return_cys)}
 
 @router.get("/carriers")
 def list_booking_carriers(collection_id: int = Query(...)):
     return get_booking_carriers(collection_id)
+
+@router.get("/return-cys")
+def list_booking_return_cys(collection_id: int = Query(...)):
+    return get_booking_return_cys(collection_id)
 
 @router.get("/calendar")
 def list_bookings_calendar(
@@ -126,10 +132,11 @@ def list_bookings_calendar(
     carriers: Optional[List[str]] = Query(None),
     statuses: Optional[List[str]] = Query(None),
     hide_closed: bool = Query(False),
+    return_cys: Optional[List[str]] = Query(None),
 ):
     try:
         return get_bookings_calendar(collection_id, date_from, date_to, search_query, search_field, carriers,
-                                     statuses, hide_closed)
+                                     statuses, hide_closed, return_cys)
     except ValueError:
         raise HTTPException(status_code=400, detail="Ngày không hợp lệ (cần dạng YYYY-MM-DD)")
 

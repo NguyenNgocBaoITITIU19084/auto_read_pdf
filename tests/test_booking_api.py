@@ -377,3 +377,21 @@ def test_bookings_filter_by_carrier(col_id):
     assert page(["MAERSK", ""]) == (["BK4", "BK2"], 2)
     ids = client.get("/api/v1/bookings/ids", params={"collection_id": col_id, "carriers": ["OOCL"]}).json()["ids"]
     assert len(ids) == 2
+
+
+def test_bookings_filter_by_return_cy(col_id):
+    for no, cy in (("BK1", "CAT LAI TML"), ("BK2", "ICD SONG THAN"), ("BK3", "CAT LAI TML"), ("BK4", "")):
+        insert_booking(col_id, {"Booking No": no, "Full return CY": cy})
+
+    res = client.get("/api/v1/bookings/return-cys", params={"collection_id": col_id})
+    assert res.json() == [{"carrier": "", "count": 1}, {"carrier": "CAT LAI TML", "count": 2},
+                          {"carrier": "ICD SONG THAN", "count": 1}]
+
+    def page(cys):
+        res = client.get("/api/v1/bookings/page", params={"collection_id": col_id, "return_cys": cys})
+        return sorted(r["Booking No"] for r in res.json()["items"]), res.json()["total"]
+
+    assert page(["CAT LAI TML"]) == (["BK1", "BK3"], 2)
+    assert page(["ICD SONG THAN", ""]) == (["BK2", "BK4"], 2)
+    ids = client.get("/api/v1/bookings/ids", params={"collection_id": col_id, "return_cys": ["CAT LAI TML"]})
+    assert len(ids.json()["ids"]) == 2

@@ -951,12 +951,14 @@ _BOOKING_ALL_FIELDS = ("pdf_name", "booking_no", "carrier", "port_of_discharging
 
 def _booking_where(col_id: int, search_query: str = None, search_field: str = None,
                    carriers: list[str] = None, statuses: list[str] = None,
-                   hide_closed: bool = False) -> tuple[str, list]:
+                   hide_closed: bool = False, return_cys: list[str] = None) -> tuple[str, list]:
     where = "collection_id = ?"
     params: list = [col_id]
-    extra, extra_params = _values_filter("carrier", carriers)  # '' picks bookings without a carrier
-    where += extra
-    params.extend(extra_params)
+    # '' picks bookings without a carrier / return CY
+    for col, values in (("carrier", carriers), ("full_return_cy", return_cys)):
+        extra, extra_params = _values_filter(col, values)
+        where += extra
+        params.extend(extra_params)
     if statuses:
         where += f" AND {_STATUS_EXPR} IN ({','.join('?' * len(statuses))})"
         params.extend(statuses)
@@ -1095,9 +1097,9 @@ def get_bookings(col_id: int, search_query: str = None, search_field: str = None
 def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int = 0,
                       search_query: str = None, search_field: str = None,
                       sort_by: str = None, sort_dir: str = None, carriers: list[str] = None,
-                      statuses: list[str] = None, hide_closed: bool = False) -> dict:
+                      statuses: list[str] = None, hide_closed: bool = False, return_cys: list[str] = None) -> dict:
     limit, offset = _page_bounds(limit, offset)
-    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed, return_cys)
     order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
         total = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where};", tuple(params)).fetchone()[0]
@@ -1106,7 +1108,8 @@ def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int 
         # How many done / cancelled bookings the toggle leaves out (the toolbar shows it, a search says so too)
         hidden_closed = 0
         if hide_closed and not statuses:
-            all_where, all_params = _booking_where(col_id, search_query, search_field, carriers, statuses, False)
+            all_where, all_params = _booking_where(col_id, search_query, search_field, carriers, statuses, False,
+                                                   return_cys)
             hidden_closed = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {all_where};",
                                          tuple(all_params)).fetchone()[0] - total
     return {"items": [_booking_row_to_api(r) for r in rows], "total": total, "hidden_closed": hidden_closed}
@@ -1114,8 +1117,8 @@ def get_bookings_page(col_id: int, limit: int = PAGE_DEFAULT_LIMIT, offset: int 
 
 def get_booking_ids(col_id: int, search_query: str = None, search_field: str = None,
                     sort_by: str = None, sort_dir: str = None, carriers: list[str] = None,
-                    statuses: list[str] = None, hide_closed: bool = False) -> list[int]:
-    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+                    statuses: list[str] = None, hide_closed: bool = False, return_cys: list[str] = None) -> list[int]:
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed, return_cys)
     order = _booking_order(sort_by, sort_dir)
     with get_connection() as conn:
         return [r[0] for r in conn.execute(f"SELECT id FROM bookings WHERE {where} {order};",
@@ -1127,6 +1130,11 @@ def get_booking_carriers(col_id: int) -> list[dict]:
     return _value_counts("bookings", "carrier", col_id)
 
 
+def get_booking_return_cys(col_id: int) -> list[dict]:
+    """Full-return CYs of a collection with their booking counts ('' = none), for the column filter."""
+    return _value_counts("bookings", "full_return_cy", col_id)
+
+
 def _calendar_day_key(day: str) -> str:
     """'2026-10-19' -> the sort_key() prefix of that date ('120261019')."""
     return "1" + datetime.strptime(day, "%Y-%m-%d").strftime("%Y%m%d")
@@ -1134,11 +1142,11 @@ def _calendar_day_key(day: str) -> str:
 
 def get_bookings_calendar(col_id: int, date_from: str, date_to: str, search_query: str = None,
                           search_field: str = None, carriers: list[str] = None, statuses: list[str] = None,
-                          hide_closed: bool = False) -> dict:
+                          hide_closed: bool = False, return_cys: list[str] = None) -> dict:
     """Bookings whose cut-off falls between two days (inclusive, 'YYYY-MM-DD'), earliest first, with the same
     filters as the table. Each item carries "Hạn cut-off" ('YYYY-MM-DD HH:MM') and "Cut-off cả ngày" (no time
     given: due by the end of the day). `undated` counts the matching bookings that have no readable cut-off."""
-    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed)
+    where, params = _booking_where(col_id, search_query, search_field, carriers, statuses, hide_closed, return_cys)
     day = f"substr(sort_key({_DEADLINE_EXPR}), 1, 9)"
     with get_connection() as conn:
         rows = _select_dicts(

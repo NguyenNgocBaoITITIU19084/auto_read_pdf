@@ -77,6 +77,7 @@ const tableParams = (collectionId: number, q: TableQuery, extra: Record<string, 
   }
   if (q.carriers?.length) params.carriers = q.carriers;
   if (q.statuses?.length) params.statuses = q.statuses;
+  if (q.return_cys?.length) params.return_cys = q.return_cys;
   if (q.hide_closed) params.hide_closed = 'true';
   return params;
 };
@@ -121,6 +122,8 @@ export const getBookingIds = async (collectionId: number, q: TableQuery): Promis
   (await apiClient.get<{ ids: number[] }>('/bookings/ids', { params: tableParams(collectionId, q), paramsSerializer: listParams })).data.ids;
 export const getBookingCarriers = async (collectionId: number): Promise<ColumnValueCount[]> =>
   (await apiClient.get<ColumnValueCount[]>('/bookings/carriers', { params: { collection_id: collectionId } })).data;
+export const getBookingReturnCys = async (collectionId: number): Promise<ColumnValueCount[]> =>
+  (await apiClient.get<ColumnValueCount[]>('/bookings/return-cys', { params: { collection_id: collectionId } })).data;
 /** Bookings whose cut-off falls between two days ('YYYY-MM-DD'), with the table's filters (its sort is ignored). */
 export const getBookingsCalendar = async (
   collectionId: number, dateFrom: string, dateTo: string, q: TableQuery,

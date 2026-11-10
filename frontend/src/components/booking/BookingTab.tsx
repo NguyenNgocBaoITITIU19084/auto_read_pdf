@@ -12,7 +12,7 @@ import { useImageQueue } from '../../context/ImageQueueContext';
 import { useNotifications } from '../../context/NotificationsContext';
 import { Booking, BookingPageResult, BookingStatus, BOOKING_STATUSES, TableQuery } from '../../types';
 import {
-  getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers,
+  getBookingsPage, getBookingIds, getBookingsByIds, getBookingCarriers, getBookingReturnCys,
   deleteBooking, clearBookings, deleteBookingsBatch, searchVesselsApi, updateBookingApi, getBookingTrashCount,
   getBookingStatuses, setBookingStatusApi
 } from '../../services/api';
@@ -299,6 +299,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const { sort, toggleSort, sortDirOf } = useTableSort('booking_sort');
   const [carrierFilter, setCarrierFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [returnCyFilter, setReturnCyFilter] = useState<string[]>([]);
   // Done / cancelled bookings are hidden by default; the toolbar toggle says so and brings them back
   const [hideClosed, setHideClosed] = useState<boolean>(() => {
     try {
@@ -441,9 +442,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const tableQuery = useMemo<TableQuery>(
     () => ({
       search_query: debouncedQuery, search_field: searchField, sort_by: sort?.key, sort_dir: sort?.dir,
-      carriers: carrierFilter, statuses: statusFilter, hide_closed: hideClosed,
+      carriers: carrierFilter, statuses: statusFilter, return_cys: returnCyFilter, hide_closed: hideClosed,
     }),
-    [debouncedQuery, searchField, sort, carrierFilter, statusFilter, hideClosed]
+    [debouncedQuery, searchField, sort, carrierFilter, statusFilter, returnCyFilter, hideClosed]
   );
 
   const table = useServerTable<Booking, BookingPageResult>({
@@ -481,6 +482,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   useEffect(() => {
     setCarrierFilter([]);
     setStatusFilter([]);
+    setReturnCyFilter([]);
   }, [activeCollection?.id]);
 
   useEffect(() => {
@@ -491,7 +493,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
   const selection = useRowSelection<Booking>(
     pageRows,
     getBookingId,
-    [activeCollection?.id, debouncedQuery, searchField, carrierFilter.join('\n'), statusFilter.join('\n'), hideClosed],
+    [activeCollection?.id, debouncedQuery, searchField, carrierFilter.join('\n'), statusFilter.join('\n'), returnCyFilter.join('\n'), hideClosed],
     { pruneMissing: false }
   );
   const selectedIdList = useMemo(() => Array.from(selection.selectedIds), [selection.selectedIds]);
@@ -736,6 +738,7 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     error: t.booking.calendar.error,
     filterCarrier: t.booking.calendar.filterCarrier,
     filterStatus: t.booking.calendar.filterStatus,
+    filterReturnCy: t.booking.calendar.filterReturnCy,
     onlyLate: t.booking.calendar.onlyLate,
     filtersActive: t.booking.calendar.filtersActive,
     clearFilters: t.booking.calendar.clearFilters,
@@ -1226,6 +1229,9 @@ export const BookingTab: React.FC<BookingTabProps> = ({
           statuses={statusFilter}
           onStatusesChange={setStatusFilter}
           loadStatuses={() => getBookingStatuses(activeCollection.id)}
+          returnCys={returnCyFilter}
+          onReturnCysChange={setReturnCyFilter}
+          loadReturnCys={() => getBookingReturnCys(activeCollection.id)}
           filterLabels={t.common.columnFilter}
         />
       ) : (
@@ -1267,6 +1273,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                         loadOptions={() => getBookingCarriers(activeCollection.id)}
                         value={carrierFilter}
                         onChange={setCarrierFilter}
+                        labels={t.common.columnFilter}
+                      />
+                    ) : col.key === 'Full return CY' && activeCollection ? (
+                      <ColumnValueFilter
+                        column={col.label}
+                        loadOptions={() => getBookingReturnCys(activeCollection.id)}
+                        value={returnCyFilter}
+                        onChange={setReturnCyFilter}
                         labels={t.common.columnFilter}
                       />
                     ) : col.key === STATUS_KEY && activeCollection ? (

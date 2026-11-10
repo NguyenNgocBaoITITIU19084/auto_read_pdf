@@ -22,6 +22,7 @@ export const ALL_DAY_KEY = 'Cut-off cả ngày';
 export interface BookingCalendarLabels extends WeekNavLabels {
   filterCarrier: string;
   filterStatus: string;
+  filterReturnCy?: string;
   onlyLate: string;
   filtersActive: string;
   clearFilters: string;
@@ -54,13 +55,18 @@ interface BookingCalendarProps {
   statuses: string[];
   onStatusesChange: (values: string[]) => void;
   loadStatuses: () => Promise<ColumnValueCount[]>;
+  /** Full-return CYs kept (empty = all); the chip shows only when given */
+  returnCys?: string[];
+  onReturnCysChange?: (values: string[]) => void;
+  loadReturnCys?: () => Promise<ColumnValueCount[]>;
   filterLabels: ColumnFilterLabels;
 }
 
 /** Week view of the bookings by cut-off: one column per day, Monday to Sunday. */
 export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   collectionId, query, reloadKey, labels, statusLabels, onOpen, onContextMenu, onChangeStatus, onError,
-  carriers, onCarriersChange, loadCarriers, statuses, onStatusesChange, loadStatuses, filterLabels,
+  carriers, onCarriersChange, loadCarriers, statuses, onStatusesChange, loadStatuses,
+  returnCys = [], onReturnCysChange, loadReturnCys, filterLabels,
 }) => {
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [onlyLate, setOnlyLate] = useState(false);
@@ -109,7 +115,8 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     return cards;
   }, [items, onlyLate, labels.allDay, statusLabels, onOpen, onContextMenu, onChangeStatus]);
   const late = items.filter((b) => b[OVERDUE_KEY]).length;
-  const activeFilters = (carriers.length > 0 ? 1 : 0) + (statuses.length > 0 ? 1 : 0) + (onlyLate ? 1 : 0);
+  const activeFilters = (carriers.length > 0 ? 1 : 0) + (statuses.length > 0 ? 1 : 0) + (returnCys.length > 0 ? 1 : 0)
+    + (onlyLate ? 1 : 0);
 
   return (
     <WeekCalendar
@@ -137,6 +144,16 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
             labels={filterLabels}
             formatOption={(v) => statusLabels.labels[v as BookingStatus] ?? v}
           />
+          {onReturnCysChange && loadReturnCys && (
+            <ColumnValueFilter
+              variant="chip"
+              column={labels.filterReturnCy ?? ''}
+              loadOptions={loadReturnCys}
+              value={returnCys}
+              onChange={onReturnCysChange}
+              labels={filterLabels}
+            />
+          )}
           <FilterToggle active={onlyLate} onChange={setOnlyLate} icon={<AlertTriangle className="w-3 h-3" />}>
             {labels.onlyLate}
           </FilterToggle>
@@ -147,6 +164,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
             onClear={() => {
               onCarriersChange([]);
               onStatusesChange([]);
+              onReturnCysChange?.([]);
               setOnlyLate(false);
             }}
           />
