@@ -8,7 +8,8 @@ import { checkBookingDuplicatesApi, extractBookingImageDetailedApi, saveManualBo
 import { tf } from '../services/i18nFormat';
 import { isImageFile, isPdfFile } from '../components/booking/clipboard';
 import {
-  QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, dedupeIncoming, isPdfItem, makeQueueItem, queueReducer, queueStats,
+  QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, dedupeIncoming, fieldErrorsFromSaveError, isPdfItem, makeQueueItem,
+  queueReducer, queueStats,
 } from '../services/imageQueueLogic';
 
 export const MAX_QUEUE_ITEMS = 60;
@@ -246,9 +247,17 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       return true;
     } catch (e: any) {
-      if (mountedRef.current) dispatch({ type: 'saving', id: item.id, value: false });
       const detail = e?.response?.data?.detail;
-      addToastRef.current(tf(tt.saveFailed, { error: (typeof detail === 'string' && detail) || e?.message || '' }), 'error');
+      const text = typeof detail === 'string' ? detail : '';
+      // Mark the refused fields in the form, and name them in the toast as the form labels them
+      const fieldErrors = fieldErrorsFromSaveError(text, Object.keys(item.fields));
+      if (mountedRef.current) dispatch({ type: 'saveFailed', id: item.id, fieldErrors });
+      const labels = tRef.current.booking.columns as Record<string, string>;
+      const shown = text.split(/;\s+/).map((part) => {
+        const m = part.match(/^([^:]+):\s*(.+)$/);
+        return m && fieldErrors[m[1].trim()] && labels[m[1].trim()] ? `${labels[m[1].trim()]}: ${m[2]}` : part;
+      }).join('; ');
+      addToastRef.current(tf(tt.saveFailed, { error: shown || e?.message || '' }), 'error');
       return false;
     }
   }, []);

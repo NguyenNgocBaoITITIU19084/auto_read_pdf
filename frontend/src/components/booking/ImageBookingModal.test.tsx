@@ -248,4 +248,28 @@ describe('ImageBookingModal (reading queue)', () => {
     await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2));
     expect(container).toBeTruthy();
   });
+
+  it('a refused save marks the field in red, focuses it, and the fixed value saves', async () => {
+    extract.mockResolvedValueOnce({ ...good('SGN3527323'), data: { ...good('SGN3527323').data, ETD: '11-NOV-2026 ZHONG' } });
+    saveManual.mockReset()
+      .mockRejectedValueOnce({ response: { data: { detail: 'ETD: ngày không hợp lệ (DD/MM/YYYY hoặc DD/MM/YYYY HH:mm)' } } })
+      .mockImplementation(async (_c: number, b: any) => ({ item: { id: 7, ...b }, warnings: [] }));
+    const { pick, onClose } = setup();
+    pick([png('cma.png')]);
+    const etd = await screen.findByDisplayValue('11-NOV-2026 ZHONG');
+    const save = screen.getByRole('button', { name: translations.vi.booking.imageModal.saveToCollection });
+
+    fireEvent.click(save);
+    await waitFor(() => expect(etd).toHaveAttribute('aria-invalid', 'true'));
+    expect(screen.getByText('ngày không hợp lệ (DD/MM/YYYY hoặc DD/MM/YYYY HH:mm)')).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(etd));
+    // The toast names the field as the form labels it
+    expect(addToast).toHaveBeenCalledWith(expect.stringContaining(`${translations.vi.booking.columns.ETD}: ngày không hợp lệ`), 'error');
+
+    fireEvent.change(etd, { target: { value: '11/11/2026' } });
+    expect(etd).not.toHaveAttribute('aria-invalid');
+    fireEvent.click(save);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(saveManual).toHaveBeenLastCalledWith(1, expect.objectContaining({ ETD: '11/11/2026' }), false);
+  });
 });

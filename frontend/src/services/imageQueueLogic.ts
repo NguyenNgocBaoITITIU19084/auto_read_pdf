@@ -37,6 +37,8 @@ export interface QueueItem {
   dbDuplicate?: boolean;
   saving?: boolean;
   savedId?: number;
+  /** Fields the last save refused, with the server's reason; each clears once that field changes */
+  fieldErrors?: Record<string, string>;
 }
 
 /** Fields that indicate a real extraction (Carrier alone is not enough — it can be guessed from noise). */
@@ -119,6 +121,20 @@ export function applyFieldChange(fields: Partial<Booking>, key: string, value: s
   return updated;
 }
 
+/**
+ * Per-field reasons from a refused save. The server joins them with '; ' as '<field>: <reason>'
+ * ('ETD: ngày không hợp lệ (...)'); the identity rule ('Cần nhập ít nhất Booking No ...') goes to Booking No.
+ */
+export function fieldErrorsFromSaveError(detail: string, knownKeys: readonly string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of (detail || '').split(/;\s+/)) {
+    const m = part.match(/^([^:]+):\s*(.+)$/);
+    if (m && knownKeys.includes(m[1].trim())) out[m[1].trim()] = m[2].trim();
+    else if (/Booking No/i.test(part) && knownKeys.includes('Booking No')) out['Booking No'] = part.trim();
+  }
+  return out;
+}
+
 export const fileKey = (f: File): string => `${f.name}|${f.size}|${f.lastModified}`;
 
 /** Files not already in the queue (and not repeated among themselves). */
@@ -171,6 +187,8 @@ export type QueueAction =
   | { type: 'setField'; id: string; key: string; value: string }
   | { type: 'setDbDuplicate'; id: string; value: boolean }
   | { type: 'saving'; id: string; value: boolean }
+  /** a refused save: the fields it named stay marked until edited */
+  | { type: 'saveFailed'; id: string; fieldErrors: Record<string, string> }
   /** saved to the collection: leaves the queue (nothing left to do with it) */
   | { type: 'saved'; id: string; bookingId: number };
 
@@ -182,7 +200,7 @@ const accepts = (it: QueueItem, run: number) => (it.status === 'reading' || it.s
 
 const RESET: Partial<QueueItem> = {
   status: 'queued', error: undefined, errorKind: undefined, engine: undefined, model: undefined, warnings: [],
-  readMs: undefined, dbDuplicate: undefined, saving: false,
+  readMs: undefined, dbDuplicate: undefined, saving: false, fieldErrors: undefined,
 };
 
 export function queueReducer(items: QueueItem[], action: QueueAction): QueueItem[] {
@@ -224,11 +242,21 @@ export function queueReducer(items: QueueItem[], action: QueueAction): QueueItem
     case 'clearSaved':
       return items.filter((it) => it.status !== 'saved');
     case 'setField':
-      return patch(items, action.id, (it) => ({ ...it, fields: applyFieldChange(it.fields, action.key, action.value) }));
+      return patch(items, action.id, (it) => {
+        const fields = applyFieldChange(it.fields, action.key, action.value);
+        if (!it.fieldErrors) return { ...it, fields };
+        // Every field that changed, also ETD when it follows a corrected leg ETD
+        const left = Object.fromEntries(Object.entries(it.fieldErrors).filter(([k]) => fields[k as keyof Booking] === it.fields[k as keyof Booking]));
+        return { ...it, fields, fieldErrors: Object.keys(left).length ? left : undefined };
+      });
     case 'setDbDuplicate':
       return patch(items, action.id, (it) => ({ ...it, dbDuplicate: action.value }));
     case 'saving':
       return patch(items, action.id, (it) => ({ ...it, saving: action.value }));
+    case 'saveFailed':
+      return patch(items, action.id, (it) => ({
+        ...it, saving: false, fieldErrors: Object.keys(action.fieldErrors).length ? action.fieldErrors : undefined,
+      }));
     case 'saved': {
       const saved = items.find((it) => it.id === action.id);
       if (!saved) return items;

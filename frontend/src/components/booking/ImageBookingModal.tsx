@@ -29,6 +29,12 @@ interface ImageBookingModalProps {
 const inputCls =
   'w-full px-2.5 py-1.5 text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-none disabled:opacity-70';
 const editedCls = '!bg-amber-50 dark:!bg-amber-950/30 !border-amber-300 dark:!border-amber-700';
+/** The form's fields top to bottom, to find the first one a refused save marked */
+const FORM_ORDER = [
+  'Booking No', 'Carrier', 'Vessel', 'ETD', 'Port of Discharging', 'Place of Delivery', 'Equipment Type', "Q'ty",
+  'T/S Port', 'Empty Pick Up CY', 'Full return CY', 'Port Cargo Cut-off',
+];
+const errorCls ='!border-rose-500 dark:!border-rose-500 ring-1 ring-rose-500/40';
 const smallInputCls =
   'w-full px-2 py-1 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md disabled:opacity-70';
 
@@ -51,6 +57,8 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
   const [readingClipboard, setReadingClipboard] = useState(false);
   const [quickVesselBooking, setQuickVesselBooking] = useState<Partial<Booking> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fieldRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [focusErrors, setFocusErrors] = useState(0);
   /** The focus id already applied: focus is a one-shot hint, not a pin that fights the user's own clicks */
   const appliedFocusRef = useRef<string | null>(null);
 
@@ -59,6 +67,18 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
   const previewUrl = useObjectUrl(selectedIsPdf ? null : selected?.file);
   const pdf = usePdfPreview(selectedIsPdf ? selected?.file : null);
   const fields = selected?.fields ?? {};
+  const fieldErrors = selected?.fieldErrors ?? {};
+  // After a refused save: scroll to and focus the first marked field, in form order
+  useEffect(() => {
+    if (!focusErrors) return;
+    const key = FORM_ORDER.find((k) => selected?.fieldErrors?.[k] && fieldRefs.current[k]);
+    const el = key ? fieldRefs.current[key] : null;
+    if (!el) return;
+    el.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    el.focus({ preventScroll: true });
+    el.select();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusErrors]);
   const carrierBadge = useCarrierBadge(fields['Carrier']);
   const showList = items.length > 1;
 
@@ -126,7 +146,11 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
     if (!selected) return;
     const savedId = selected.id;
     const ok = await queue.save(savedId);
-    if (!ok) return;
+    if (!ok) {
+      // Take the user to the first field the save refused (it may be scrolled out of view)
+      setFocusErrors((n) => n + 1);
+      return;
+    }
     const remaining = items.filter((i) => i.id !== savedId && i.status !== 'saved');
     if (remaining.length === 0) {
       // Everything is saved: leave a clean queue and close, like the old single-image flow
@@ -162,22 +186,32 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
     : null;
   const engine = selected ? engineLabel(selected) : null;
 
-  const textField = (key: string, label: React.ReactNode, placeholder: string, extra?: React.ReactNode) => (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">{label}</label>
-        {extra}
+  const textField = (key: string, label: React.ReactNode, placeholder: string, extra?: React.ReactNode) => {
+    const error = fieldErrors[key];
+    return (
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label htmlFor={`image-field-${key}`} className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">{label}</label>
+          {extra}
+        </div>
+        <input
+          id={`image-field-${key}`}
+          ref={(el) => { fieldRefs.current[key] = el; }}
+          type="text"
+          value={norm(fields[key]) ? String(fields[key]) : ''}
+          disabled={locked}
+          onChange={(e) => selected && queue.setField(selected.id, key, e.target.value)}
+          placeholder={placeholder}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `image-field-${key}-error` : undefined}
+          className={`${inputCls} ${error ? errorCls : isEdited(key) ? editedCls : ''}`}
+        />
+        {error && (
+          <p id={`image-field-${key}-error`} role="alert" className="mt-1 text-[10px] font-semibold text-rose-600 dark:text-rose-400">{error}</p>
+        )}
       </div>
-      <input
-        type="text"
-        value={norm(fields[key]) ? String(fields[key]) : ''}
-        disabled={locked}
-        onChange={(e) => selected && queue.setField(selected.id, key, e.target.value)}
-        placeholder={placeholder}
-        className={`${inputCls} ${isEdited(key) ? editedCls : ''}`}
-      />
-    </div>
-  );
+    );
+  };
   const col = t.booking.columns as Record<string, string>;
 
   const pauseBanner = paused && (

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ImageExtractResult } from '../types';
 import {
-  QueueItem, applyFieldChange, batchDuplicateIds, classifyResult, dedupeIncoming, isPdfItem, makeQueueItem, queueReducer, queueStats,
+  QueueItem, applyFieldChange, batchDuplicateIds, classifyResult, dedupeIncoming, fieldErrorsFromSaveError, isPdfItem, makeQueueItem, queueReducer, queueStats,
 } from './imageQueueLogic';
 
 const file = (name: string, size = 10, lastModified = 1) => new File([new Uint8Array(size)], name, { type: 'image/png', lastModified });
@@ -168,5 +168,48 @@ describe('applyFieldChange', () => {
   it('keeps an ETD the user set apart from the leg', () => {
     const own = { ...misread, 'ETD': '12/11/2026' };
     expect(applyFieldChange(own, 'ETD_Pre', '11/11/2026')['ETD']).toBe('12/11/2026');
+  });
+});
+
+describe('refused saves', () => {
+  const KEYS = ['Booking No', 'ETD', 'Port Cargo Cut-off', "Q'ty", 'ETD_Pre'];
+
+  it('reads the server reasons per field', () => {
+    expect(fieldErrorsFromSaveError(
+      'ETD: ngày không hợp lệ (DD/MM/YYYY hoặc DD/MM/YYYY HH:mm); Q\'ty: phải là số nguyên từ 1 đến 999', KEYS,
+    )).toEqual({ ETD: 'ngày không hợp lệ (DD/MM/YYYY hoặc DD/MM/YYYY HH:mm)', "Q'ty": 'phải là số nguyên từ 1 đến 999' });
+    expect(fieldErrorsFromSaveError('Cần nhập ít nhất Booking No hoặc Tàu (Vessel)', KEYS))
+      .toEqual({ 'Booking No': 'Cần nhập ít nhất Booking No hoặc Tàu (Vessel)' });
+    expect(fieldErrorsFromSaveError('Network Error', KEYS)).toEqual({});
+  });
+
+  it('marks the refused fields until each one changes', () => {
+    const start = [item('a.pdf', { status: 'success', saving: true, fields: { ETD: 'x', 'Port Cargo Cut-off': 'y' } })];
+    const failed = queueReducer(start, { type: 'saveFailed', id: start[0].id, fieldErrors: { ETD: 'bad', 'Port Cargo Cut-off': 'bad' } });
+    expect(failed[0].saving).toBe(false);
+    expect(failed[0].fieldErrors).toEqual({ ETD: 'bad', 'Port Cargo Cut-off': 'bad' });
+    const fixed = queueReducer(failed, { type: 'setField', id: start[0].id, key: 'ETD', value: '11/11/2026' });
+    expect(fixed[0].fieldErrors).toEqual({ 'Port Cargo Cut-off': 'bad' });
+    const both = queueReducer(fixed, { type: 'setField', id: start[0].id, key: 'Port Cargo Cut-off', value: '10/11/2026 09:00' });
+    expect(both[0].fieldErrors).toBeUndefined();
+  });
+
+  it('clears ETD when it is fixed through the leg ETD it follows', () => {
+    // The CMA misread: ETD follows ETD_Pre, the user corrects ETD_Pre in the vessel details
+    const start = [item('cma.pdf', {
+      status: 'success',
+      fields: { 'Pre Carrier': 'ZHONG GU BEI JING TVI000W19', ETD_Pre: '11-NOV-2026 ZHONG', ETD: '11-NOV-2026 ZHONG' },
+      fieldErrors: { ETD: 'bad' },
+    })];
+    const r = queueReducer(start, { type: 'setField', id: start[0].id, key: 'ETD_Pre', value: '11/11/2026' });
+    expect(r[0].fields.ETD).toBe('11/11/2026');
+    expect(r[0].fieldErrors).toBeUndefined();
+  });
+
+  it('keeps the mark while an unrelated field is edited, and a re-read drops it', () => {
+    const start = [item('a.pdf', { status: 'success', fields: { ETD: 'x', Carrier: 'ONE' }, fieldErrors: { ETD: 'bad' } })];
+    const other = queueReducer(start, { type: 'setField', id: start[0].id, key: 'Carrier', value: 'MSC' });
+    expect(other[0].fieldErrors).toEqual({ ETD: 'bad' });
+    expect(queueReducer(other, { type: 'retry', id: start[0].id })[0].fieldErrors).toBeUndefined();
   });
 });
