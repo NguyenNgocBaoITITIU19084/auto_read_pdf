@@ -76,6 +76,29 @@ def _equipment(text: str):
     return " + ".join(f"{q} X {t}" for t, q in items), str(sum(int(q) for _, q in items))
 
 
+def _vessel_from_packing_list(text: str):
+    """When the commodity column's package count ('643 CARTONS') is printed over the vessel row, the two
+    interleave in the text layer ('INFINIT64Y3 2 C6A4R3TNO -N ESTD 07/11/2026 05:00 AM'). The CONTAINER
+    PACKING LIST page repeats the vessel and voyage cleanly:
+
+        VESSEL : INFINITY DATE: 07/11/2026
+        VOYAGE : 2643N LIMITED            <- the shipper column runs into the voyage's row
+
+    The ETD keeps the vessel row's date and time when they are still readable, else the packing list date."""
+    name = re.search(r"^\s*VESSEL\s*:\s*(.+?)\s+DATE\s*:\s*" + _DATE, text, re.IGNORECASE | re.MULTILINE)
+    voyage = re.search(r"^\s*VOYAGE\s*:\s*(\S+)", text, re.IGNORECASE | re.MULTILINE)
+    if not name:
+        return "", ""
+    vessel = " ".join(v for v in (re.sub(r"\s+", " ", name.group(1)).strip(), voyage and voyage.group(1)) if v)
+    row = re.search(rf"VESSEL\s*&\s*VOY\s*NO\s*:[^\n]*?{_DATE}(?:\s+(\d{{1,2}}):(\d{{2}})\s*(AM|PM)?)?", text,
+                    re.IGNORECASE)
+    if row:
+        etd = row.group(1) + (f" {_time_24h(row.group(2), row.group(3), row.group(4) or '')}" if row.group(2) else "")
+    else:
+        etd = name.group(2)
+    return vessel.upper(), etd
+
+
 def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict[str, str]:
     out: Dict[str, str] = {"Carrier": "JINJIANG"}
 
@@ -88,6 +111,9 @@ def parse(text: str, pages_words: Optional[Sequence[List[Dict]]] = None) -> Dict
     if m:
         vessel = re.sub(r"\s+", " ", m.group(1)).strip()
         etd = m.group(2) + (f" {_time_24h(m.group(3), m.group(4), m.group(5) or '')}" if m.group(3) else "")
+    else:
+        vessel, etd = _vessel_from_packing_list(text)
+    if vessel:
         out["Vessel"], out["ETD"] = vessel, etd
         out["Trunk Vessel"], out["ETD_Trunk"] = vessel, etd
 

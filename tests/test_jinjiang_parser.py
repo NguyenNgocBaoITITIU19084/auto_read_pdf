@@ -114,3 +114,31 @@ def test_jinjiang_pickup_depot_and_pm_etd():
 def test_jinjiang_carrier_from_booking_prefix():
     assert detect_carrier(booking_no="JJMSGZHY600023") == "JINJIANG"
     assert detect_carrier("JJ SHIPPING") == "JINJIANG"
+
+
+# JJCSGSHY605644: the second commodity's '643 CARTONS' is printed over the vessel row, so the text layer
+# interleaves the two; the packing list page still names the vessel and voyage
+JJ_OVERPRINTED = JJ_TEXT.replace(
+    "VESSEL & VOY NO : INFINITY 2640N - ETD 21/10/2026 05:00 AM",
+    "VESSEL & VOY NO : INFINIT64Y3 2 C6A4R3TNO -N ESTD 21/10/2026 05:00 AM",
+) + """16/10/2026 10:14:20AM
+CONTAINER PACKING LIST
+BOOKING NUMBER : JJMSGZHY600023
+Sô lệ nh
+VESSEL : INFINITY DATE: 21/10/2026
+Tên tau Ngày SHIPPPER or/and VIET UNI Logistics
+VOYAGE : 2640N Joint Stock Company
+Sô chuyên TRUCK No : BROKER :
+OPERATOR : JJ SHIPPING
+"""
+
+
+def test_jinjiang_vessel_row_overprinted_by_commodity():
+    _check(JJ_OVERPRINTED)
+
+
+def test_jinjiang_overprinted_row_without_a_time_uses_packing_list_date():
+    text = JJ_OVERPRINTED.replace("ESTD 21/10/2026 05:00 AM", "ESTD").replace("DATE: 21/10/2026", "DATE: 22/10/2026")
+    result = jinjiang.parse(text)
+    assert result["Vessel"] == "INFINITY 2640N"
+    assert result["ETD"] == "22/10/2026"
