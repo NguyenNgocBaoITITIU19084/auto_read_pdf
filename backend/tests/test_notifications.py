@@ -422,3 +422,45 @@ def test_send_test_creates_a_notification_that_reaches_the_popup_and_is_never_de
     claim = client.post(f"{API}/notifications/claim-os").json()
     assert claim["summary"]["title"] == "Thông báo thử" and "popup" in claim["summary"]["body"]
     assert client.get(f"{API}/notifications").json()["unread"] == 3 and third["read"] is False
+
+
+# ----------------------------------------------------------------------------------------------- message bookings
+def test_notification_bookings_lists_the_open_bookings_on_that_voyage(client, col):
+    keep = db.insert_booking(col, {"Booking No": "BK1", "Vessel": "HMM HOPE 062E", "Carrier": "HMM",
+                                   "Equipment Type": "40'HC", "Q'ty": "2", "Full return CY": "CAT LAI"})
+    db.insert_booking(col, {"Booking No": "BK2", "Vessel": "HMM HOPE 062E"})            # no status yet: still open
+    done = db.insert_booking(col, {"Booking No": "BK3", "Vessel": "HMM HOPE 062E"})
+    cancelled = db.insert_booking(col, {"Booking No": "BK4", "Vessel": "HMM HOPE 062E"})
+    db.set_booking_status([done], "done")
+    db.set_booking_status([cancelled], "cancelled")
+    db.insert_booking(col, {"Booking No": "BK5", "Vessel": "HMM HOPE 063E"})            # another voyage
+    other = db.create_collection("other")
+    db.insert_booking(other, {"Booking No": "BK6", "Vessel": "HMM HOPE 062E"})          # another collection
+    assert keep
+
+    db.insert_vessel_schedules(col, [sched()])
+    db.insert_vessel_schedules(col, [sched(closing="2026-09-24 09:30:00")])
+    (n,) = notes()
+    items = client.get(f"{API}/notifications/{n['id']}/bookings").json()["items"]
+    assert sorted(b["Booking No"] for b in items) == ["BK1", "BK2"]
+    bk1 = next(b for b in items if b["Booking No"] == "BK1")
+    assert (bk1["Carrier"], bk1["Equipment Type"], bk1["Q'ty"], bk1["Full return CY"]) == ("HMM", "40'HC", "2", "CAT LAI")
+
+
+def test_notification_bookings_of_a_one_row_per_change_notification_from_before(client, col):
+    db.insert_booking(col, {"Booking No": "BK1", "Vessel": "HMM HOPE 062E"})
+    with db.get_connection() as conn:
+        db._record_notifications(conn, col, [{"kind": cd.VESSEL_CLOSING, "entity_key": "CTL|HMM HOPE|062E-062E",
+                                              "old": "23/09/2026 11:00", "new": "24/09/2026 09:30", "title": "t"}], "manual")
+    (n,) = notes()
+    items = client.get(f"{API}/notifications/{n['id']}/bookings").json()["items"]
+    assert [b["Booking No"] for b in items] == ["BK1"]
+
+
+def test_notification_bookings_unknown_or_not_a_vessel(client, col):
+    assert client.get(f"{API}/notifications/999999/bookings").status_code == 404
+    with db.get_connection() as conn:
+        db._record_notifications(conn, col, [{"kind": cd.CONTAINER_INGATE, "entity_key": "CTL|EMCU1234567",
+                                              "new": "24/09/2026 09:30", "title": "t"}], "manual")
+    (n,) = notes()
+    assert client.get(f"{API}/notifications/{n['id']}/bookings").json() == {"items": []}

@@ -1,6 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Copy, Loader2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../context/NotificationsContext';
+import { useToastActions } from '../../context/ToastContext';
+import { getNotificationBookingsApi } from '../../services/api';
+import { copyTextToClipboard } from '../../utils/formatters';
+import { isVesselChangeNotification, vesselChangeMessage } from '../../utils/vesselChangeMessage';
+import type { Booking } from '../../types';
 import { notificationChange, notificationChanges, notificationTitle } from '../../utils/notifications';
 import { Modal } from './Modal';
 import { CutoffReminderDetail, MorningBriefDetail, formatStamp } from './ReminderViews';
@@ -17,6 +23,8 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   const { t } = useApp();
   const d = t.notifications.detail;
   const { items, detailId, closeDetail } = useNotifications();
+  const { addToast } = useToastActions();
+  const [copying, setCopying] = useState(false);
   const item = detailId === null ? null : items.find((n) => n.id === detailId) || null;
   if (!item) return null;
 
@@ -36,6 +44,24 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
     [d.source, isAutoImport ? undefined : item.source === 'auto_sync' ? t.notifications.sourceAuto : t.notifications.sourceManual],
     [d.time, formatStamp(item.created_at)],
   ];
+
+  const canCopy = isVesselChangeNotification(item) && (changes.length > 0 || !!item.old_value);
+  const m = t.notifications.message;
+  /** The schedule-change message with the open bookings on the voyage, ready to paste into Zalo. Without the
+   *  bookings (an older backend, offline) it still copies, listing the numbers kept in the notification. */
+  const copyMessage = async () => {
+    setCopying(true);
+    let bookings: Booking[] | null = null;
+    try {
+      bookings = await getNotificationBookingsApi(item.id);
+    } catch {
+      bookings = null;
+    }
+    const ok = await copyTextToClipboard(vesselChangeMessage(item, bookings, t));
+    setCopying(false);
+    if (!ok) addToast(m.copyFailed, 'error');
+    else addToast(bookings ? m.copied : m.copiedNumbersOnly, bookings ? 'success' : 'info');
+  };
 
   const goToTab = () => {
     closeDetail();
@@ -85,7 +111,19 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           ))}
         </dl>
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          {canCopy && (
+            <button
+              type="button"
+              onClick={copyMessage}
+              disabled={copying}
+              title={m.copyHint}
+              className="mr-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 bg-primary-50 dark:bg-primary-950/40 hover:bg-primary-100 dark:hover:bg-primary-900/50 disabled:opacity-60"
+            >
+              {copying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Copy className="w-3.5 h-3.5" />}
+              {m.copy}
+            </button>
+          )}
           <button type="button" onClick={closeDetail} className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
             {d.close}
           </button>

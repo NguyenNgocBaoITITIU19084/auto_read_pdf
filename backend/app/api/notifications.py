@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.app.core.database import (
-    claim_os_notifications, clear_notifications, get_notification_settings, list_notifications,
+    claim_os_notifications, clear_notifications, get_notification_bookings, get_notification_settings, list_notifications,
     mark_notifications_read, record_test_notification, set_notification_settings, booking_links_seq,
 )
 from backend.app.services.change_detection import ALL_KINDS
@@ -40,6 +40,15 @@ def get_notifications(limit: int = Query(50, ge=1, le=500), unread_only: bool = 
     `booking_links_seq` whenever bookings may have met new ePort vessel schedules."""
     return {**list_notifications(limit, unread_only), "auto_import_seq": import_seq(),
             "booking_links_seq": booking_links_seq()}
+
+
+@router.get("/{notification_id}/bookings")
+def notification_bookings(notification_id: int):
+    """Open bookings on the vessel/voyage a schedule-change notification is about (for the message to the team)."""
+    items = get_notification_bookings(notification_id)
+    if items is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy thông báo")
+    return {"items": items}
 
 
 @router.post("/mark-read")

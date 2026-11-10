@@ -2751,6 +2751,38 @@ def list_notifications(limit: int = 50, unread_only: bool = False) -> dict:
     return {"items": [_notification_to_api(r) for r in rows], "unread": unread}
 
 
+def get_notification_bookings(notification_id: int) -> list[dict] | None:
+    """Open bookings (not done / cancelled) of the notification's own collection that sail on the vessel/voyage a
+    schedule-change notification is about, for the message sent on to the team. They are matched again now, so the
+    list is complete (the stored detail keeps 8 numbers) and follows bookings added or closed since.
+    None when there is no such notification; [] for other kinds."""
+    with get_connection() as conn:
+        rows = _select_dicts(conn, "SELECT * FROM notifications WHERE id = ?;", (notification_id,))
+        if not rows:
+            return None
+        note = rows[0]
+        if note["kind"] != cd.VESSEL_SCHEDULE and note["kind"] not in _VESSEL_KINDS:
+            return []
+        try:
+            detail = json.loads(note.get("detail") or "{}")
+        except (TypeError, ValueError):
+            detail = {}
+        # One-row-per-change notifications from before kept the vessel only in their key: 'CTL|HMM HOPE|062E-062E'
+        key = (note.get("entity_key") or "").split("|")
+        schedule = {
+            "vessel_name": detail.get("vessel") or (key[1] if len(key) == 3 else ""),
+            "in_out_voyage": detail.get("voyage") or (key[2] if len(key) == 3 else ""),
+        }
+        if not schedule["vessel_name"] or note["collection_id"] is None:
+            return []
+        candidates = _select_dicts(
+            conn, f"SELECT * FROM bookings WHERE collection_id = ? AND COALESCE(vessel, '') != '' "
+                  f"AND {_STATUS_EXPR} NOT IN ({','.join('?' * len(_BOOKING_CLOSED_STATUSES))}) "
+                  f"ORDER BY sort_key(COALESCE(NULLIF(eport_cutoff, ''), cutoff_time)), id;",
+            (note["collection_id"], *_BOOKING_CLOSED_STATUSES))
+    return [_booking_row_to_api(b) for b in candidates if text_matches_schedule(b["vessel"], schedule)]
+
+
 def mark_notifications_read(ids: list[int] | None = None) -> int:
     """Marks the given notifications (or all when ids is None) as read; returns how many changed."""
     with get_connection() as conn:

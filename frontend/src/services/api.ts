@@ -754,6 +754,10 @@ type NotificationsPoll = { items: AppNotification[]; unread: number; auto_import
 export const getNotificationsApi = async (limit = 50): Promise<NotificationsPoll> =>
   (await apiClient.get<NotificationsPoll>('/notifications', { params: { limit }, timeout: 8000 })).data;
 
+/** Open bookings on the vessel/voyage of a schedule-change notification (for the message sent on to the team) */
+export const getNotificationBookingsApi = async (id: number): Promise<Booking[]> =>
+  (await apiClient.get<{ items: Booking[] }>(`/notifications/${id}/bookings`, { timeout: 8000 })).data.items;
+
 /** ids omitted = mark everything read */
 export const markNotificationsReadApi = async (ids?: number[]): Promise<void> => {
   await apiClient.post('/notifications/mark-read', ids ? { ids } : {});

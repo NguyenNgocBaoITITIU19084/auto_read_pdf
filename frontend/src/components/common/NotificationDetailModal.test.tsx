@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { translations } from '../../i18n/translations';
 import type { AppNotification } from '../../types';
 
@@ -10,6 +10,13 @@ let state: { items: AppNotification[]; detailId: number | null } = { items: [], 
 vi.mock('../../context/NotificationsContext', () => ({
   useNotifications: () => ({ ...state, closeDetail }),
 }));
+
+const addToast = vi.fn();
+vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
+const loadBookings = vi.fn();
+vi.mock('../../services/api', () => ({ getNotificationBookingsApi: (...a: unknown[]) => loadBookings(...a) }));
+const copied = vi.fn();
+vi.mock('../../utils/formatters', () => ({ copyTextToClipboard: async (text: string) => { copied(text); return true; } }));
 
 import { NotificationDetailModal } from './NotificationDetailModal';
 
@@ -136,5 +143,51 @@ describe('reminder helpers', () => {
   });
   it('formats the stored time for reading', () => {
     expect(formatStamp('2026-10-16 10:40:46')).toBe('10:40 · 16/10/2026');
+  });
+
+  describe('copy message', () => {
+    const grouped: AppNotification = {
+      ...vessel, id: 3, kind: 'vessel_schedule', old_value: '', new_value: '',
+      detail: {
+        site_id: 'CTL', vessel: 'HMM HOPE', voyage: '062E-062E', bookings: ['SGNGX2311600'],
+        changes: [{ kind: 'vessel_closing', label: 'Cut-off', old: '23/09/2026 11:00', new: '23/09/2026 08:00' }],
+      },
+    };
+    const copy = () => screen.getByRole('button', { name: translations.vi.notifications.message.copy });
+
+    beforeEach(() => {
+      addToast.mockReset();
+      copied.mockReset();
+      loadBookings.mockReset();
+      state = { items: [grouped, container], detailId: 3 };
+    });
+
+    it('copies the change with the open bookings on the voyage', async () => {
+      loadBookings.mockResolvedValue([{ 'Booking No': 'SGNGX2311600', Carrier: 'ONE', 'Equipment Type': "40'HC", "Q'ty": '2' }]);
+      render(<NotificationDetailModal onNavigateTab={vi.fn()} />);
+      fireEvent.click(copy());
+      await waitFor(() => expect(copied).toHaveBeenCalled());
+      expect(loadBookings).toHaveBeenCalledWith(3);
+      const text = copied.mock.calls[0][0] as string;
+      expect(text).toContain('‼ TÀU ĐỔI LỊCH: HMM HOPE 062E-062E');
+      expect(text).toContain('• Cut-off: 23/09 11:00 → 23/09 08:00 (SỚM HƠN 3 giờ)');
+      expect(text).toContain("• SGNGX2311600 – ONE – 2x40'HC");
+      expect(addToast).toHaveBeenCalledWith(translations.vi.notifications.message.copied, 'success');
+    });
+
+    it('still copies, with the booking numbers only, when the bookings cannot be loaded', async () => {
+      loadBookings.mockRejectedValue(new Error('404'));
+      render(<NotificationDetailModal onNavigateTab={vi.fn()} />);
+      fireEvent.click(copy());
+      await waitFor(() => expect(copied).toHaveBeenCalled());
+      expect(copied.mock.calls[0][0]).toContain('• SGNGX2311600');
+      expect(addToast).toHaveBeenCalledWith(translations.vi.notifications.message.copiedNumbersOnly, 'info');
+    });
+
+    it('is offered for vessel changes only', () => {
+      state = { items: [grouped, container], detailId: 1 };
+      render(<NotificationDetailModal onNavigateTab={vi.fn()} />);
+      expect(screen.queryByRole('button', { name: translations.vi.notifications.message.copy })).toBeNull();
+    });
   });
 });
