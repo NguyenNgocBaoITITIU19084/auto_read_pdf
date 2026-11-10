@@ -405,6 +405,19 @@ export const COLOR_PRESETS: ColorPreset[] = [
     hexPreview: '#92400e',
     badgeClass: 'bg-amber-800 text-amber-50 border-amber-900 dark:bg-amber-700 dark:text-amber-50 dark:border-amber-500',
   },
+  {
+    id: 'cobalt',
+    name: 'Cobalt (Solid)',
+    nameVi: 'Xanh cô-ban (đậm)',
+    bgClass: 'bg-indigo-800',
+    darkBgClass: 'dark:bg-indigo-700',
+    borderClass: 'border-indigo-900',
+    darkBorderClass: 'dark:border-indigo-500',
+    textClass: 'text-indigo-50',
+    darkTextClass: 'dark:text-indigo-50',
+    hexPreview: '#3730a3',
+    badgeClass: 'bg-indigo-800 text-indigo-50 border-indigo-900 dark:bg-indigo-700 dark:text-indigo-50 dark:border-indigo-500',
+  },
 ];
 
 const PRESET_BY_ID = new Map<string, ColorPreset>(COLOR_PRESETS.map((p) => [p.id, p]));

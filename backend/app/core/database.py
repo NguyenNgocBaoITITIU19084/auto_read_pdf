@@ -270,6 +270,7 @@ DEFAULT_COLOR_RULES = [
     {"target_table": "booking", "column_key": "Carrier", "match_value": "LEGEND", "match_type": "contains", "preset_id": "olive", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "JINJIANG", "match_type": "contains", "preset_id": "jade", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "TOPAZ", "match_type": "contains", "preset_id": "bronze", "is_enabled": 1},
+    {"target_table": "booking", "column_key": "Carrier", "match_value": "SINOLINES", "match_type": "contains", "preset_id": "cobalt", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "SAMUDERA", "match_type": "contains", "preset_id": "ocean", "is_enabled": 1},
     {"target_table": "booking", "column_key": "Carrier", "match_value": "RCL", "match_type": "exact", "preset_id": "charcoal", "is_enabled": 1},
 ]
@@ -987,6 +988,8 @@ def _fallback_carrier(row: dict) -> str:
         return "TOPAZ MARINE"
     if "JINJIANG" in upper_check or b_no.startswith("JJMS"):
         return "JINJIANG"
+    if "SINOLINES" in upper_check or b_no.startswith("SNLG"):
+        return "SINOLINES"
     if "DONGJIN" in upper_check or "DJSC" in upper_check or b_no.startswith("DJ"):
         return "DONGJIN"
     if "PIL" in upper_check or b_no.startswith("SGN6") or "KOTA" in upper_check:

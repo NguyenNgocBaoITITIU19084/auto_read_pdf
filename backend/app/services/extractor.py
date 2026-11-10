@@ -173,6 +173,8 @@ CARRIERS: List[CarrierEntry] = [
     # Before MSC: ZIM's terms cite IMO circular 'MSC.1/CIRC.1474'
     ("ZIM", _rx(r"\bZIM\s+INTEGRATED\b", r"\bZIM\b"), ("ZIMU",), []),
     ("JINJIANG", _rx(r"\bJINJIANG\b", r"\bJJ\s+SHIPP?ING\b"), ("JJMS",), []),
+    # Sinotrans Container Lines: the company name only, since Sinotrans forwarders book with other lines
+    ("SINOLINES", _rx(r"\bSINOLINES\b", r"\bSINOTRANS\s+CONTAINER\s+LINES?\b"), ("SNLG",), []),
     ("MSC", _rx(r"\bMEDITERRANEAN\s+SHIPPING\b", r"\bMSC\b"), ("MEDU",), _rx(r"^MSC\s")),
 ]
 
@@ -368,7 +370,7 @@ def _fill_nulls(result: dict) -> dict:
 
 
 def _extract_with_layout_parser(parser, text: str, filename: str, result: dict, pages_words) -> dict:
-    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC, ZIM, Jinjiang, Topaz Marine) — see carrier_parsers/."""
+    """Carrier-specific layouts (COSCO/OOCL, Hapag-Lloyd, KMTC, Namsung, Sinokor / Heung A, Wan Hai, CMA CGM, MSC, HMM, Maersk, Evergreen, Interasia, TS Line, Swire Shipping, Matson, DJ Shipping, Legend Shipping, RCL, Yang Ming, SITC, ZIM, Jinjiang, Topaz Marine, Sinolines) — see carrier_parsers/."""
     try:
         fields = parser.parse(text, pages_words)
         result.update({k: v for k, v in fields.items() if k in result})

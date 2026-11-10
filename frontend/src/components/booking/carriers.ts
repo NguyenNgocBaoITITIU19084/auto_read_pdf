@@ -131,6 +131,10 @@ export const CARRIERS: CarrierDef[] = [
     key: 'JINJIANG',
     patterns: [/\bJINJIANG\b/, /\bJJ\s+SHIPP?ING\b/],
   },
+  {
+    key: 'SINOLINES',
+    patterns: [/\bSINOLINES\b/, /\bSINOTRANS\s+CONTAINER\s+LINES?\b/],
+  },
 ];
 
 const isBlank = (v?: string | null) => !v || v.trim() === '' || v.trim().toLowerCase() === 'null';
@@ -148,6 +152,7 @@ const BOOKING_PREFIXES: [RegExp, string][] = [
   [/^LGVN/, 'LEGEND SHIPPING'],
   [/^ZIMU/, 'ZIM'],
   [/^JJMS/, 'JINJIANG'],
+  [/^SNLG/, 'SINOLINES'],
   [/^DJ/, 'DONGJIN'],
   [/^CUL/, 'CULINES'],
   [/^SGN6/, 'PIL'],
