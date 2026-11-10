@@ -169,3 +169,25 @@ def test_undouble_only_touches_doubled_labels():
 
 def test_interasia_reefer_and_several_containers():
     assert interasia._equipment(["SD", "RF"], ["40", "20"], ["96", "86"], ["2", "1"]) == ("2 X 40'HC + 1 X 20'RF", "3")
+
+
+def test_interasia_pod_sharing_a_line_with_the_left_column():
+    # ADM03261100044 (A59GX35819): three shipper e-mails wrap the left column, so POD / PLD no longer
+    # start their own lines
+    text = INTERASIA_TEXT.replace(
+        "pricing@reallogistics.vn\nPPOODD:: PASIR GUDANG,JOHOR, MALAYSIA\nCCoonnttrraacctt NNoo::\n"
+        "PPLLDD:: PASIR GUDANG,JOHOR, MALAYSIA\n",
+        "pricing@reallogistics.vn\ncs@reallogistics.vn PPOODD:: MANILA SOUTH PORT, PHILIPPINES\n"
+        "CCoonnttrraacctt NNoo:: PPLLDD:: MANILA SOUTH PORT, PHILIPPINES\n")
+    assert "cs@reallogistics.vn PPOODD::" in text
+    r = extract_booking_from_text(text, "A59GX35819.pdf", _words())
+    assert r["Port of Discharging"] == "MANILA SOUTH PORT, PHILIPPINES"
+    assert r["Place of Delivery"] == "MANILA SOUTH PORT, PHILIPPINES"
+    assert r["ETD"] == "15/10/2026"
+    assert r["Port Cargo Cut-off"] == "14/10/2026 09:00"
+
+
+def test_interasia_value_stops_at_the_next_label_on_its_line():
+    assert interasia._value("ETD: 2026-11-11 PLD: MANILA", "ETD") == "2026-11-11"
+    assert interasia._value("Contract No: PLD: MANILA SOUTH PORT, PHILIPPINES", "PLD") == "MANILA SOUTH PORT, PHILIPPINES"
+    assert interasia._value("POD Term Full/Empty", "POD") == ""

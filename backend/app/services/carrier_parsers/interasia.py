@@ -54,9 +54,18 @@ def matches(text: str) -> bool:
                 and re.search(r"\bVessel\s+Name\b", text, re.IGNORECASE))
 
 
+# 'Label:' fields of the two header columns; one of them further along a line ends the value before it
+_INLINE_LABEL = re.compile(r"\s(?:Name|PIC|E-mail|Contract\s+No|POD|PLD|PLR|POL|ETA|ETD|Close\s+Date|"
+                           r"SI\s+Cut\s+Off\s+Date|TFC\s+Code)\s*:", re.IGNORECASE)
+
+
 def _value(text: str, label: str) -> str:
-    m = re.search(rf"^\s*{label}\s*:[ \t]*(.*)$", text, re.IGNORECASE | re.MULTILINE)
-    return m.group(1).strip() if m else ""
+    """The value after 'Label:'. The label need not start its line: a long left column (a third shipper
+    e-mail, say) wraps and pushes the right column's 'POD:' / 'PLD:' onto the end of a left-column line."""
+    m = re.search(rf"(?<![\w/]){label}\s*:[ \t]*(.*)$", text, re.IGNORECASE | re.MULTILINE)
+    if not m:
+        return ""
+    return _INLINE_LABEL.split(" " + m.group(1), maxsplit=1)[0].strip()
 
 
 def _grid_from_words(pages_words, label: str) -> List[str]:
