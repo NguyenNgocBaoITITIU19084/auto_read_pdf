@@ -112,6 +112,19 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
         </dl>
 
         <div className="flex flex-wrap justify-end gap-2 pt-1">
+          {isBrief && (
+            <button
+              type="button"
+              onClick={() => {
+                closeDetail();
+                onNavigateTab('tasks');
+              }}
+              className="mr-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 bg-primary-50 dark:bg-primary-950/40 hover:bg-primary-100 dark:hover:bg-primary-900/50"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              {t.booking.tasks.openFromBrief}
+            </button>
+          )}
           {canCopy && (
             <button
               type="button"

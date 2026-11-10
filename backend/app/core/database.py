@@ -2582,8 +2582,7 @@ def _open_bookings_with_deadline(conn: sqlite3.Connection, col_ids: list[int] | 
         clean = _clean_ids(col_ids) or [-1]
         where += f" AND collection_id IN ({','.join('?' * len(clean))})"
         params = tuple(clean)
-    rows = _select_dicts(conn, f"SELECT id, collection_id, booking_no, vessel, carrier, cutoff_time, eport_cutoff "
-                               f"FROM bookings WHERE {where} ORDER BY id;", params)
+    rows = _select_dicts(conn, f"SELECT * FROM bookings WHERE {where} ORDER BY id;", params)
     out = []
     for r in rows:
         deadline = _cutoff_deadline(r.get("eport_cutoff") or r.get("cutoff_time"))
@@ -2709,6 +2708,36 @@ def maybe_send_morning_brief(now: datetime | None = None, col_ids: list[int] | N
     set_system_setting("notify_last_brief_date", today.isoformat())
     logger.info(f"Morning brief sent: {summary}")
     return True
+
+
+def get_booking_tasks(col_id: int | None = None, now: datetime | None = None) -> dict:
+    """Work list of open bookings (new / dispatched / stuffed: not gated in yet) by their cut-off, ePort's when known:
+    `late` (cut-off passed, oldest first, however long ago: a booking still open then usually just needs its status
+    updated), `today` (still ahead today) and `tomorrow`, each sorted by cut-off. Days are VN days. One collection,
+    or every collection (each row names its own) when `col_id` is None. Each item is the booking as the API shows it
+    plus "Hạn cut-off" ('dd/mm/YYYY HH:MM'), "Cut-off cả ngày" (no time given: due by the end of the day),
+    "Bộ sưu tập" and "collection_id"."""
+    now = (now or datetime.now(VN_TZ)).astimezone(VN_TZ)
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+    with get_connection() as conn:
+        rows = _open_bookings_with_deadline(conn, None if col_id is None else [col_id])
+        names = {c_id: name for c_id, name in conn.execute("SELECT id, name FROM collections;").fetchall()}
+    groups: dict[str, list] = {"late": [], "today": [], "tomorrow": []}
+    for r in sorted(rows, key=lambda r: (r["deadline"], r["id"])):
+        deadline = r["deadline"]
+        key = ("late" if deadline < now else "today" if deadline.date() == today
+               else "tomorrow" if deadline.date() == tomorrow else None)
+        if key is None:
+            continue
+        item = _booking_row_to_api(r)
+        item["Hạn cut-off"] = deadline.strftime("%d/%m/%Y %H:%M")
+        item["Cut-off cả ngày"] = not _SORT_TIME.search(str(r.get("eport_cutoff") or r.get("cutoff_time") or ""))
+        item["Bộ sưu tập"] = names.get(r["collection_id"], "")
+        item["collection_id"] = r["collection_id"]
+        groups[key].append(item)
+    return {"date": today.strftime("%d/%m/%Y"), "tomorrow_date": tomorrow.strftime("%d/%m/%Y"),
+            "generated_at": now.strftime("%d/%m/%Y %H:%M"), **groups}
 
 
 def run_reminders(now: datetime | None = None) -> dict:

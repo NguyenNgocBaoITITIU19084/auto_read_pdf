@@ -13,6 +13,7 @@ const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').th
 const BookingTab = lazy(() => import('./components/booking/BookingTab').then((m) => ({ default: m.BookingTab })));
 const VesselTab = lazy(() => import('./components/vessel/VesselTab').then((m) => ({ default: m.VesselTab })));
 const ContainerTab = lazy(() => import('./components/container/ContainerTab').then((m) => ({ default: m.ContainerTab })));
+const TasksTab = lazy(() => import('./components/tasks/TasksTab').then((m) => ({ default: m.TasksTab })));
 const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ default: m.LogsTab })));
 
 export const App: React.FC = () => {
@@ -36,6 +37,7 @@ export const App: React.FC = () => {
     if (tab === 'booking') void import('./components/booking/BookingTab');
     if (tab === 'vessel') void import('./components/vessel/VesselTab');
     if (tab === 'container') void import('./components/container/ContainerTab');
+    if (tab === 'tasks') void import('./components/tasks/TasksTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -149,6 +151,7 @@ export const App: React.FC = () => {
           {activeTab === 'container' && (
             <ContainerTab initialSearchQuery={drilldownKeywords.container} />
           )}
+          {activeTab === 'tasks' && <TasksTab onNavigateTab={handleNavigateTab} />}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

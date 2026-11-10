@@ -155,7 +155,7 @@ export interface ColumnSetting {
   customName?: string;
 }
 
-export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container';
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks';
 export type MatchType = 'exact' | 'contains' | 'starts_with' | 'ends_with' | 'any';
 export type TargetTable = 'all' | 'booking' | 'container' | 'vessel';
 
@@ -474,6 +474,25 @@ export interface PageResult<T> {
 }
 
 /** `hidden_closed`: bookings the search also matches but the "hide done / cancelled" toggle leaves out */
+/** An open booking in the work list, with its cut-off (ePort's when known) */
+export type BookingTask = Booking & {
+  'Hạn cut-off': string;
+  /** No time given: due by the end of the day ("Hạn cut-off" then reads 23:59) */
+  'Cut-off cả ngày': boolean;
+  'Bộ sưu tập': string;
+  collection_id: number;
+};
+
+/** Open bookings (not gated in yet) by cut-off: passed, later today, tomorrow (VN days, 'dd/mm/YYYY') */
+export interface BookingTasks {
+  date: string;
+  tomorrow_date: string;
+  generated_at: string;
+  late: BookingTask[];
+  today: BookingTask[];
+  tomorrow: BookingTask[];
+}
+
 export interface BookingPageResult extends PageResult<Booking> {
   hidden_closed?: number;
 }

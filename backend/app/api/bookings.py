@@ -7,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 from backend.app.core.database import (
     insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
-    get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers, get_booking_return_cys,
+    get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers, get_booking_return_cys, get_booking_tasks,
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
     BOOKING_TRASH_KEEP_DAYS, BOOKING_STATUSES, set_booking_status, get_booking_status_counts,
@@ -121,6 +121,11 @@ def list_booking_carriers(collection_id: int = Query(...)):
 @router.get("/return-cys")
 def list_booking_return_cys(collection_id: int = Query(...)):
     return get_booking_return_cys(collection_id)
+
+@router.get("/today")
+def list_booking_tasks(collection_id: Optional[int] = Query(None, description="One collection; omitted = all")):
+    """Open bookings (not gated in yet) by cut-off: passed, later today, tomorrow."""
+    return get_booking_tasks(collection_id)
 
 @router.get("/calendar")
 def list_bookings_calendar(

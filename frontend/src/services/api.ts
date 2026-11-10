@@ -4,7 +4,7 @@ import {
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
-  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult,
+  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -131,6 +131,11 @@ export const getBookingsCalendar = async (
   (await apiClient.get<{ items: Booking[]; undated: number }>('/bookings/calendar', {
     params: { ...tableParams(collectionId, { ...q, sort_by: undefined }), date_from: dateFrom, date_to: dateTo },
     paramsSerializer: listParams,
+  })).data;
+/** Open bookings by cut-off (passed / today / tomorrow) of one collection, or of all when none is given */
+export const getBookingTasksApi = async (collectionId?: number | null): Promise<BookingTasks> =>
+  (await apiClient.get<BookingTasks>('/bookings/today', {
+    params: collectionId ? { collection_id: collectionId } : {}, timeout: 15000,
   })).data;
 export const getBookingStatuses = async (collectionId: number): Promise<ColumnValueCount[]> =>
   (await apiClient.get<{ status: string; count: number }[]>('/bookings/statuses', { params: { collection_id: collectionId } }))

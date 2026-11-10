@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   UploadCloud, Search, RefreshCw, Trash2, FileSpreadsheet,
   SlidersHorizontal, Eye, Copy, FileText, Sparkles, Ship, Layers, Pencil, Plus, Smartphone, StickyNote, Loader2,
-  ArchiveRestore, ListChecks, EyeOff
+  ArchiveRestore, ListChecks, EyeOff, CalendarClock
 } from 'lucide-react';
 import { TableRefreshBar } from '../common/TableRefreshBar';
 import { useApp } from '../../context/AppContext';
@@ -1170,6 +1170,18 @@ export const BookingTab: React.FC<BookingTabProps> = ({
                 className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </Tooltip>
+          )}
+
+          {onNavigateTab && (
+            <Tooltip content={t.booking.tasks.buttonTooltip}>
+              <button
+                onClick={() => onNavigateTab('tasks')}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 transition-colors"
+              >
+                <CalendarClock className="w-3.5 h-3.5" />
+                <span>{t.booking.tasks.button}</span>
               </button>
             </Tooltip>
           )}
