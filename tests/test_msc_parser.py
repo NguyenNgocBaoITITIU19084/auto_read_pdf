@@ -194,3 +194,21 @@ def test_msc_carrier_detection():
     assert detect_carrier("MSC MEDITERRANEAN SHIPPING COMPANY S.A.") == "MSC"
     assert detect_carrier(booking_no="MEDUABE44198") == "MSC"
     assert detect_carrier(vessel="MSC MONICA III HR642R") == "MSC"
+
+
+def test_msc_vessel_still_to_be_named_keeps_the_transhipment():
+    """339IVN0139237: a 'TBN' vessel is printed with no Lloyds number and no flag. Missing it sent the PDF down the
+    OCR path, which dropped T/S Port SINGAPORE and took the connecting-vessel line as the vessel."""
+    text = (MSC_TEXT
+            .replace("VESSEL NAME / FLAG MSC MONICA III (LLOYDS NO. 9060649) / LR VOYAGE NUMBER HR642R",
+                     "VESSEL NAME / FLAG TBN45# VOYAGE NUMBER HQ645A")
+            .replace("PORT OF TRANSHIPMENT N*1 BUSAN EST. TIME OF DEPARTURE 05/11/2026 21:30",
+                     "PORT OF TRANSHIPMENT N*1 SINGAPORE EST. TIME OF DEPARTURE 26/11/2026 07:00")
+            .replace("CONNECTING VESSEL N*1 / FLAG ONE SINCERITY (LLOYDS NO. 9976185) / SG VOYAGE NUMBER 2642E",
+                     "CONNECTING VESSEL N*1 / FLAG MSC SAMAR (LLOYDS NO. 9839442) / PA VOYAGE NUMBER GJ644W"))
+    r = extract_booking_from_text(text, "339IVN0139237.pdf")
+    assert r["Vessel"] == r["Pre Carrier"] == "TBN45 HQ645A"
+    assert r["T/S Port"] == "SINGAPORE"
+    assert r["Trunk Vessel"] == "MSC SAMAR GJ644W"
+    assert r["ETD_Trunk"] == "26/11/2026 07:00"
+    assert r["Port Cargo Cut-off"] == "19/10/2026 04:00"   # the special (ICD) cut-off, not first receiving

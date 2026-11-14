@@ -37,8 +37,9 @@ _DATETIME = r"\d{1,2}/\d{1,2}/\d{4}(?:\s+\d{1,2}:\d{2})?"
 # (an empty value leaves the next label at the start)
 _NEXT_LABEL = (r"(?:^|\s+)(?:EST\.\s*TIME|CARRIER'?S\s+HAULAGE|BOOKING\s+DATE|AS\s+FROM|UNTIL|VOYAGE\s+NUMBER|"
                r"QUANTITY|HAZARDOUS|TERMINAL\s+OF)\b")
-# 'MSC MONICA III (LLOYDS NO. 9060649) / LR VOYAGE NUMBER HR642R'
-_VESSEL = r"(.*?)\s*(?:\(LLOYDS\s+NO\.?\s*\d*\))?\s*/\s*[A-Z]{0,3}\s+VOYAGE\s+NUMBER\s*([A-Z0-9]*)"
+# 'MSC MONICA III (LLOYDS NO. 9060649) / LR VOYAGE NUMBER HR642R', or a vessel still to be named, printed with
+# no Lloyds number and no flag: 'TBN45# VOYAGE NUMBER HQ645A'
+_VESSEL = r"(.*?)\s*(?:\(LLOYDS\s+NO\.?\s*\d*\))?(?:\s*/\s*[A-Z]{0,3})?\s+VOYAGE\s+NUMBER\s*([A-Z0-9]*)"
 _EQUIP = re.compile(r"EQUIP\.?\s*TYPE\s*/\s*ISO\s*/\s*NUMBER\s+(\d{2})([A-Z]{2})\s*/\s*\w+\s+QUANTITY\s+(\d+)",
                     re.IGNORECASE)
 
@@ -59,7 +60,8 @@ def _vessel(text: str, label: str) -> str:
     m = re.search(rf"^\s*{label}[ \t]*{_VESSEL}[ \t]*$", text, re.IGNORECASE | re.MULTILINE)
     if not m:
         return ""
-    return f"{m.group(1).strip()} {m.group(2)}".strip()
+    name = m.group(1).replace("#", " ").strip()   # 'TBN45#': the '#' only marks a vessel to be named
+    return f"{name} {m.group(2)}".strip()
 
 
 def _dates_after(text: str, label: str) -> List[str]:
