@@ -12,7 +12,7 @@ export const NOTE_MAX_LENGTH = 2000;
 export const BOOKING_FORM_SECTIONS: { titleKey: 'main' | 'ports' | 'equipment' | 'yards' | 'source' | 'note'; fields: { key: BookingFieldKey; kind: FieldKind; required?: boolean }[] }[] = [
   { titleKey: 'main', fields: [
     { key: 'Booking No', kind: 'text', required: true }, { key: 'Carrier', kind: 'carrier' },
-    { key: 'Vessel', kind: 'text', required: true }, { key: 'ETD', kind: 'date' },
+    { key: 'Vessel', kind: 'text', required: true }, { key: 'ETD', kind: 'datetime' },
   ] },
   { titleKey: 'ports', fields: [
     { key: 'Port of Discharging', kind: 'text' }, { key: 'Place of Delivery', kind: 'text' },
@@ -56,7 +56,7 @@ export function isValidBookingDate(value: string, allowTime: boolean): boolean {
 export function validateBookingForm(v: BookingFormValues): Partial<Record<BookingFieldKey | '_identity', string>> {
   const errors: Partial<Record<BookingFieldKey | '_identity', string>> = {};
   if (!v['Booking No'].trim() && !v.Vessel.trim()) errors._identity = 'identityRequired';
-  if (!isValidBookingDate(v.ETD, false)) errors.ETD = 'dateInvalid';
+  if (!isValidBookingDate(v.ETD, true)) errors.ETD = 'dateTimeInvalid';
   if (!isValidBookingDate(v['Port Cargo Cut-off'], true)) errors['Port Cargo Cut-off'] = 'dateTimeInvalid';
   const qty = v["Q'ty"].trim();
   if (qty && !(/^\d+$/.test(qty) && Number(qty) >= 1 && Number(qty) <= 999)) errors["Q'ty"] = 'qtyInvalid';

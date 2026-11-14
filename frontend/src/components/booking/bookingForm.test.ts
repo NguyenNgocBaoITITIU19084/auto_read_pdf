@@ -18,7 +18,9 @@ describe('bookingForm', () => {
     expect(validateBookingForm(v)._identity).toBe('identityRequired');
     expect(validateBookingForm({ ...v, Vessel: 'KOTA' })._identity).toBeUndefined();
     expect(validateBookingForm({ ...v, 'Booking No': 'A', "Q'ty": '0' })["Q'ty"]).toBe('qtyInvalid');
-    expect(validateBookingForm({ ...v, 'Booking No': 'A', ETD: '31/04/2026' }).ETD).toBe('dateInvalid');
+    expect(validateBookingForm({ ...v, 'Booking No': 'A', ETD: '31/04/2026' }).ETD).toBe('dateTimeInvalid');
+    // Parsers store ETD with a time (e.g. MSC), so an edit must not be blocked by it.
+    expect(validateBookingForm({ ...v, 'Booking No': 'A', ETD: '21/11/2026 14:30' }).ETD).toBeUndefined();
   });
 
   it('maps null-ish booking values to empty strings and diffs only changed fields', () => {

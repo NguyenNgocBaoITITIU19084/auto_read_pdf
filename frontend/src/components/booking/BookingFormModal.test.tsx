@@ -30,7 +30,7 @@ describe('BookingFormModal', () => {
     fireEvent.change(screen.getByLabelText(cols['Booking No']), { target: { value: 'SGN1' } });
     fireEvent.change(screen.getByLabelText(cols.ETD), { target: { value: '31/04/2026' } });
     fireEvent.blur(screen.getByLabelText(cols.ETD));
-    expect(screen.getByText(f.dateInvalid)).toBeInTheDocument();
+    expect(screen.getByText(f.dateTimeInvalid)).toBeInTheDocument();
     expect(save).toBeDisabled();
     fireEvent.change(screen.getByLabelText(cols.ETD), { target: { value: '30/04/2026' } });
     fireEvent.click(save);
@@ -48,6 +48,27 @@ describe('BookingFormModal', () => {
     fireEvent.keyDown(screen.getByLabelText(cols.Vessel), { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(api.updateBookingApi).toHaveBeenCalledWith(9, { Vessel: 'NEW' }));
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ Vessel: 'NEW' }), 'edit');
+  });
+
+  it('saves an edit when ETD carries a time, and shows a prefilled invalid value at once', () => {
+    const { unmount } = render(<BookingFormModal isOpen mode="edit" booking={{ id: 3, 'Booking No': '339IVN0139237', ETD: '21/11/2026 14:30' } as any} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByLabelText(cols.Carrier), { target: { value: 'MSC' } });
+    expect(screen.getByRole('button', { name: f.save })).toBeEnabled();
+    unmount();
+    render(<BookingFormModal isOpen mode="edit" booking={{ id: 4, 'Booking No': 'B', ETD: '31/04/2026' } as any} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.getByText(f.dateTimeInvalid)).toBeInTheDocument();
+  });
+
+  it('shows each error as soon as it is typed, with a correct example and a count by the save button', () => {
+    render(<BookingFormModal isOpen mode="edit" booking={{ id: 6, 'Booking No': 'B' } as any} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByLabelText(cols["Q'ty"]), { target: { value: 'ba' } });
+    fireEvent.change(screen.getByLabelText(cols['Port Cargo Cut-off']), { target: { value: '2026-11-19' } });
+    expect(screen.getByText(f.qtyInvalid)).toHaveTextContent('Ví dụ đúng: 3');
+    expect(screen.getByText(f.dateTimeInvalid)).toHaveTextContent('21/11/2026 14:30');
+    expect(screen.getByRole('status')).toHaveTextContent('Còn 2 ô bị lỗi');
+    expect(screen.getByRole('button', { name: f.save })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(cols['Booking No']), { target: { value: '' } });
+    expect(screen.getByText(f.identityRequired)).toBeInTheDocument();
   });
 
   it('shows the server error message', async () => {

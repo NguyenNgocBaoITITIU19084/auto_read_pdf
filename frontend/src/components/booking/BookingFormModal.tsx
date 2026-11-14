@@ -48,10 +48,14 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({ isOpen, mode
   const dirty = Object.keys(changes).length > 0;
   const hasErrors = Object.keys(errors).length > 0;
   const canSave = !saving && !hasErrors && dirty;
+  // A blank new form is not an error yet; the "Booking No or Vessel" rule shows once the user starts typing.
+  const showIdentityErr = !!errors._identity && (dirty || submitted || touched.has('Booking No') || touched.has('Vessel'));
+  const visibleErrorCount = Object.keys(errors).filter((k) => k !== '_identity').length + (showIdentityErr ? 1 : 0);
 
   const fieldError = (key: BookingFieldKey) => {
     const code = errors[key];
-    return code && (touched.has(key) || submitted) ? (f as Record<string, any>)[code] as string : '';
+    // Every invalid field shows its error (with a correct example) at once, so Lưu is never disabled without a reason.
+    return code ? (f as Record<string, any>)[code] as string : '';
   };
 
   const requestClose = async () => {
@@ -106,7 +110,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({ isOpen, mode
                 const id = `booking-form-${field.key.replace(/[^a-z0-9]/gi, '-')}`;
                 const label = t.booking.columns[field.key] || field.key;
                 const err = fieldError(field.key);
-                const identityErr = field.required && errors._identity && (submitted || touched.has(field.key));
+                const identityErr = field.required && errors._identity && showIdentityErr;
                 if (field.kind === 'textarea') {
                   const len = values[field.key].trim().length;
                   return (
@@ -151,6 +155,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({ isOpen, mode
                       autoFocus={field.key === 'Booking No'}
                     />
                     {err && <p className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">{err}</p>}
+                    {identityErr && field.key === 'Booking No' && <p className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">{f.identityRequired}</p>}
                   </div>
                 );
               })}
@@ -160,10 +165,11 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({ isOpen, mode
         <datalist id="booking-form-carriers">
           {CARRIERS.map((c) => <option key={c.key} value={c.key} />)}
         </datalist>
-        {errors._identity && submitted && <p className="text-[11px] text-rose-600 dark:text-rose-400">{f.identityRequired}</p>}
 
         <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-          <span className="text-[11px] text-slate-400">{dirty ? f.shortcut : f.noChanges}</span>
+          {visibleErrorCount > 0
+            ? <span role="status" className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">{tf(f.errorCount, { count: visibleErrorCount })}</span>
+            : <span className="text-[11px] text-slate-400">{dirty ? f.shortcut : f.noChanges}</span>}
           <div className="flex items-center gap-2">
             <button type="button" onClick={requestClose} className="px-3.5 py-2 text-xs font-semibold rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">
               {f.cancel}
