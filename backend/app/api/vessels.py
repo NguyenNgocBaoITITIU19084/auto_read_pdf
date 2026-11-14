@@ -91,6 +91,9 @@ def query_vessels(payload: VesselSearchRequest):
             insert_vessel_schedules(payload.collection_id, results)
         if results:
             message = detail.get("message") or ""
+        elif detail.get("message"):
+            # The lookup's own reason (vessel not at this port / voyage not listed, with the voyages it has)
+            message = detail["message"]
         elif payload.voyage:
             message = f"Không tìm thấy lịch tàu '{payload.vessel_name}' khớp với số chuyến '{payload.voyage}' trên ePort"
         else:

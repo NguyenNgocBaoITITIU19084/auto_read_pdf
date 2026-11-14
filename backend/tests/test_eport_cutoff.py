@@ -205,3 +205,19 @@ def test_links_seq_goes_up_when_schedules_are_saved_or_moved(col):
     other = db.create_collection("other")
     db.move_items_to_collection("vessels", [db.get_vessel_schedules(col)[0]["id"]], other)
     assert before < after_save < db.booking_links_seq()
+
+
+def test_api_search_reports_why_nothing_was_found(fresh_db, monkeypatch):
+    """A vessel that does not call at the chosen port is reported as such, not as a voyage mismatch."""
+    from fastapi.testclient import TestClient
+    import backend.app.api.vessels as vessels_api
+    from backend.app.main import app
+
+    col = db.create_collection("not found")
+    monkeypatch.setattr(vessels_api, "search_vessels_detailed", lambda *a, **k: {
+        "items": [], "reason": "vessel_not_found", "message": "Không tìm thấy tàu 'MAERSK ALTAIR' tại cảng SP-ITC",
+        "available_voyages": []})
+    res = TestClient(app).post("/api/v1/vessels/search", json={
+        "collection_id": col, "site_id": "ITC", "vessel_name": "MAERSK ALTAIR", "voyage": "645E", "save": False})
+    assert res.status_code == 200
+    assert res.json()["message"] == "Không tìm thấy tàu 'MAERSK ALTAIR' tại cảng SP-ITC"
