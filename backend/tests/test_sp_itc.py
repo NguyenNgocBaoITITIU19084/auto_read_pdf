@@ -563,3 +563,113 @@ def test_port_gate_hours_settings_roundtrip(tmp_path, monkeypatch):
     assert port_gate_rules.get_gate_open_hours() == {"ITC": {"dry": 144, "reefer": 72, "haz": 48}}
     port_gate_rules.set_gate_open_hours({"ITC": {"dry": 168, "reefer": 72, "haz": 48}})
     assert port_gate_rules.get_gate_open_hours()["ITC"]["dry"] == 168
+
+
+def test_stored_itc_schedules_get_gate_open_times_on_save_and_startup(fresh_db):
+    """Schedules saved before the rule existed, or before the hours were edited, are recomputed too:
+    a vessel that already left is never fetched again, so waiting for the next sync left them empty."""
+    from backend.app.core import database as db
+    from backend.app.services import port_gate_rules
+    col = db.create_collection("itc")
+    with db.get_connection() as conn:   # stored by an old version: no gate-open time
+        db._insert_vessel_rows(conn.cursor(), col, [{"SITE_ID": "ITC", "VESSELNAME": "WAN HAI 1", "IN_OUT_VOYAGE": "1N",
+                                                     "CLOSING_TIME": "2026-11-11 08:00:00"}], "2026-11-01 00:00:00")
+        db._insert_vessel_rows(conn.cursor(), col, [{"SITE_ID": "CTL", "VESSELNAME": "KOTA", "IN_OUT_VOYAGE": "2S",
+                                                     "CLOSING_TIME": "2026-11-11 08:00:00"}], "2026-11-01 00:00:00")
+    stored = lambda site: next(v for v in db.get_vessel_schedules(col) if v["site_id"] == site)
+
+    db.init_db()
+    assert stored("ITC")["open_ts"] == "2026-11-05 08:00:00"
+    assert stored("ITC")["reefer_open_ts"] == "2026-11-08 08:00:00"
+    assert stored("ITC")["haz_open_ts"] == "2026-11-09 08:00:00"
+    assert stored("CTL")["open_ts"] == ""   # ePort ports publish their own times: left alone
+
+    port_gate_rules.set_gate_open_hours({"ITC": {"dry": 120, "reefer": 72, "haz": 48}})
+    assert stored("ITC")["open_ts"] == "2026-11-06 08:00:00"
+
+
+# An export version of the real record: same shape, class 3 (export), loading vessel in ShipInfo
+REAL_EXPORT = dict(REAL_IMPORT_BY_BARGE_DELIVERED, CntrClass="3", TKHNNo=None, TKHXNo="30812345678", DateOut=None,
+                   CJMode_OUT_CD=None, CMStatus="S", IsTruckBarge="T", DMethod_CD="XE-BAI", CJModeName="Hạ bãi",
+                   ShipInfo="WAN HAI 316/W123/W123", ISO_SZTP="45G1")
+_ITC_SCHEDULE = {"VESSELNAME": "WAN HAI 316", "IN_OUT_VOYAGE": "W123", "CLOSING_TIME": "2026-11-16 07:00:00"}
+
+
+def test_export_container_carries_its_loading_vessel_but_an_import_does_not():
+    (export_row,) = sp_itc_client._map_sp_itc_container(REAL_EXPORT)
+    assert export_row["IM_EXP"] == "Export" and export_row["LOAD_TO_VESSEL"] == "WAN HAI 316/W123/W123"
+    assert all(r["LOAD_TO_VESSEL"] == "" for r in sp_itc_client._map_sp_itc_container(REAL_IMPORT_BY_BARGE_DELIVERED))
+
+
+def test_vessel_cutoff_needs_the_same_vessel_and_voyage():
+    rows = sp_itc_client._map_sp_itc_container(REAL_EXPORT)
+    sp_itc_client.attach_vessel_cutoffs(rows, [_ITC_SCHEDULE, dict(_ITC_SCHEDULE, VESSELNAME="WAN HAI 3161")])
+    assert rows[0]["VESSEL_CUTOFF"] == "2026-11-16 07:00:00"
+
+    other_voyage = sp_itc_client._map_sp_itc_container(REAL_EXPORT)
+    sp_itc_client.attach_vessel_cutoffs(other_voyage, [dict(_ITC_SCHEDULE, IN_OUT_VOYAGE="W124")])
+    assert other_voyage[0]["VESSEL_CUTOFF"] == ""
+
+
+def test_vessel_cutoff_lookup_failing_leaves_the_rows_usable(monkeypatch):
+    def down():
+        raise ConnectionError("down")
+    monkeypatch.setattr(sp_itc_client, "fetch_sp_itc_vessel_schedules", down)
+    rows = sp_itc_client.attach_vessel_cutoffs(sp_itc_client._map_sp_itc_container(REAL_EXPORT))
+    assert rows[0]["VESSEL_CUTOFF"] == ""
+
+
+def test_container_cargo_type_from_iso_and_temperature():
+    from backend.app.services.port_gate_rules import container_cargo_type
+    assert container_cargo_type("45R1", "") == "reefer"
+    assert container_cargo_type("22G0", "-18") == "reefer"
+    assert container_cargo_type("45G1", "") == "dry"
+    assert container_cargo_type("", "") == "dry"
+    assert container_cargo_type("45G1", "", "Hàng nguy hiểm (DG) - 3 - UN 1993") == "haz"
+    assert container_cargo_type("45R1", "-18", "Hàng nguy hiểm (DG)") == "haz"   # DG wins over reefer
+
+
+def test_sp_itc_dg_fields_mark_the_container_dangerous():
+    # the real record: CARGO_TYPE GP, ClassUno '-', DG_CD / DG_CHK / UNNO empty -> ordinary cargo
+    assert sp_itc_client._sp_itc_haz(dict(REAL_IMPORT_BY_BARGE_DELIVERED, CARGO_TYPE="GP", ClassUno="-",
+                                          DG_CD=None, DG_CHK=None, UNNO=None)) == ""
+    assert sp_itc_client._sp_itc_haz({"ClassUno": "3", "UNNO": "1993"}) == "Hàng nguy hiểm (DG) - 3 - UN 1993"
+    assert sp_itc_client._sp_itc_haz({"DG_CHK": "1"}) == "Hàng nguy hiểm (DG)"
+    assert sp_itc_client._sp_itc_haz({"CARGO_TYPE": "DG"}) == "Hàng nguy hiểm (DG)"
+    assert sp_itc_client._sp_itc_haz({"DG_CHK": "0", "ClassUno": "-"}) == ""
+
+
+def test_itc_container_shows_gate_open_time_that_follows_settings(fresh_db):
+    from backend.app.core import database as db
+    from backend.app.services import port_gate_rules
+    col = db.create_collection("itc cont")
+    dry = sp_itc_client.attach_vessel_cutoffs(sp_itc_client._map_sp_itc_container(REAL_EXPORT), [_ITC_SCHEDULE])
+    reefer = sp_itc_client.attach_vessel_cutoffs(
+        sp_itc_client._map_sp_itc_container(dict(REAL_EXPORT, CntrNo="TRIU1234567", ISO_SZTP="45R1")), [_ITC_SCHEDULE])
+    db.insert_containers(col, dry + reefer)
+    shown = lambda no: next(c for c in db.get_containers(col) if c["containerno"] == no)
+
+    assert shown("MEDU5049541")["vessel_cutoff"] == "2026-11-16 07:00:00"
+    assert shown("MEDU5049541")["gate_open_ts"] == "2026-11-10 07:00:00"   # dry: 144h before
+    assert shown("TRIU1234567")["gate_open_ts"] == "2026-11-13 07:00:00"   # reefer: 72h before
+    dg = sp_itc_client.attach_vessel_cutoffs(
+        sp_itc_client._map_sp_itc_container(dict(REAL_EXPORT, CntrNo="MSCU7654321", ClassUno="3", UNNO="1993")),
+        [_ITC_SCHEDULE])
+    db.insert_containers(col, dg)
+    assert shown("MSCU7654321")["haz"] == "Hàng nguy hiểm (DG) - 3 - UN 1993"
+    assert shown("MSCU7654321")["gate_open_ts"] == "2026-11-14 07:00:00"   # DG: 48h before
+
+    port_gate_rules.set_gate_open_hours({"ITC": {"dry": 120, "reefer": 72, "haz": 48}})
+    assert shown("MEDU5049541")["gate_open_ts"] == "2026-11-11 07:00:00"   # the edit applies at once
+
+    # looked up again while SP-ITC's schedule was unreachable: the cut-off found before is kept
+    db.insert_containers(col, sp_itc_client._map_sp_itc_container(REAL_EXPORT))
+    assert shown("MEDU5049541")["vessel_cutoff"] == "2026-11-16 07:00:00"
+
+
+def test_ctl_container_gets_no_gate_open_time(fresh_db):
+    from backend.app.core import database as db
+    col = db.create_collection("ctl")
+    db.insert_containers(col, [{"SITE": "CTL", "CONTAINERNO": "TEMU1234567", "EVENT_TYPE": "INGATE",
+                                "EVENT_TIME": "2026-11-01 08:00:00", "VESSEL_CUTOFF": "2026-11-16 07:00:00"}])
+    assert db.get_containers(col)[0]["gate_open_ts"] == ""

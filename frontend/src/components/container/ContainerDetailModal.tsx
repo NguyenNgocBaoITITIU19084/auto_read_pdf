@@ -71,7 +71,10 @@ export const ContainerDetailModal: React.FC<ContainerDetailModalProps> = ({
     },
     {
       title: "Vị trí & Vận chuyển",
-      fields: ["location", "stack", "in_yard", "truck_vessel", "pod_destination", "load_to_vessel", "temp", "haz"]
+      fields: ["location", "stack", "in_yard", "truck_vessel", "pod_destination", "load_to_vessel",
+        // SP-ITC only: the loading vessel's cut-off and the gate-open time worked out from it (Settings › Giờ mở cổng hạ)
+        ...(String(container.site_id || '').toUpperCase() === 'ITC' ? ["vessel_cutoff", "gate_open_ts"] : []),
+        "temp", "haz"]
     },
     {
       title: "Hải quan & Phí hạ tầng",

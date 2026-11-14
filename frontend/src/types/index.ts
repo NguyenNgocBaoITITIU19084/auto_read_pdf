@@ -106,6 +106,10 @@ export interface ContainerInfo {
   temp?: string;
   haz?: string;
   load_to_vessel?: string;
+  /** SP-ITC export: the loading vessel's cut-off ("YYYY-MM-DD HH:MM:SS") */
+  vessel_cutoff?: string;
+  /** SP-ITC export: cut-off minus the gate-open hours of its cargo type (computed by the backend) */
+  gate_open_ts?: string;
   pod_destination?: string;
   truck_vessel: string;
   trans_in: string;

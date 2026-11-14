@@ -209,6 +209,9 @@ def _enrich_container_row(row: dict) -> dict:
     text, url = parse_haz(row.get("haz"))
     row["haz"] = text
     row["imdg_url"] = url
+    from backend.app.services.port_gate_rules import container_gate_open_time
+    row["gate_open_ts"] = container_gate_open_time(row.get("site_id"), row.get("vessel_cutoff"), row.get("iso"), row.get("temp"),
+                                                   row.get("haz"))
     return row
 
 
@@ -470,6 +473,7 @@ def init_db():
             );
         """)
         _ensure_columns(conn, "containers", [
+            ("vessel_cutoff", "TEXT"),
             ("in_yard", "TEXT"),
             ("stack", "TEXT"),
             ("temp", "TEXT"),
@@ -612,6 +616,14 @@ def init_db():
                 _sync_booking_eport_cutoffs(conn, col_id)
         except Exception:
             logger.exception("Could not backfill bookings' ePort cut-off")
+
+    # SP-ITC schedules stored before the gate-open rule (or before its hours were edited) get their times
+    try:
+        from backend.app.services.port_gate_rules import apply_gate_open_hours, reset_gate_open_hours_cache
+        reset_gate_open_hours_cache()   # hours cached from another database (tests, a restore) are not this one's
+        apply_gate_open_hours()
+    except Exception:
+        logger.exception("Could not recompute SP-ITC gate-open times")
 
     if removed_color_rules > 0:
         # VACUUM cannot run inside a transaction; reclaim the space freed by the dedupe.
@@ -1939,6 +1951,15 @@ def _insert_container_rows(cursor: sqlite3.Cursor, col_id: int, containers: list
                  _s(c.get("EVENT_TYPE", c.get("event_type", ""))))).fetchone()
             if kept:
                 bill_book = kept[0]
+        vessel_cutoff = _s(c.get("VESSEL_CUTOFF", c.get("vessel_cutoff", "")))
+        if not vessel_cutoff and _s(c.get("LOAD_TO_VESSEL", c.get("load_to_vessel", ""))):
+            # SP-ITC's schedule could not be read this time: keep the cut-off found for the same vessel before
+            kept = cursor.execute(
+                "SELECT vessel_cutoff FROM containers WHERE collection_id = ? AND containerno = ? AND load_to_vessel = ? "
+                "AND TRIM(COALESCE(vessel_cutoff, '')) != '' ORDER BY queried_at DESC LIMIT 1;",
+                (col_id, cont_val, _s(c.get("LOAD_TO_VESSEL", c.get("load_to_vessel", ""))))).fetchone()
+            if kept:
+                vessel_cutoff = kept[0]
 
         cursor.execute("""
             INSERT OR REPLACE INTO containers (
@@ -1947,8 +1968,8 @@ def _insert_container_rows(cursor: sqlite3.Cursor, col_id: int, containers: list
                 vgm, category, cust, location, stack, temp, haz, load_to_vessel, pod_destination,
                 truck_vessel, trans_in, trans_out, cont_in_ts, cont_out_ts, line_oper, im_exp,
                 bill_book, cust_approval_date, note, item_seal_no, custom_clearance_status,
-                infras_fee_status, item_key, queried_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                infras_fee_status, item_key, queried_at, vessel_cutoff
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             col_id,
             site_val,
@@ -1988,7 +2009,8 @@ def _insert_container_rows(cursor: sqlite3.Cursor, col_id: int, containers: list
             _s(c.get("CUSTOM_CLEARANCE_STATUS", c.get("custom_clearance_status", ""))),
             _s(c.get("INFRAS_FEE_STATUS", c.get("infras_fee_status", ""))),
             _i(c.get("ITEM_KEY", c.get("item_key", None))),
-            row_queried_at
+            row_queried_at,
+            vessel_cutoff,
         ))
         if cursor.lastrowid:
             inserted_ids.append(cursor.lastrowid)
@@ -2014,7 +2036,7 @@ CONTAINER_SEARCH_COLUMNS = {
     "vgm", "category", "cust", "location", "stack", "temp", "haz", "load_to_vessel", "pod_destination",
     "truck_vessel", "trans_in", "trans_out", "cont_in_ts", "cont_out_ts", "line_oper", "im_exp",
     "bill_book", "cust_approval_date", "note", "item_seal_no", "custom_clearance_status",
-    "infras_fee_status", "item_key", "queried_at", "customs_status"
+    "infras_fee_status", "item_key", "queried_at", "customs_status", "vessel_cutoff"
 }
 
 
@@ -2056,6 +2078,8 @@ def get_containers(col_id: int, search_query: str = None, search_field: str = No
 
 
 def _container_order(sort_by: str = None, sort_dir: str = None) -> str:
+    if sort_by == "gate_open_ts":   # computed when shown: it follows the cut-off it is worked out from
+        sort_by = "vessel_cutoff"
     if sort_by not in CONTAINER_SEARCH_COLUMNS:
         return _CONTAINER_ORDER
     col = CUSTOMS_STATUS_SQL if sort_by == "customs_status" else sort_by

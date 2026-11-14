@@ -254,6 +254,27 @@ def _sp_itc_im_exp(raw: dict) -> str:
     return ""
 
 
+_DG_CARGO_TYPES = {"DG", "DGR", "HZ", "HAZ", "IMO", "IMDG"}
+_EMPTY_FLAG = {"", "0", "-", "N", "NO", "FALSE", "NONE", "NULL"}
+
+
+def _sp_itc_haz(raw: dict) -> str:
+    """Dangerous-goods text of an SP-ITC record ('' for ordinary cargo).
+
+    A real record carries DG_CHK / DG_CD / UNNO / ClassUno ('-' when none) and CARGO_TYPE ('GP' for ordinary
+    cargo). Any of them set marks the box as DG, which opens the gate later than dry or reefer cargo.
+    """
+    def val(key):
+        v = str(raw.get(key) or "").strip()
+        return "" if v.upper() in _EMPTY_FLAG else v
+
+    cargo_type = val("CARGO_TYPE").upper()
+    parts = [p for p in (val("DG_CD"), val("ClassUno"), f"UN {val('UNNO')}" if val("UNNO") else "") if p]
+    if not (parts or val("DG_CHK") or cargo_type in _DG_CARGO_TYPES):
+        return ""
+    return " - ".join(["Hàng nguy hiểm (DG)", *parts])
+
+
 def _arrived_by_barge(raw: dict) -> bool:
     return (str(raw.get("IsTruckBarge") or "").strip().upper() == "B"
             or "SALAN" in str(raw.get("DMethod_CD") or "").upper())
@@ -355,11 +376,15 @@ def _map_sp_itc_container(raw: dict, booking_no: str = "") -> List[dict]:
     seal = (raw.get("SealNo") or "").strip()
     temp = str(raw.get("Temperature") or "").strip()
 
+    # Export: ShipInfo ("NAME/INVOY/OUTVOY") is the vessel it is loaded on, whose cut-off gives the gate-open time.
+    # Import: it is the vessel it came off, so it is not a loading vessel and stays out of LOAD_TO_VESSEL.
+    load_to_vessel = str(raw.get("ShipInfo") or "").strip() if im_exp == "Export" else ""
+
     common = {
-        "SITE_ID": "ITC", "CONTAINERNO": cntr_no, "IN_YARD": in_yard, "FEL": fel, "ISO": iso, "GROSS": gross,
+        "SITE_ID": "ITC", "CONTAINERNO": cntr_no, "LOAD_TO_VESSEL": load_to_vessel, "VESSEL_CUTOFF": "", "IN_YARD": in_yard, "FEL": fel, "ISO": iso, "GROSS": gross,
         "CONT_IN_TS": date_in, "CONT_OUT_TS": date_out, "LINE_OPER": line_oper, "IM_EXP": im_exp,
         "POD_DESTINATION": pod, "BILL_BOOK": bill_book, "ITEM_SEAL_NO": seal, "TEMP": temp,
-        "CUST": cust, "CUSTOM_CLEARANCE_STATUS": cust,
+        "CUST": cust, "CUSTOM_CLEARANCE_STATUS": cust, "HAZ": _sp_itc_haz(raw),
     }
     events = _sp_itc_events(raw)
     rows = []
@@ -494,6 +519,7 @@ def search_sp_itc_manual(container_nos: str, captcha_code: str, session_id: Opti
     rows = []
     for raw in (r for r in (data.get("results") or []) if isinstance(r, dict)):
         rows.extend(_map_sp_itc_container(raw))
+    attach_vessel_cutoffs(rows)
     logger.info(f"[SP-ITC cont] (manual) '{first}' -> {len(rows)} row(s), {len(rest)} container(s) left")
 
     next_captcha = None
@@ -542,6 +568,44 @@ def _query_sp_itc(session: requests.Session, opt: str, value: str, max_retries: 
             time.sleep(1)
 
     raise SpItcUnavailable(f"Không tra được '{value}' trên ePort SP-ITC sau {max_retries} lần thử ({last_error})")
+
+
+def _ship_info(text: str) -> tuple[str, List[str]]:
+    """'MSC JORDAN III/XO639A/XO639A' -> ('MSC JORDAN III', ['XO639A'])."""
+    parts = [p.strip() for p in str(text or "").split("/")]
+    voyages = []
+    for v in parts[1:]:
+        if v and v not in voyages:
+            voyages.append(v)
+    return (parts[0] if parts else ""), voyages
+
+
+def attach_vessel_cutoffs(rows: List[dict], schedules: Optional[List[dict]] = None) -> List[dict]:
+    """Sets VESSEL_CUTOFF on the export rows from the SP-ITC schedule of their loading vessel (LOAD_TO_VESSEL).
+
+    One schedule request per batch (no captcha). A vessel or voyage that does not match exactly gets no cut-off:
+    a wrong one would show a wrong gate-open time. If SP-ITC cannot be reached the rows keep none.
+    """
+    wanted = [r for r in rows if r.get("LOAD_TO_VESSEL")]
+    if not wanted:
+        return rows
+    from backend.app.services.vessel_match import same_vessel_name
+    if schedules is None:
+        try:
+            schedules = fetch_sp_itc_vessel_schedules()
+        except Exception as e:
+            logger.warning(f"[SP-ITC CONTAINER] No vessel schedule for the cut-off: {e}")
+            return rows
+    for r in wanted:
+        name, voyages = _ship_info(r["LOAD_TO_VESSEL"])
+        matches = {
+            s.get("CLOSING_TIME") for s in schedules
+            if s.get("CLOSING_TIME") and same_vessel_name(name, s.get("VESSELNAME"))
+            and any(is_voyage_match(v, s.get("IN_OUT_VOYAGE", "")) for v in voyages)
+        }
+        if len(matches) == 1:
+            r["VESSEL_CUTOFF"] = r["vessel_cutoff"] = matches.pop()
+    return rows
 
 
 def search_sp_itc_single_container(session: requests.Session, container_no: str, max_retries: int = 3) -> List[dict]:
@@ -593,7 +657,7 @@ def search_sp_itc_containers(container_nos: str) -> List[Dict[str, Any]]:
         raise SpItcUnavailable(next(iter(failed.values())))
     for c, e in failed.items():
         logger.warning(f"[SP-ITC CONTAINER] {c}: {e}")
-    return SpItcResults(all_results, failed)
+    return SpItcResults(attach_vessel_cutoffs(all_results), failed)
 
 
 def search_sp_itc_booking(booking_no: str, max_retries: int = 3) -> List[Dict[str, Any]]:
@@ -607,4 +671,4 @@ def search_sp_itc_booking(booking_no: str, max_retries: int = 3) -> List[Dict[st
     rows = []
     for raw in _query_sp_itc(_create_session(), "booking", bk_clean, max_retries):
         rows.extend(_map_sp_itc_container(raw, booking_no=bk_clean))
-    return rows
+    return attach_vessel_cutoffs(rows)
