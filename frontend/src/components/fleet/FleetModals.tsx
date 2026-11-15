@@ -6,7 +6,8 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { Modal } from '../common/Modal';
 import { tf } from '../../services/i18nFormat';
 import {
-  createFleetDriverApi, createFleetVehicleApi, deleteFleetDriverPhotoApi, deleteFleetVehiclePhotoApi, moveDriverTemporaryApi,
+  createFleetDriverApi, createFleetVehicleApi, deleteFleetDriverPhotoApi, deleteFleetVehiclePhotoApi, getFleetTrailersApi,
+  moveDriverTemporaryApi,
   setDriverHomeVehicleApi, setFleetVehicleStatusApi, unassignDriverApi, updateFleetDriverApi, updateFleetVehicleApi,
   uploadFleetDriverPhotoApi, uploadFleetVehiclePhotoApi,
 } from '../../services/api';
@@ -16,11 +17,11 @@ import {
 } from '../../types';
 import { apiError, freeVehicles, isConflict } from './fleetUtils';
 
-const INPUT = 'w-full h-9 px-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 '
+export const INPUT = 'w-full h-9 px-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 '
   + 'text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60';
 const LABEL = 'block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1';
 
-const Field: React.FC<{ label: string; children: React.ReactNode; className?: string; required?: boolean }> = ({
+export const Field: React.FC<{ label: string; children: React.ReactNode; className?: string; required?: boolean }> = ({
   label, children, className = '', required,
 }) => (
   <label className={`block ${className}`}>
@@ -29,7 +30,7 @@ const Field: React.FC<{ label: string; children: React.ReactNode; className?: st
   </label>
 );
 
-const Footer: React.FC<{ onCancel: () => void; saving: boolean; disabled?: boolean; children?: React.ReactNode }> = ({
+export const Footer: React.FC<{ onCancel: () => void; saving: boolean; disabled?: boolean; children?: React.ReactNode }> = ({
   onCancel, saving, disabled, children,
 }) => {
   const { t } = useApp();
@@ -49,11 +50,11 @@ const Footer: React.FC<{ onCancel: () => void; saving: boolean; disabled?: boole
   );
 };
 
-const NO_PHOTO_CHANGE: PhotoChoice = { file: null, remove: false };
+export const NO_PHOTO_CHANGE: PhotoChoice = { file: null, remove: false };
 
 /** Apply the form's photo choice once the record exists. Returns null when fine, else what went wrong.
  *  A backend older than the photo feature answers FastAPI's bare 404 "Not Found" (no such route): say to restart. */
-async function savePhoto(
+export async function savePhoto(
   choice: PhotoChoice, id: number, upload: (id: number, f: File) => Promise<unknown>, remove: (id: number) => Promise<unknown>,
   fallback: string, outdated: string,
 ): Promise<string | null> {
@@ -94,6 +95,20 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<PhotoChoice>(NO_PHOTO_CHANGE);
+  // trailers free to pick (or this tractor's own), offered as the trailer plate's suggestions
+  const [freeTrailers, setFreeTrailers] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let live = true;
+    getFleetTrailersApi()
+      .then((list) => live && setFreeTrailers(list
+        .filter((r) => r.status !== 'inactive' && (!r.vehicle || r.vehicle.id === vehicle?.id)).map((r) => r.plate)))
+      .catch(() => live && setFreeTrailers([]));
+    return () => {
+      live = false;
+    };
+  }, [isOpen, vehicle]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -146,7 +161,11 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
             <input autoFocus className={INPUT} value={form.plate} onChange={set('plate')} placeholder={f.platePh} />
           </Field>
           <Field label={f.trailer}>
-            <input className={INPUT} value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh} />
+            <input className={INPUT} value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
+              list="fleet-free-trailers" title={t.fleet.trailer.formHint} />
+            <datalist id="fleet-free-trailers">
+              {freeTrailers.map((plate) => <option key={plate} value={plate} />)}
+            </datalist>
           </Field>
           <Field label={f.type}>
             <input className={INPUT} value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />

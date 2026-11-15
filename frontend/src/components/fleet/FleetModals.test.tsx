@@ -18,6 +18,7 @@ vi.mock('../../services/api', () => ({
   updateFleetDriverApi: vi.fn(), uploadFleetDriverPhotoApi: vi.fn(), deleteFleetDriverPhotoApi: vi.fn(),
   moveDriverTemporaryApi: vi.fn(), setDriverHomeVehicleApi: vi.fn(), setFleetVehicleStatusApi: vi.fn(), unassignDriverApi: vi.fn(),
   fleetPhotoUrl: (n: string) => (n ? `http://api/fleet/photos/${n}` : ''),
+  getFleetTrailersApi: async () => [],
 }));
 
 import { VehicleFormModal } from './FleetModals';

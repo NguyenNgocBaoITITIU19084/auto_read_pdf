@@ -58,6 +58,7 @@ vi.mock('../../services/api', () => ({
   uploadFleetDriverPhotoApi: vi.fn(),
   deleteFleetDriverPhotoApi: vi.fn(),
   fleetPhotoUrl: (name: string) => (name ? `http://api/fleet/photos/${name}` : ''),
+  getFleetTrailersApi: async () => [],
 }));
 
 import { FleetTab } from './FleetTab';

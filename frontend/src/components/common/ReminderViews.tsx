@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlarmClock, AlertTriangle, CalendarClock, CalendarDays, Ship, Truck, User } from 'lucide-react';
+import { AlarmClock, AlertTriangle, CalendarClock, CalendarDays, Container, Ship, Truck, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import type { AppNotification, FleetDocument } from '../../types';
 import { tf } from '../../services/i18nFormat';
@@ -98,7 +98,8 @@ export const FleetExpiryDetail: React.FC<{ item: AppNotification }> = ({ item })
       <ul className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
         {docs.map((d) => (
           <li key={`${d.entity}-${d.entity_id}-${d.kind}`} className="flex items-center gap-2.5 px-3 py-2 text-xs">
-            <span className="text-slate-400">{d.entity === 'vehicle' ? <Truck className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}</span>
+            <span className="text-slate-400">{d.entity === 'vehicle' ? <Truck className="w-3.5 h-3.5" />
+              : d.entity === 'trailer' ? <Container className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}</span>
             <span className="min-w-0 flex-1">
               <span className="font-semibold text-slate-800 dark:text-slate-100">{d.subject}</span>
               <span className="text-slate-500 dark:text-slate-400"> · {r.fleetDocs[d.kind] || d.label} · {d.expiry}</span>

@@ -616,7 +616,7 @@ export interface AppNotification {
     // fleet_expiry (count = documents; expired = how many of them already expired)
     expired?: number; documents?: FleetDocument[];
   };
-  nav_tab: 'vessel' | 'container' | 'booking' | 'fleet' | null;
+  nav_tab: 'vessel' | 'container' | 'booking' | 'fleet' | 'drivers' | 'trailers' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
@@ -675,7 +675,8 @@ export interface AutoImportRunResult {
 // Excel export templates
 // ---------------------------------------------------------------------------
 /** Whose saved export templates: a tab, or one of the fleet tab's three tables */
-export type ExportTab = 'booking' | 'vessel' | 'container' | 'fleet_vehicle' | 'fleet_driver' | 'fleet_history';
+export type ExportTab = 'booking' | 'vessel' | 'container' | 'fleet_vehicle' | 'fleet_driver' | 'fleet_history' | 'fleet_trailer'
+  | 'fleet_hitch';
 export type ExportFill = 'header' | 'column';
 export type PaletteColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
 /** A palette colour, or a custom one as '#RRGGBB' */
@@ -773,11 +774,11 @@ export interface FleetAssignment {
   end_reason: string;
 }
 
-export type FleetDocumentKind = 'registration' | 'insurance' | 'license';
+export type FleetDocumentKind = 'registration' | 'insurance' | 'license' | 'trailer_registration' | 'trailer_insurance';
 export interface FleetDocument {
   kind: FleetDocumentKind;
   label: string;
-  entity: 'vehicle' | 'driver';
+  entity: 'vehicle' | 'driver' | 'trailer';
   entity_id: number;
   subject: string;
   /** 'YYYY-MM-DD' from /fleet/expiring, 'dd/mm/YYYY' inside a notification */
@@ -806,4 +807,50 @@ export interface FleetTrashedVehicle extends FleetTrashFields {
 }
 export interface FleetTrashedDriver extends FleetTrashFields {
   name: string; phone: string; license_no: string; license_class: string; status: DriverStatus; photo: string; note: string;
+}
+export interface FleetTrashedTrailer extends FleetTrashFields {
+  plate: string; trailer_type: string; chassis_no: string; status: TrailerStatus; photo: string; note: string;
+}
+
+// Trailers (rơ moóc) and which tractor pulls which
+export type TrailerStatus = VehicleStatus;
+export interface FleetTrailer {
+  id: number;
+  plate: string;
+  /** e.g. "Sàn 40'", "Xương 20'" */
+  trailer_type: string;
+  chassis_no: string;
+  /** free text, e.g. "32 tấn" */
+  payload: string;
+  /** 'YYYY' or '' */
+  year: string;
+  /** 'YYYY-MM-DD' or '' */
+  registration_expiry: string;
+  insurance_expiry: string;
+  status: TrailerStatus;
+  note: string;
+  /** stored photo name ('' = none); see fleetPhotoUrl */
+  photo: string;
+  created_at: string;
+  updated_at: string;
+  /** the tractor pulling it now, with that tractor's current driver */
+  vehicle: { id: number; plate: string; status: VehicleStatus; photo: string; driver_name: string; since: string; reason: string } | null;
+}
+export interface FleetHitch {
+  id: number;
+  trailer_id: number | null;
+  vehicle_id: number | null;
+  trailer_plate: string;
+  vehicle_plate: string;
+  reason: string;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string;
+}
+export interface FleetHitchPage { items: FleetHitch[]; total: number }
+export interface HitchResult extends FleetTrailer {
+  /** the trailer taken off the tractor ('' = none) */
+  replaced: string;
+  /** the tractor the trailer came off ('' = none) */
+  from_plate: string;
 }

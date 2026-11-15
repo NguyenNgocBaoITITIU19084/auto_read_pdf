@@ -15,6 +15,7 @@ const VesselTab = lazy(() => import('./components/vessel/VesselTab').then((m) =>
 const ContainerTab = lazy(() => import('./components/container/ContainerTab').then((m) => ({ default: m.ContainerTab })));
 const TasksTab = lazy(() => import('./components/tasks/TasksTab').then((m) => ({ default: m.TasksTab })));
 const FleetTab = lazy(() => import('./components/fleet/FleetTab').then((m) => ({ default: m.FleetTab })));
+const TrailerTab = lazy(() => import('./components/fleet/TrailerTab').then((m) => ({ default: m.TrailerTab })));
 const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ default: m.LogsTab })));
 
 export const App: React.FC = () => {
@@ -27,6 +28,7 @@ export const App: React.FC = () => {
     container?: string;
     fleet?: string;
     drivers?: string;
+    trailers?: string;
   }>({});
   const [pasteRequest, setPasteRequest] = useState<BookingPasteRequest | null>(null);
   const pasteSeqRef = useRef(0);
@@ -42,6 +44,7 @@ export const App: React.FC = () => {
     if (tab === 'container') void import('./components/container/ContainerTab');
     if (tab === 'tasks') void import('./components/tasks/TasksTab');
     if (tab === 'fleet' || tab === 'drivers') void import('./components/fleet/FleetTab');
+    if (tab === 'trailers') void import('./components/fleet/TrailerTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -158,6 +161,7 @@ export const App: React.FC = () => {
           {activeTab === 'tasks' && <TasksTab onNavigateTab={handleNavigateTab} />}
           {activeTab === 'fleet' && <FleetTab screen="vehicles" initialSearchQuery={drilldownKeywords.fleet} />}
           {activeTab === 'drivers' && <FleetTab screen="drivers" initialSearchQuery={drilldownKeywords.drivers} />}
+          {activeTab === 'trailers' && <TrailerTab initialSearchQuery={drilldownKeywords.trailers} />}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

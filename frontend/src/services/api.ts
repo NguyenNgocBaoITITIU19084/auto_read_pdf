@@ -6,7 +6,7 @@ import {
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
   FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
-  FleetTrashedVehicle, FleetTrashedDriver,
+  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -886,7 +886,7 @@ export const getFleetHistoryPageApi = async (params: {
   (await apiClient.get<FleetHistoryPage>('/fleet/history/page', { params, paramsSerializer: listParams })).data;
 /** The fleet trash, shaped like the collections' trash APIs (TrashModal); fleet data has no collection, so the
  *  collection argument is ignored. */
-const fleetTrashApi = <T,>(kind: 'vehicle' | 'driver') => ({
+const fleetTrashApi = <T,>(kind: 'vehicle' | 'driver' | 'trailer') => ({
   list: async (_collectionId: number, limit: number, offset: number) =>
     (await apiClient.get<PageResult<T> & { keep_days?: number }>('/fleet/trash', { params: { kind, limit, offset } })).data,
   ids: async (_collectionId: number) =>
@@ -898,8 +898,36 @@ const fleetTrashApi = <T,>(kind: 'vehicle' | 'driver') => ({
 });
 export const fleetVehicleTrashApi = fleetTrashApi<FleetTrashedVehicle>('vehicle');
 export const fleetDriverTrashApi = fleetTrashApi<FleetTrashedDriver>('driver');
-export const getFleetTrashCountApi = async (): Promise<{ vehicle: number; driver: number }> =>
-  (await apiClient.get<{ vehicle: number; driver: number }>('/fleet/trash/count')).data;
+export const fleetTrailerTrashApi = fleetTrashApi<FleetTrashedTrailer>('trailer');
+export type FleetTrashCount = { vehicle: number; driver: number; trailer: number };
+export const getFleetTrashCountApi = async (): Promise<FleetTrashCount> =>
+  (await apiClient.get<FleetTrashCount>('/fleet/trash/count')).data;
+
+// Trailers
+export type TrailerInput = Partial<Pick<FleetTrailer, 'plate' | 'trailer_type' | 'chassis_no' | 'payload' | 'year'
+  | 'registration_expiry' | 'insurance_expiry' | 'status' | 'note'>> & { vehicle_id?: number | null };
+export const getFleetTrailersApi = async (): Promise<FleetTrailer[]> =>
+  (await apiClient.get<FleetTrailer[]>('/fleet/trailers')).data;
+export const createFleetTrailerApi = async (data: TrailerInput): Promise<FleetTrailer> =>
+  (await apiClient.post<FleetTrailer>('/fleet/trailers', data)).data;
+export const updateFleetTrailerApi = async (id: number, data: TrailerInput): Promise<FleetTrailer> =>
+  (await apiClient.put<FleetTrailer>(`/fleet/trailers/${id}`, data)).data;
+export const deleteFleetTrailerApi = async (id: number): Promise<void> => {
+  await apiClient.delete(`/fleet/trailers/${id}`);
+};
+/** Onto a tractor (vehicleId null: off). It comes off any other tractor, and the tractor's own trailer comes off. */
+export const hitchFleetTrailerApi = async (id: number, vehicleId: number | null, reason = ''): Promise<HitchResult> =>
+  (await apiClient.post<HitchResult>(`/fleet/trailers/${id}/hitch`, { vehicle_id: vehicleId, reason })).data;
+export const uploadFleetTrailerPhotoApi = (id: number, file: Blob) => uploadPhoto<FleetTrailer>(`/fleet/trailers/${id}/photo`, file);
+export const deleteFleetTrailerPhotoApi = async (id: number): Promise<FleetTrailer> =>
+  (await apiClient.delete<FleetTrailer>(`/fleet/trailers/${id}/photo`)).data;
+export const getFleetHitchesApi = async (params: { trailer_id?: number; vehicle_id?: number; limit?: number } = {}) =>
+  (await apiClient.get<FleetHitch[]>('/fleet/trailers/history', { params })).data;
+export const getFleetHitchPageApi = async (params: {
+  trailer_id?: number; vehicle_id?: number; states?: string[]; q?: string; sort_by?: string; sort_dir?: 'asc' | 'desc';
+  limit?: number; offset?: number;
+}): Promise<FleetHitchPage> =>
+  (await apiClient.get<FleetHitchPage>('/fleet/trailers/history/page', { params, paramsSerializer: listParams })).data;
 
 export const getFleetExpiringApi = async (days = 30): Promise<FleetDocument[]> =>
   (await apiClient.get<FleetDocument[]>('/fleet/expiring', { params: { days } })).data;

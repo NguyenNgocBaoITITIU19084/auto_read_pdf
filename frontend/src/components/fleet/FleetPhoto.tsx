@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ImagePlus, Trash2, Truck, X } from 'lucide-react';
+import { Container, ImagePlus, Trash2, Truck, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { fleetPhotoUrl } from '../../services/api';
@@ -42,7 +42,7 @@ export function photoProblem(file: File): 'notImage' | 'heic' | 'tooLarge' | nul
 interface AvatarProps {
   photo: string | null | undefined;
   /** what the placeholder shows: a truck icon, or the person's initials */
-  kind: 'vehicle' | 'driver';
+  kind: 'vehicle' | 'driver' | 'trailer';
   name: string;
   /** xs/sm/md are square (people); wide/wideSm are landscape (trucks) */
   size?: 'xs' | 'sm' | 'md' | 'wide' | 'wideSm';
@@ -62,13 +62,14 @@ export const FleetAvatar: React.FC<AvatarProps> = ({ photo, kind, name, size = '
   const box = `${SIZES[size]} ${shape} shrink-0 overflow-hidden flex items-center justify-center font-bold`;
   const body = url ? (
     <img src={url} alt={name} loading="lazy" onError={() => setBroken(true)} className="w-full h-full object-cover" />
-  ) : kind === 'vehicle' ? (
-    <Truck className={size === 'xs' ? 'w-3 h-3' : size === 'wideSm' ? 'w-4 h-4' : 'w-5 h-5'} />
+  ) : kind !== 'driver' ? (
+    React.createElement(kind === 'trailer' ? Container : Truck,
+      { className: size === 'xs' ? 'w-3 h-3' : size === 'wideSm' ? 'w-4 h-4' : 'w-5 h-5' })
   ) : (
     initials(name)
   );
   const tone = url ? 'bg-slate-100 dark:bg-slate-800 ring-1 ring-slate-200 dark:ring-slate-700'
-    : kind === 'vehicle' ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500' : toneOf(name);
+    : kind !== 'driver' ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500' : toneOf(name);
   if (url && onClick) {
     return (
       <button type="button" onClick={onClick} aria-label={tf(t.fleet.photo.view, { name })} title={tf(t.fleet.photo.view, { name })}
@@ -116,7 +117,7 @@ export interface PhotoChoice {
 }
 
 interface PickerProps {
-  kind: 'vehicle' | 'driver';
+  kind: 'vehicle' | 'driver' | 'trailer';
   name: string;
   /** the photo stored now ('' = none) */
   current: string;
@@ -158,7 +159,7 @@ export const PhotoPicker: React.FC<PickerProps> = ({ kind, name, current, value,
           over ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30'
             : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:border-primary-300'}`}>
         {shown ? <img src={shown} alt={name || p.label} className="w-full h-full object-cover" />
-          : kind === 'vehicle' ? <Truck className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+          : kind !== 'driver' ? React.createElement(kind === 'trailer' ? Container : Truck, { className: 'w-8 h-8 text-slate-300 dark:text-slate-600' })
             : <span className="text-2xl font-bold text-slate-300 dark:text-slate-600">{name.trim() ? initials(name) : <ImagePlus className="w-8 h-8" />}</span>}
       </button>
       <div className="min-w-0 space-y-1.5">
