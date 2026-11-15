@@ -674,7 +674,8 @@ export interface AutoImportRunResult {
 // ---------------------------------------------------------------------------
 // Excel export templates
 // ---------------------------------------------------------------------------
-export type ExportTab = 'booking' | 'vessel' | 'container';
+/** Whose saved export templates: a tab, or one of the fleet tab's three tables */
+export type ExportTab = 'booking' | 'vessel' | 'container' | 'fleet_vehicle' | 'fleet_driver' | 'fleet_history';
 export type ExportFill = 'header' | 'column';
 export type PaletteColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
 /** A palette colour, or a custom one as '#RRGGBB' */

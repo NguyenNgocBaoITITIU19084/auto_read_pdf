@@ -2502,7 +2502,8 @@ def _trim_notifications(conn: sqlite3.Connection, now: datetime) -> None:
 # ---------------------------------------------------------------------------
 # Excel export templates
 # ---------------------------------------------------------------------------
-EXPORT_TABS = ("booking", "vessel", "container")
+# Each table keeps its own saved export templates (the fleet tab has three tables)
+EXPORT_TABS = ("booking", "vessel", "container", "fleet_vehicle", "fleet_driver", "fleet_history")
 EXPORT_NAME_MAX = 80
 
 

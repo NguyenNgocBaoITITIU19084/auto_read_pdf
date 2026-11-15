@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
-  SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Wrench, X,
+  FileSpreadsheet, SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -15,6 +15,8 @@ import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { ColumnConfigModal, type ColumnDef } from '../common/ColumnConfigModal';
 import { TRASH_KEEP_DAYS } from '../common/TrashModal';
 import { FleetTrashModal } from './FleetTrashModal';
+import { ExportModal } from '../common/ExportModal';
+import type { ExportTab } from '../../types';
 import { useTableSort } from '../../hooks/useTableSort';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { ResizableTh } from '../common/ResizableTh';
@@ -397,6 +399,87 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   }, [loadTrashCount]);
   const trashKind: 'vehicle' | 'driver' = view === 'drivers' ? 'driver' : 'vehicle';
   const trashBadge = trashCount[trashKind];
+
+  // ---- Excel export: every row that matches the search / filters / sort (not just this page), every column ----
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRows, setExportRows] = useState<Record<string, string | number>[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const exportTab: ExportTab = view === 'vehicles' ? 'fleet_vehicle' : view === 'drivers' ? 'fleet_driver' : 'fleet_history';
+  const exportPrefix = view === 'vehicles' ? 'doi_xe' : view === 'drivers' ? 'tai_xe' : 'lich_su_phan_cong';
+  const exportColumns = useMemo(() => [
+    { key: 'STT', label: t.common.stt },
+    ...activeColumns.columns.map((c) => ({ key: c.key, label: c.label })),
+  ], [activeColumns.columns, t.common.stt]);
+
+  const tempNote = (kind: 'primary' | 'temporary' | undefined) => (kind === 'temporary' ? ` (${f.kind.temporary.toLowerCase()})` : '');
+  const vehicleText = (v: FleetVehicle): Record<string, string> => ({
+    plate: v.plate,
+    status: f.vehicleStatus[v.status],
+    driver: v.current_driver ? v.current_driver.name + tempNote(v.current_driver.kind) : '',
+    docs: T.docState[docState(vehicleDocs(v), today)],
+    trailer: v.trailer_plate,
+    type: v.vehicle_type,
+    home: v.home_driver?.name || '',
+    registration: formatIsoDate(v.registration_expiry),
+    insurance: formatIsoDate(v.insurance_expiry),
+    note: v.note,
+    created: formatStampShort(v.created_at),
+  });
+  const driverText = (d: FleetDriver): Record<string, string> => ({
+    name: d.name,
+    status: f.driverStatus[d.status],
+    truck: d.current_vehicle ? d.current_vehicle.plate + tempNote(d.current_vehicle.kind) : '',
+    license: [[d.license_class, d.license_no].filter(Boolean).join(' · '), T.docState[docState(driverDocs(d), today)]]
+      .filter(Boolean).join(' — '),
+    phone: d.phone,
+    id_number: d.id_number,
+    license_no: d.license_no,
+    license_class: d.license_class,
+    license_expiry: formatIsoDate(d.license_expiry),
+    home: d.home_vehicle?.plate || '',
+    note: d.note,
+    created: formatStampShort(d.created_at),
+  });
+  const historyText = (h: FleetAssignment): Record<string, string> => ({
+    started_at: formatStampShort(h.started_at),
+    ended_at: h.ended_at ? formatStampShort(h.ended_at) : f.stillOpen,
+    driver_name: h.driver_name,
+    vehicle_plate: h.vehicle_plate + tempNote(h.kind)
+      + (h.kind === 'temporary' && h.home_vehicle_plate ? ` — ${tf(f.tempOf, { plate: h.home_vehicle_plate })}` : ''),
+    reason: h.reason,
+    end_reason: h.end_reason,
+  });
+
+  /** The whole filtered history, a server page at a time. */
+  const allHistory = async (): Promise<FleetAssignment[]> => {
+    const out: FleetAssignment[] = [];
+    const size = 1000;
+    for (let offset = 0; ; offset += size) {
+      const res = await getFleetHistoryPageApi({
+        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, kinds: historyCols.vehicle_plate,
+        states: historyCols.ended_at, q: historyQuery.trim() || undefined, sort_by: historySort.sort?.key,
+        sort_dir: historySort.sort?.dir, limit: size, offset,
+      });
+      out.push(...res.items);
+      if (res.items.length < size || out.length >= res.total) return out;
+    }
+  };
+
+  const openExport = async () => {
+    setExporting(true);
+    try {
+      const rows: Record<string, string>[] = view === 'vehicles' ? sortedVehicles.map(vehicleText)
+        : view === 'drivers' ? sortedDrivers.map(driverText) : (await allHistory()).map(historyText);
+      // empty cells as the fleet tables show them ("—"), not the export's generic "null"
+      const filled = rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v || f.none])));
+      setExportRows(filled.map((r, i) => ({ STT: i + 1, ...r })));
+      setExportOpen(true);
+    } catch (err) {
+      addToast(apiError(err, f.toast.error), 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const returnHome = async (driverId: number, name: string) => {
     setBusyId(`d${driverId}`);
@@ -900,6 +983,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
           <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">{f.title}</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">{f.subtitle}</p>
         </div>
+        <button type="button" onClick={() => void openExport()} disabled={exporting || (view === 'vehicles' ? !vs.length : view === 'drivers' ? !ds.length : !history?.total)}
+          title={f.exportHint}
+          className="inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50">
+          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}{t.common.exportExcel}
+        </button>
         <button type="button" onClick={() => setColumnsOpen(true)} title={f.columns.tooltip}
           className="inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
           <SlidersHorizontal className="w-4 h-4" />{t.common.columnsConfig}
@@ -1028,6 +1116,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
       <DriverFormModal isOpen={driverForm.open} driver={driverForm.driver} vehicles={vs}
         onClose={() => setDriverForm({ open: false, driver: null })} onSaved={reload} />
       <VehicleStatusModal vehicle={statusFor} vehicles={vs} onClose={() => setStatusFor(null)} onSaved={reload} />
+      <ExportModal isOpen={exportOpen} onClose={() => setExportOpen(false)} data={exportRows} allColumns={exportColumns}
+        tab={exportTab} filenamePrefix={exportPrefix} />
       <ColumnConfigModal isOpen={columnsOpen} onClose={() => setColumnsOpen(false)} columns={activeColumns.columns}
         onChange={activeColumns.setColumns} onReset={activeColumns.resetColumns} />
       <FleetTrashModal kind={trashKind} isOpen={trashOpen} onClose={() => setTrashOpen(false)}

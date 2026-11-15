@@ -492,3 +492,21 @@ def test_trash_api():
     assert client.post("/api/v1/fleet/trash/delete", json={"kind": "driver", "ids": [d["id"]]}).json()["deleted"] == 1
     assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 0, "driver": 0}
     assert client.put(f"/api/v1/fleet/drivers/{d['id']}", json={"name": "X"}).status_code == 404
+
+
+# --- Excel export -----------------------------------------------------------------------
+def test_fleet_tables_have_their_own_export_templates_and_export():
+    import io
+    from openpyxl import load_workbook
+    cols = [{"key": "plate", "header": "Biển số"}, {"key": "status", "header": "Trạng thái", "color": "green"}]
+    res = client.post("/api/v1/export/templates", json={"tab": "fleet_vehicle", "name": "Xe đang chạy", "columns": cols})
+    assert res.status_code == 200, res.text
+    assert [t["name"] for t in client.get("/api/v1/export/templates", params={"tab": "fleet_vehicle"}).json()] == ["Xe đang chạy"]
+    assert client.get("/api/v1/export/templates", params={"tab": "fleet_driver"}).json() == []
+    out = client.post("/api/v1/export/excel", json={"data": [{"plate": "51C-123.45", "status": "Đang chạy"}],
+                                                     "columns": cols, "filename": "doi_xe.xlsx"})
+    assert out.status_code == 200
+    ws = load_workbook(io.BytesIO(out.content)).active
+    assert [c.value for c in ws[1]] == ["Biển số", "Trạng thái"]
+    assert [c.value for c in ws[2]] == ["51C-123.45", "Đang chạy"]
+    assert "doi_xe.xlsx" in out.headers["content-disposition"]

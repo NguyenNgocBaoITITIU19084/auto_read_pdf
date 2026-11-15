@@ -1521,6 +1521,7 @@ export const translations = {
         note: "Ghi chú", created: "Ngày thêm", phone: "SĐT", idNumber: "CCCD", licenseNo: "Số bằng lái", licenseClass: "Hạng bằng",
         licenseExpiry: "Hạn bằng lái", homeVehicle: "Xe cố định",
       },
+      exportHint: "Xuất ra Excel các dòng đang hiện (theo tìm kiếm, bộ lọc, sắp xếp; mọi trang)",
       confirmDeleteVehicle: "Chuyển xe {plate} vào thùng rác? Tài xế đang lái sẽ xuống xe. Có thể khôi phục trong {days} ngày.",
       confirmDeleteDriver: "Chuyển tài xế {name} vào thùng rác? Có thể khôi phục trong {days} ngày.",
       toast: {
@@ -3135,6 +3136,7 @@ export const translations = {
         note: "Note", created: "Added", phone: "Phone", idNumber: "ID card", licenseNo: "Licence no.", licenseClass: "Licence class",
         licenseExpiry: "Licence until", homeVehicle: "Own truck",
       },
+      exportHint: "Export the rows shown (search, filters and sort applied; every page) to Excel",
       confirmDeleteVehicle: "Move truck {plate} to the trash? Its driver gets off it. It can be restored for {days} days.",
       confirmDeleteDriver: "Move driver {name} to the trash? It can be restored for {days} days.",
       toast: {

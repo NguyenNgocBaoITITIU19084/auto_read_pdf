@@ -9,6 +9,10 @@ const confirmMock = vi.fn();
 vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
 vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
 vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => confirmMock }));
+const exportProps = vi.fn();
+vi.mock('../common/ExportModal', () => ({
+  ExportModal: (props: any) => { exportProps(props); return props.isOpen ? <div data-testid="export-modal" /> : null; },
+}));
 
 const api = {
   getFleetVehiclesApi: vi.fn(),
@@ -456,5 +460,50 @@ describe('FleetTab trash and columns', () => {
     expect(JSON.parse(localStorage.getItem('fleet_vehicles_table_columns') || '[]')
       .filter((c: { visible: boolean }) => c.visible).map((c: { key: string }) => c.key))
       .toEqual(['plate', 'status', 'driver', 'docs', 'trailer', 'registration']);
+  });
+});
+
+describe('FleetTab Excel export', () => {
+  it('exports every filtered row of the table, with all its columns and labels', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      ...Array.from({ length: 30 }, (_, i) => vehicle(i + 1, `51C-${String(i + 1).padStart(3, '0')}`)),
+      vehicle(99, '51D-999', { status: 'broken', trailer_plate: '51R-9', registration_expiry: '2031-05-01',
+        current_driver: { ...an, kind: 'temporary' } }),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    fireEvent.change(screen.getByLabelText(f.search), { target: { value: '51D' } });
+    fireEvent.click(screen.getByText(translations.vi.common.exportExcel));
+    await screen.findByTestId('export-modal');
+    const props = exportProps.mock.lastCall![0];
+    expect(props.tab).toBe('fleet_vehicle');
+    expect(props.filenamePrefix).toBe('doi_xe');
+    expect(props.allColumns.map((c: { key: string }) => c.key)).toEqual(
+      ['STT', 'plate', 'status', 'driver', 'docs', 'trailer', 'type', 'home', 'registration', 'insurance', 'note', 'created']);
+    expect(props.data).toEqual([expect.objectContaining({
+      STT: 1, plate: '51D-999', status: 'Hư hỏng', driver: `${an.name} (lái tạm)`, trailer: '51R-9',
+      registration: '01/05/2031', docs: 'Còn hạn', type: '—', note: '—' })]);
+  });
+
+  it('exports the whole filtered history, fetched page by page from the server', async () => {
+    localStorage.setItem('fleet.view', 'history');
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    const row = (id: number) => ({ id, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary',
+      home_vehicle_plate: '', reason: '', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '' });
+    api.getFleetHistoryPageApi.mockImplementation(async (p: { limit: number; offset: number }) => (
+      p.limit === 1000
+        ? { total: 1200, items: Array.from({ length: Math.min(1000, 1200 - p.offset) }, (_, i) => row(p.offset + i)) }
+        : { total: 1200, items: [row(1)] }));
+    render(<FleetTab />);
+    await screen.findByText(an.name);
+    fireEvent.click(screen.getByText(translations.vi.common.exportExcel));
+    await screen.findByTestId('export-modal');
+    const props = exportProps.mock.lastCall![0];
+    expect(props.tab).toBe('fleet_history');
+    expect(props.data).toHaveLength(1200);
+    expect(props.data[0]).toEqual(expect.objectContaining({ STT: 1, ended_at: f.stillOpen, started_at: '15/11/2026 08:00' }));
+    expect(api.getFleetHistoryPageApi).toHaveBeenCalledWith(expect.objectContaining({ limit: 1000, offset: 1000 }));
   });
 });
