@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { translations } from '../../i18n/translations';
 import { tf } from '../../services/i18nFormat';
+import { VEHICLE_STATUSES as VEHICLE_ORDER } from '../../types';
 import type { FleetDriver, FleetVehicle } from '../../types';
 
 const addToast = vi.fn();
@@ -31,6 +32,7 @@ const api = {
   uploadFleetDriverDocumentApi: vi.fn(),
   deleteFleetDriverDocumentApi: vi.fn(),
   updateFleetDriverApi: vi.fn(),
+  deleteFleetDriverApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -51,7 +53,7 @@ vi.mock('../../services/api', () => ({
   setDriverHomeVehicleApi: (...a: unknown[]) => api.setDriverHomeVehicleApi(...a),
   moveDriverTemporaryApi: (...a: unknown[]) => api.moveDriverTemporaryApi(...a),
   deleteFleetVehicleApi: (...a: unknown[]) => api.deleteFleetVehicleApi(...a),
-  deleteFleetDriverApi: vi.fn(),
+  deleteFleetDriverApi: (...a: unknown[]) => api.deleteFleetDriverApi(...a),
   createFleetVehicleApi: vi.fn(),
   updateFleetVehicleApi: vi.fn(),
   createFleetDriverApi: vi.fn(),
@@ -295,7 +297,7 @@ describe('FleetTab quick actions', () => {
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
     const menu = screen.getByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(
-      [f.detail.open, f.quick.report, f.menu.edit, f.menu.status, f.menu.history, f.menu.delete]);
+      [f.detail.open, f.quick.report, ...VEHICLE_ORDER.map((st) => f.vehicleStatus[st]), f.menu.edit, f.menu.history, f.menu.delete]);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
@@ -621,5 +623,91 @@ describe('FleetTab truck details', () => {
     fireEvent.click(within(detail).getByText(f.menu.edit));
     const form = screen.getByText('Sửa xe 51C-1');
     expect(detail.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe('FleetTab multi-select', () => {
+  const B = f.bulk;
+  const tick = (testId: string, shiftKey = false) =>
+    fireEvent.click(within(screen.getByTestId(testId)).getByRole('checkbox'), { shiftKey });
+
+  it('picks trucks (shift for a range), then changes their status from the bottom bar', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1'), vehicle(2, '51C-2'), vehicle(3, '51C-3', { status: 'broken' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.setFleetVehicleStatusApi.mockResolvedValue({});
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    tick('vehicle-1');
+    expect(screen.queryByRole('toolbar', { name: 'Đã chọn 1' })).not.toBeInTheDocument();   // one row: its own menu does
+    tick('vehicle-3', true);
+    const bar = screen.getByRole('toolbar', { name: 'Đã chọn 3' });
+    fireEvent.click(within(bar).getByRole('button', { name: B.status }));
+    fireEvent.click(within(screen.getByTestId('fleet-status-picker')).getByText(f.vehicleStatus.maintenance));
+    await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledTimes(3));
+    expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'maintenance', '', null, false);
+    expect(addToast).toHaveBeenCalledWith('Đã đổi trạng thái 3 mục', 'success');
+  });
+
+  it('selects a whole page from the header, copies the rows for Excel and deletes them after one question', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', { phone: '0909' }), driver(2, 'Bình')]);
+    api.deleteFleetDriverApi.mockResolvedValue(undefined);
+    confirmMock.mockResolvedValue(true);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<FleetTab screen="drivers" />);
+    await screen.findByTestId('driver-1');
+    fireEvent.click(screen.getByRole('checkbox', { name: translations.vi.bulk.selectPage }));
+    const bar = screen.getByRole('toolbar', { name: 'Đã chọn 2' });
+    fireEvent.click(within(bar).getByRole('button', { name: translations.vi.bulk.copySelected }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const text: string = writeText.mock.calls[0][0];
+    expect(text.split('\n')).toHaveLength(3);                       // header + 2 rows, tab-separated
+    expect(text.split('\n')[1].startsWith('An\t')).toBe(true);
+    fireEvent.click(within(bar).getByRole('button', { name: translations.vi.bulk.deleteSelected }));
+    await waitFor(() => expect(api.deleteFleetDriverApi).toHaveBeenCalledTimes(2));
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(addToast).toHaveBeenCalledWith('Đã chuyển 2 mục vào thùng rác', 'success');
+  });
+
+  it('a click on a checkbox neither opens the details nor the row menu', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    const box = within(row).getByRole('checkbox');
+    fireEvent.doubleClick(box);
+    expect(screen.queryByTestId('fleet-detail')).not.toBeInTheDocument();
+  });
+});
+
+describe('FleetTab quick status from the row menu', () => {
+  it('right-click → a status changes that truck at once (its current one greyed out), and names the driver who got off', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.setFleetVehicleStatusApi.mockResolvedValue({ moved_driver: { id: 4, name: 'An', to_vehicle_id: null, to_plate: '' } });
+    render(<FleetTab />);
+    fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: f.vehicleStatus.active })).toBeDisabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: f.vehicleStatus.maintenance }));
+    await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'maintenance', '', null, false));
+    expect(addToast).toHaveBeenCalledWith(`51C-1: ${f.vehicleStatus.maintenance}`, 'success');
+    expect(addToast).toHaveBeenCalledWith('An đã xuống xe', 'info');
+  });
+
+  it('on a row of a selection it changes every selected driver', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'An'), driver(2, 'Bình'), driver(3, 'Cường')]);
+    api.updateFleetDriverApi.mockResolvedValue({});
+    render(<FleetTab screen="drivers" />);
+    await screen.findByTestId('driver-1');
+    fireEvent.click(within(screen.getByTestId('driver-1')).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId('driver-2')).getByRole('checkbox'));
+    fireEvent.contextMenu(screen.getByTestId('driver-2'), { clientX: 10, clientY: 10 });
+    expect(screen.getByText('Đổi trạng thái 2 mục đã chọn')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: f.driverStatus.leave }));
+    await waitFor(() => expect(api.updateFleetDriverApi).toHaveBeenCalledTimes(2));
+    expect(api.updateFleetDriverApi).toHaveBeenCalledWith(1, { status: 'leave' });
+    expect(api.updateFleetDriverApi).toHaveBeenCalledWith(2, { status: 'leave' });
   });
 });

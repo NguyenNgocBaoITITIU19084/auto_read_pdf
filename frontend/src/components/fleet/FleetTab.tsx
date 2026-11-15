@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
+  AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Copy, Eye, ListChecks, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
   FileSpreadsheet, Info, SlidersHorizontal, Trash2, Truck, Undo2, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -9,8 +9,12 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
   deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, returnDriverHomeApi,
-  setFleetVehicleStatusApi, getFleetTrashCountApi,
+  setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi,
 } from '../../services/api';
+import { useRowSelection } from '../../hooks/useRowSelection';
+import { BulkActionBar, type BulkAction } from '../common/BulkActionBar';
+import { copyTextToClipboard, formatRowsAsTsv } from '../../utils/formatters';
+import { SelectCell, SelectHeader, StatusPickerModal, rowTone, runEach } from './FleetBulk';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { ColumnConfigModal, type ColumnDef } from '../common/ColumnConfigModal';
 import { TRASH_KEEP_DAYS } from '../common/TrashModal';
@@ -235,6 +239,9 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const driverPaging = usePaging('fleet.drivers.pageSize', JSON.stringify([query, driverFilter, driverCols, driverSort.sort]));
   const pageVehicles = usePageRows(sortedVehicles, vehiclePaging.page, vehiclePaging.pageSize);
   const pageDrivers = usePageRows(sortedDrivers, driverPaging.page, driverPaging.pageSize);
+  // ---- multi-select, like the booking table: rows that drop out of the search / filters drop out of the selection ----
+  const vehicleSel = useRowSelection(sortedVehicles, (v: FleetVehicle) => v.id, [view]);
+  const driverSel = useRowSelection(sortedDrivers, (d: FleetDriver) => d.id, [view]);
   const colFilterCount = view === 'vehicles' ? Object.values(vehicleCols).filter((v) => v.length).length
     : view === 'drivers' ? Object.values(driverCols).filter((v) => v.length).length
       : Object.values(historyCols).filter((v) => v.length).length;
@@ -360,11 +367,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     }
   };
 
-  const openExport = async () => {
+  /** `selected`: only the picked rows (the bottom bar's "Xuất Excel đã chọn"). */
+  const openExport = async (selected = false) => {
     setExporting(true);
     try {
-      const rows: Record<string, string>[] = view === 'vehicles' ? sortedVehicles.map(vehicleText)
-        : view === 'drivers' ? sortedDrivers.map(driverText) : (await allHistory()).map(historyText);
+      const rows: Record<string, string>[] = view === 'vehicles' ? (selected ? vehicleSel.selectedRows : sortedVehicles).map(vehicleText)
+        : view === 'drivers' ? (selected ? driverSel.selectedRows : sortedDrivers).map(driverText) : (await allHistory()).map(historyText);
       // empty cells as the fleet tables show them ("—"), not the export's generic "null"
       const filled = rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v || f.none])));
       setExportRows(filled.map((r, i) => ({ STT: i + 1, ...r })));
@@ -431,6 +439,88 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     }
   };
 
+  // ---- the bottom bar: what to do with the picked rows ----
+  const B = f.bulk;
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<'status' | 'delete' | null>(null);
+  const report = (total: number, res: { ok: number; errors: string[] }, done: string) => {
+    if (res.ok) addToast(tf(done, { count: res.ok }), 'success');
+    if (res.errors.length) addToast(tf(B.failed, { count: total - res.ok, error: res.errors.join('; ') }), 'error');
+  };
+  const bulkCopy = async () => {
+    const rows = view === 'vehicles' ? vehicleSel.selectedRows.map(vehicleText) : driverSel.selectedRows.map(driverText);
+    const ok = await copyTextToClipboard(formatRowsAsTsv(rows, activeColumns.columns, true));
+    addToast(ok ? tf(B.copied, { count: rows.length }) : f.toast.error, ok ? 'success' : 'error');
+  };
+  /** New status for some trucks / drivers: the bottom bar's selection, or the right-clicked row (with the selection it
+   *  is part of). Rows already in it need nothing. A truck running again gets its own driver back ("Đã sửa xong"); one
+   *  that stops drops the driver on it, who is named. */
+  const applyStatus = async (kind: 'vehicle' | 'driver', ids: number[], status: string) => {
+    setStatusPickerOpen(false);
+    setBulkBusy('status');
+    const rows: (FleetVehicle | FleetDriver)[] = kind === 'vehicle' ? vs.filter((v) => ids.includes(v.id)) : ds.filter((d) => ids.includes(d.id));
+    const todo = rows.filter((r) => r.status !== status);
+    const off: string[] = [];
+    const res = await runEach(todo, async (r) => {
+      if (kind === 'driver') return updateFleetDriverApi(r.id, { status: status as DriverStatus });
+      const out = await setFleetVehicleStatusApi(r.id, status as VehicleStatus, '', null, status === 'active');
+      if (out.moved_driver && !out.moved_driver.to_vehicle_id) off.push(out.moved_driver.name);
+      return out;
+    }, f.toast.error);
+    const label = kind === 'vehicle' ? f.vehicleStatus[status as VehicleStatus] : f.driverStatus[status as DriverStatus];
+    const only = rows.length === 1 ? rows[0] : null;
+    report(rows.length, { ok: res.ok + (rows.length - todo.length), errors: res.errors },
+      only ? tf(B.statusOne, { name: 'plate' in only ? only.plate : only.name, status: label }) : B.statusDone);
+    if (off.length) addToast(tf(B.driversOff, { names: off.join(', ') }), 'info');
+    setBulkBusy(null);
+    reload();
+  };
+  const bulkStatus = (status: string) =>
+    applyStatus(view === 'vehicles' ? 'vehicle' : 'driver', [...(view === 'vehicles' ? vehicleSel : driverSel).selectedIds], status);
+  const bulkDelete = async () => {
+    const isVehicles = view === 'vehicles';
+    const total = isVehicles ? vehicleSel.count : driverSel.count;
+    if (!(await confirm({ message: tf(B.deleteConfirm, { count: total, days: TRASH_KEEP_DAYS }), confirmText: f.actions.delete, danger: true }))) return;
+    setBulkBusy('delete');
+    const res = isVehicles ? await runEach(vehicleSel.selectedRows, (v) => deleteFleetVehicleApi(v.id), f.toast.error)
+      : await runEach(driverSel.selectedRows, (d) => deleteFleetDriverApi(d.id), f.toast.error);
+    report(total, res, B.deleted);
+    setBulkBusy(null);
+    (isVehicles ? vehicleSel : driverSel).clear();
+    reload();
+    loadTrashCount();
+  };
+  const bulkActions: BulkAction[] = [
+    { key: 'status', label: B.status, icon: ListChecks, onClick: () => setStatusPickerOpen(true), loading: bulkBusy === 'status' },
+    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => void openExport(true), loading: exporting },
+    { key: 'copy', label: t.bulk.copySelected, icon: Copy, onClick: () => void bulkCopy() },
+    { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: () => void bulkDelete(), danger: true, loading: bulkBusy === 'delete' },
+  ];
+  const activeSel = view === 'vehicles' ? vehicleSel : view === 'drivers' ? driverSel : null;
+  const selectHeader = <R extends { id: number },>(sel: ReturnType<typeof useRowSelection<R>>, page: R[]) => (
+    <SelectHeader checked={sel.isPageAllSelected(page)} partial={sel.isPagePartiallySelected(page)} disabled={page.length === 0}
+      onChange={() => sel.selectPage(page, !sel.isPageAllSelected(page))} />
+  );
+
+  /** The rows a right-click acts on: the selection when the row is part of one, else the row alone. */
+  const menuTargets = (kind: 'vehicle' | 'driver', id: number) => {
+    const sel = kind === 'vehicle' ? vehicleSel : driverSel;
+    return sel.count > 1 && sel.isSelected(id) ? [...sel.selectedIds] : [id];
+  };
+  /** "Đổi trạng thái" in the row menu, like the booking table: one click, the current status greyed out. */
+  const statusGroup = (kind: 'vehicle' | 'driver', row: FleetVehicle | FleetDriver): MenuGroup => {
+    const ids = menuTargets(kind, row.id);
+    const options = kind === 'vehicle'
+      ? VEHICLE_STATUSES.map((s) => [s, f.vehicleStatus[s]] as const) : DRIVER_STATUSES.map((s) => [s, f.driverStatus[s]] as const);
+    return {
+      label: ids.length > 1 ? tf(B.statusTitle, { count: ids.length }) : B.status,
+      items: options.map(([s, label]) => ({
+        key: `status-${s}`, label, icon: ListChecks, disabled: ids.length === 1 && row.status === s,
+        onClick: () => void applyStatus(kind, ids, s),
+      })),
+    };
+  };
+
   // ---- one place for each row's actions: the right-click / "⋯" menu and the detail window use them alike ----
   const vehicleMain = (v: FleetVehicle): DetailAction | null =>
     v.status === 'active' ? { label: f.quick.report, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v), primary: true }
@@ -452,9 +542,9 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'vehicle', id: v.id }) },
         ...(main ? [{ key: 'main', label: main.label, icon: v.status === 'active' ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
       ] },
+      statusGroup('vehicle', v),
       { items: [
         { key: 'edit', label: f.menu.edit, icon: Pencil, onClick: () => setVehicleForm({ open: true, vehicle: v }) },
-        { key: 'status', label: f.menu.status, icon: Wrench, onClick: () => setStatusFor(v) },
         { key: 'history', label: f.menu.history, icon: History, onClick: () => showHistory({ vehicle_id: v.id, label: v.plate }) },
       ] },
       { items: [{ key: 'delete', label: f.menu.delete, icon: Trash2, danger: true, onClick: () => void removeVehicle(v) }] },
@@ -467,6 +557,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         ? [{ key: 'home', label: f.actions.returnHome, icon: Undo2, onClick: () => void returnHome(d.id, d.name) }] : []),
       ...(d.status !== 'left' ? [{ key: 'move', label: f.actions.move, icon: ArrowLeftRight, onClick: () => setMoveFor(d) }] : []),
     ] },
+    statusGroup('driver', d),
     { items: [
       { key: 'edit', label: f.menu.edit, icon: Pencil, onClick: () => setDriverForm({ open: true, driver: d }) },
       { key: 'history', label: f.menu.history, icon: History, onClick: () => showHistory({ driver_id: d.id, label: d.name }) },
@@ -755,8 +846,10 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
 
   type Settings = ReturnType<typeof useColumnSettings>;
   /** The header row of a table, from its column settings (visible columns, their order, labels and widths). */
-  const headerRow = <R,>(settings: Settings, specs: Record<string, Spec<R>>, sorter: ReturnType<typeof useTableSort>, actions: boolean) => (
+  const headerRow = <R,>(settings: Settings, specs: Record<string, Spec<R>>, sorter: ReturnType<typeof useTableSort>, actions: boolean,
+    select?: React.ReactNode) => (
     <tr>
+      {select}
       {settings.columns.filter((c) => c.visible && specs[c.key]).map((c) =>
         header(c.key, c.label, sorter, specs[c.key].filter, { width: settings.columnWidths[c.key], onResize: settings.startResize }))}
       {actions && <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>}
@@ -780,15 +873,17 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     if (vs.length === 0) return empty(f.empty.vehicles);
     return (
       <table className="min-w-full text-sm">
-        <thead className={THEAD}>{headerRow(vehicleColumns, vehicleSpecs, vehicleSort, true)}</thead>
-        {pageVehicles.length === 0 && emptyRow(visibleCount(vehicleColumns, vehicleSpecs) + 1,
+        <thead className={THEAD}>{headerRow(vehicleColumns, vehicleSpecs, vehicleSort, true, selectHeader(vehicleSel, pageVehicles))}</thead>
+        {pageVehicles.length === 0 && emptyRow(visibleCount(vehicleColumns, vehicleSpecs) + 2,
           vehicleFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageVehicles.map((v) => {
             const down = v.status === 'broken' || v.status === 'maintenance';
             return (
               <tr key={v.id} data-testid={`vehicle-${v.id}`} {...rowEvents({ kind: 'vehicle', id: v.id })}
-                className={`${ROW} ${menu.state?.row.kind === 'vehicle' && menu.state.row.id === v.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${v.status === 'inactive' ? 'opacity-60' : ''}`}>
+                className={`${ROW} ${rowTone(vehicleSel.isSelected(v.id), menu.state?.row.kind === 'vehicle' && menu.state.row.id === v.id)} ${v.status === 'inactive' ? 'opacity-60' : ''}`}>
+                <SelectCell checked={vehicleSel.isSelected(v.id)} label={tf(B.rowLabel, { name: v.plate })}
+                  onToggle={(shift) => vehicleSel.toggle(v.id, shift)} />
                 {cells(vehicleColumns, vehicleSpecs, v)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
@@ -820,15 +915,17 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     if (ds.length === 0) return empty(f.empty.drivers);
     return (
       <table className="min-w-full text-sm">
-        <thead className={THEAD}>{headerRow(driverColumns, driverSpecs, driverSort, true)}</thead>
-        {pageDrivers.length === 0 && emptyRow(visibleCount(driverColumns, driverSpecs) + 1,
+        <thead className={THEAD}>{headerRow(driverColumns, driverSpecs, driverSort, true, selectHeader(driverSel, pageDrivers))}</thead>
+        {pageDrivers.length === 0 && emptyRow(visibleCount(driverColumns, driverSpecs) + 2,
           driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageDrivers.map((d) => {
             const back = canReturnHome(d, vs);
             return (
               <tr key={d.id} data-testid={`driver-${d.id}`} {...rowEvents({ kind: 'driver', id: d.id })}
-                className={`${ROW} ${menu.state?.row.kind === 'driver' && menu.state.row.id === d.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${d.status === 'left' ? 'opacity-60' : ''}`}>
+                className={`${ROW} ${rowTone(driverSel.isSelected(d.id), menu.state?.row.kind === 'driver' && menu.state.row.id === d.id)} ${d.status === 'left' ? 'opacity-60' : ''}`}>
+                <SelectCell checked={driverSel.isSelected(d.id)} label={tf(B.rowLabel, { name: d.name })}
+                  onToggle={(shift) => driverSel.toggle(d.id, shift)} />
                 {cells(driverColumns, driverSpecs, d)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
@@ -924,7 +1021,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
           </span>
           <div role="toolbar" aria-label={f.toolbar}
             className="inline-flex items-stretch h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden">
-            <button type="button" onClick={() => void openExport()} disabled={exporting || (view === 'vehicles' ? !vs.length : view === 'drivers' ? !ds.length : !history?.total)}
+            <button type="button" onClick={() => void openExport(false)} disabled={exporting || (view === 'vehicles' ? !vs.length : view === 'drivers' ? !ds.length : !history?.total)}
               title={f.exportHint} aria-label={t.common.exportExcel}
               className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50">
               {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}<span className="hidden min-[1900px]:inline">{t.common.exportExcel}</span>
@@ -1026,6 +1123,21 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         onChange={activeColumns.setColumns} onReset={activeColumns.resetColumns} />
       <FleetTrashModal kind={trashKind} isOpen={trashOpen} onClose={() => setTrashOpen(false)}
         onChanged={() => { reload(); loadTrashCount(); }} />
+      {activeSel && (
+        <BulkActionBar count={activeSel.count} onClear={activeSel.clear} actions={bulkActions} extra={
+          !activeSel.isAllSelected ? (
+            <button type="button" onClick={() => activeSel.selectAll(true)}
+              className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap">
+              {tf(t.bulk.selectAllResults, { count: view === 'vehicles' ? sortedVehicles.length : sortedDrivers.length })}
+            </button>
+          ) : undefined
+        } />
+      )}
+      <StatusPickerModal open={statusPickerOpen} onClose={() => setStatusPickerOpen(false)} onPick={(s) => void bulkStatus(s)}
+        title={tf(B.statusTitle, { count: activeSel?.count || 0 })} hint={view === 'vehicles' ? B.vehicleHint : B.driverHint}
+        options={view === 'vehicles'
+          ? VEHICLE_STATUSES.map((s) => ({ value: s, label: f.vehicleStatus[s], dot: VEHICLE_TONE[s].dot }))
+          : DRIVER_STATUSES.map((s) => ({ value: s, label: f.driverStatus[s], dot: DRIVER_TONE[s].dot }))} />
       <RowContextMenu position={menu.state && menuGroups.length ? { x: menu.state.x, y: menu.state.y } : null}
         groups={menuGroups} onClose={menu.close} />
       <PhotoLightbox photo={viewing?.photo || null} name={viewing?.name || ''} onClose={closeViewer} />

@@ -18,6 +18,7 @@ const api = {
   hitchFleetTrailerApi: vi.fn(),
   createFleetTrailerApi: vi.fn(),
   deleteFleetTrailerApi: vi.fn(),
+  updateFleetTrailerApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetTrailersApi: (...a: unknown[]) => api.getFleetTrailersApi(...a),
@@ -26,7 +27,7 @@ vi.mock('../../services/api', () => ({
   hitchFleetTrailerApi: (...a: unknown[]) => api.hitchFleetTrailerApi(...a),
   createFleetTrailerApi: (...a: unknown[]) => api.createFleetTrailerApi(...a),
   deleteFleetTrailerApi: (...a: unknown[]) => api.deleteFleetTrailerApi(...a),
-  updateFleetTrailerApi: vi.fn(),
+  updateFleetTrailerApi: (...a: unknown[]) => api.updateFleetTrailerApi(...a),
   uploadFleetTrailerPhotoApi: vi.fn(),
   deleteFleetTrailerPhotoApi: vi.fn(),
   getFleetTrashCountApi: async () => ({ vehicle: 0, driver: 0, trailer: 2 }),
@@ -122,5 +123,41 @@ describe('TrailerTab', () => {
     fireEvent.change(within(dialog).getByLabelText(R.form.vehicle), { target: { value: '1' } });
     fireEvent.click(within(dialog).getByText(translations.vi.common.save));
     await waitFor(() => expect(api.createFleetTrailerApi).toHaveBeenCalledWith(expect.objectContaining({ plate: '51R-5', trailer_type: "Sàn 40'", vehicle_id: 1 })));
+  });
+});
+
+describe('TrailerTab multi-select', () => {
+  it('unhitches the hitched ones of the selection and changes their status', async () => {
+    const on = { id: 1, plate: '51C-1', status: 'active' as const, photo: '', driver_name: '', since: '', reason: '' };
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1', { vehicle: on }), trailer(2, '51R-2'), trailer(3, '51R-3', { vehicle: { ...on, id: 2, plate: '51C-2' } })]);
+    api.hitchFleetTrailerApi.mockResolvedValue({});
+    api.updateFleetTrailerApi.mockResolvedValue({});
+    render(<TrailerTab />);
+    await screen.findByTestId('trailer-1');
+    fireEvent.click(screen.getByRole('checkbox', { name: translations.vi.bulk.selectPage }));
+    const bar = screen.getByRole('toolbar', { name: 'Đã chọn 3' });
+    fireEvent.click(within(bar).getByRole('button', { name: R.actions.unhitch }));
+    await waitFor(() => expect(api.hitchFleetTrailerApi).toHaveBeenCalledTimes(2));   // only the hitched two
+    expect(api.hitchFleetTrailerApi).toHaveBeenCalledWith(1, null);
+    expect(api.hitchFleetTrailerApi).toHaveBeenCalledWith(3, null);
+    expect(addToast).toHaveBeenCalledWith('Đã tháo 2 moóc', 'success');
+
+    fireEvent.click(within(bar).getByRole('button', { name: translations.vi.fleet.bulk.status }));
+    fireEvent.click(within(screen.getByTestId('fleet-status-picker')).getByText(R.status.broken));
+    await waitFor(() => expect(api.updateFleetTrailerApi).toHaveBeenCalledTimes(3));
+    expect(api.updateFleetTrailerApi).toHaveBeenCalledWith(2, { status: 'broken' });
+  });
+});
+
+describe('TrailerTab quick status from the row menu', () => {
+  it('right-click → a status changes that trailer', async () => {
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1')]);
+    api.updateFleetTrailerApi.mockResolvedValue({});
+    render(<TrailerTab />);
+    fireEvent.contextMenu(await screen.findByTestId('trailer-1'), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: R.status.active })).toBeDisabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: R.status.broken }));
+    await waitFor(() => expect(api.updateFleetTrailerApi).toHaveBeenCalledWith(1, { status: 'broken' }));
+    expect(addToast).toHaveBeenCalledWith(`51R-1: ${R.status.broken}`, 'success');
   });
 });

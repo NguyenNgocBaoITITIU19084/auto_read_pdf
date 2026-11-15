@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArchiveRestore, Container, FileSpreadsheet, History, Info, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Plus,
-  RefreshCw, Search, SlidersHorizontal, Trash2, X,
+  AlertTriangle, ArchiveRestore, Container, Copy, FileSpreadsheet, History, Info, Link2, Link2Off, ListChecks, Loader2, MoreHorizontal,
+  Pencil, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -9,7 +9,12 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
   deleteFleetTrailerApi, getFleetHitchPageApi, getFleetTrailersApi, getFleetTrashCountApi, getFleetVehiclesApi, hitchFleetTrailerApi,
+  updateFleetTrailerApi,
 } from '../../services/api';
+import { useRowSelection } from '../../hooks/useRowSelection';
+import { BulkActionBar, type BulkAction } from '../common/BulkActionBar';
+import { copyTextToClipboard, formatRowsAsTsv } from '../../utils/formatters';
+import { SelectCell, SelectHeader, StatusPickerModal, rowTone, runEach } from './FleetBulk';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { ColumnConfigModal, type ColumnDef } from '../common/ColumnConfigModal';
 import { TRASH_KEEP_DAYS } from '../common/TrashModal';
@@ -189,6 +194,8 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     [shown, cols, value, sort.sort, sortValue]);
   const paging = usePaging('fleet.trailers.pageSize', JSON.stringify([query, filter, cols, sort.sort]));
   const pageRows = usePageRows(sorted, paging.page, paging.pageSize);
+  // multi-select, like the booking table (rows that drop out of the search / filters drop out of it)
+  const sel = useRowSelection(sorted, (r: FleetTrailer) => r.id, [view]);
   const colFilterCount = Object.values(view === 'trailers' ? cols : historyCols).filter((v) => v.length).length;
   const clearColFilters = () => (view === 'trailers' ? setCols({}) : setHistoryCols({}));
 
@@ -233,6 +240,17 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
       addToast(apiError(err, f.toast.error), 'error');
     }
   };
+  /** "Đổi trạng thái" in the row menu, like the booking table: the selection when the row is part of one. */
+  const statusGroup = (r: FleetTrailer): MenuGroup => {
+    const ids = sel.count > 1 && sel.isSelected(r.id) ? [...sel.selectedIds] : [r.id];
+    return {
+      label: ids.length > 1 ? tf(f.bulk.statusTitle, { count: ids.length }) : f.bulk.status,
+      items: VEHICLE_STATUSES.map((s) => ({
+        key: `status-${s}`, label: R.status[s], icon: ListChecks, disabled: ids.length === 1 && r.status === s,
+        onClick: () => void applyStatus(ids, s),
+      })),
+    };
+  };
   const menuFor = (r: FleetTrailer): MenuGroup[] => [
     { label: r.plate, items: [
       { key: 'edit', label: f.menu.edit, icon: Pencil, onClick: () => setForm({ open: true, trailer: r }) },
@@ -241,6 +259,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
       ...(r.vehicle ? [{ key: 'unhitch', label: R.actions.unhitch, icon: Link2Off, onClick: () => void unhitch(r) }] : []),
       { key: 'history', label: f.menu.history, icon: History, onClick: () => showHistory(r) },
     ] },
+    statusGroup(r),
     { items: [{ key: 'delete', label: f.menu.delete, icon: Trash2, danger: true, onClick: () => void remove(r) }] },
   ];
   const menuRow = menu.state ? rows.find((r) => r.id === menu.state!.row) : undefined;
@@ -310,10 +329,12 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
       if (res.items.length < size || out.length >= res.total) return out;
     }
   };
-  const openExport = async () => {
+  /** `selected`: only the picked rows (the bottom bar's "Xuất Excel đã chọn"). */
+  const openExport = async (selected = false) => {
     setExporting(true);
     try {
-      const list: Record<string, string>[] = view === 'trailers' ? sorted.map(trailerText) : (await allHistory()).map(hitchText);
+      const list: Record<string, string>[] = view === 'trailers' ? (selected ? sel.selectedRows : sorted).map(trailerText)
+        : (await allHistory()).map(hitchText);
       const filled = list.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v || f.none])));
       setExportRows(filled.map((r, i) => ({ STT: i + 1, ...r })));
       setExportOpen(true);
@@ -323,6 +344,59 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
       setExporting(false);
     }
   };
+
+  // ---- the bottom bar: what to do with the picked trailers ----
+  const B = f.bulk;
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState<'status' | 'unhitch' | 'delete' | null>(null);
+  const report = (total: number, res: { ok: number; errors: string[] }, done: string) => {
+    if (res.ok) addToast(tf(done, { count: res.ok }), 'success');
+    if (res.errors.length) addToast(tf(B.failed, { count: total - res.ok, error: res.errors.join('; ') }), 'error');
+  };
+  const bulkCopy = async () => {
+    const ok = await copyTextToClipboard(formatRowsAsTsv(sel.selectedRows.map(trailerText), listColumns.columns, true));
+    addToast(ok ? tf(B.copied, { count: sel.count }) : f.toast.error, ok ? 'success' : 'error');
+  };
+  /** New status for the selection (bottom bar) or the right-clicked trailer (with the selection it is part of). */
+  const applyStatus = async (ids: number[], status: string) => {
+    setStatusPickerOpen(false);
+    setBulkBusy('status');
+    const picked = rows.filter((r) => ids.includes(r.id));
+    const todo = picked.filter((r) => r.status !== status);   // the others need nothing
+    const res = await runEach(todo, (r) => updateFleetTrailerApi(r.id, { status: status as TrailerStatus }), f.toast.error);
+    report(picked.length, { ok: res.ok + (picked.length - todo.length), errors: res.errors },
+      picked.length === 1 ? tf(B.statusOne, { name: picked[0].plate, status: R.status[status as TrailerStatus] }) : B.statusDone);
+    setBulkBusy(null);
+    reload();
+  };
+  const bulkStatus = (status: string) => applyStatus([...sel.selectedIds], status);
+  const bulkUnhitch = async () => {
+    setBulkBusy('unhitch');
+    const hitched = sel.selectedRows.filter((r) => r.vehicle);
+    const res = await runEach(hitched, (r) => hitchFleetTrailerApi(r.id, null), f.toast.error);
+    report(hitched.length, res, B.unhitched);
+    setBulkBusy(null);
+    reload();
+  };
+  const bulkDelete = async () => {
+    const total = sel.count;
+    if (!(await confirm({ message: tf(B.deleteConfirm, { count: total, days: TRASH_KEEP_DAYS }), confirmText: f.actions.delete, danger: true }))) return;
+    setBulkBusy('delete');
+    const res = await runEach(sel.selectedRows, (r) => deleteFleetTrailerApi(r.id), f.toast.error);
+    report(total, res, B.deleted);
+    setBulkBusy(null);
+    sel.clear();
+    reload();
+    loadTrashCount();
+  };
+  const anyHitched = sel.selectedRows.some((r) => r.vehicle);
+  const bulkActions: BulkAction[] = [
+    { key: 'status', label: B.status, icon: ListChecks, onClick: () => setStatusPickerOpen(true), loading: bulkBusy === 'status' },
+    { key: 'unhitch', label: B.unhitch, icon: Link2Off, onClick: () => void bulkUnhitch(), disabled: !anyHitched, loading: bulkBusy === 'unhitch' },
+    { key: 'export', label: t.bulk.exportSelected, icon: FileSpreadsheet, onClick: () => void openExport(true), loading: exporting },
+    { key: 'copy', label: t.bulk.copySelected, icon: Copy, onClick: () => void bulkCopy() },
+    { key: 'delete', label: t.bulk.deleteSelected, icon: Trash2, onClick: () => void bulkDelete(), danger: true, loading: bulkBusy === 'delete' },
+  ];
 
   // ---- tables ----
   type Spec<Row> = {
@@ -413,8 +487,10 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
 
   type Settings = ReturnType<typeof useColumnSettings>;
   const visible = <Row,>(settings: Settings, table: Record<string, Spec<Row>>) => settings.columns.filter((c) => c.visible && table[c.key]);
-  const headerRow = <Row,>(settings: Settings, table: Record<string, Spec<Row>>, sorter: ReturnType<typeof useTableSort>, actions: boolean) => (
+  const headerRow = <Row,>(settings: Settings, table: Record<string, Spec<Row>>, sorter: ReturnType<typeof useTableSort>, actions: boolean,
+    select?: React.ReactNode) => (
     <tr>
+      {select}
       {visible(settings, table).map((c) => {
         const fl = table[c.key].filter;
         return (
@@ -451,13 +527,17 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     }
     return (
       <table className="min-w-full text-sm">
-        <thead className={THEAD}>{headerRow(listColumns, specs, sort, true)}</thead>
-        {pageRows.length === 0 && emptyRow(visible(listColumns, specs).length + 1,
+        <thead className={THEAD}>{headerRow(listColumns, specs, sort, true, (
+          <SelectHeader checked={sel.isPageAllSelected(pageRows)} partial={sel.isPagePartiallySelected(pageRows)} disabled={pageRows.length === 0}
+            onChange={() => sel.selectPage(pageRows, !sel.isPageAllSelected(pageRows))} />
+        ))}</thead>
+        {pageRows.length === 0 && emptyRow(visible(listColumns, specs).length + 2,
           filter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageRows.map((r) => (
             <tr key={r.id} data-testid={`trailer-${r.id}`} {...rowEvents(r)}
-              className={`${ROW} ${menu.state?.row === r.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${r.status === 'inactive' ? 'opacity-60' : ''}`}>
+              className={`${ROW} ${rowTone(sel.isSelected(r.id), menu.state?.row === r.id)} ${r.status === 'inactive' ? 'opacity-60' : ''}`}>
+              <SelectCell checked={sel.isSelected(r.id)} label={tf(B.rowLabel, { name: r.plate })} onToggle={(shift) => sel.toggle(r.id, shift)} />
               {cells(listColumns, specs, r)}
               <td className={`${TD} text-right whitespace-nowrap w-0`}>
                 <div className="inline-flex items-center gap-1">
@@ -572,7 +652,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
           </span>
           <div role="toolbar" aria-label={f.toolbar}
             className="inline-flex items-stretch h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden">
-            <button type="button" onClick={() => void openExport()} disabled={exporting || (view === 'trailers' ? !rows.length : !history?.total)}
+            <button type="button" onClick={() => void openExport(false)} disabled={exporting || (view === 'trailers' ? !rows.length : !history?.total)}
               title={f.exportHint} aria-label={t.common.exportExcel}
               className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50">
               {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}<span className="hidden min-[1900px]:inline">{t.common.exportExcel}</span>
@@ -638,6 +718,19 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
         onChange={activeColumns.setColumns} onReset={activeColumns.resetColumns} />
       <FleetTrashModal kind="trailer" isOpen={trashOpen} onClose={() => setTrashOpen(false)}
         onChanged={() => { reload(); loadTrashCount(); }} />
+      {view === 'trailers' && (
+        <BulkActionBar count={sel.count} onClear={sel.clear} actions={bulkActions} extra={
+          !sel.isAllSelected ? (
+            <button type="button" onClick={() => sel.selectAll(true)}
+              className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline whitespace-nowrap">
+              {tf(t.bulk.selectAllResults, { count: sorted.length })}
+            </button>
+          ) : undefined
+        } />
+      )}
+      <StatusPickerModal open={statusPickerOpen} onClose={() => setStatusPickerOpen(false)} onPick={(s) => void bulkStatus(s)}
+        title={tf(B.statusTitle, { count: sel.count })} hint={B.trailerHint}
+        options={VEHICLE_STATUSES.map((s) => ({ value: s, label: R.status[s], dot: VEHICLE_TONE[s].dot }))} />
       <RowContextMenu position={menu.state && menuRow ? { x: menu.state.x, y: menu.state.y } : null}
         groups={menuRow ? menuFor(menuRow) : []} onClose={menu.close} />
       <PhotoLightbox photo={viewing?.photo || null} name={viewing?.name || ''} onClose={closeViewer} />
