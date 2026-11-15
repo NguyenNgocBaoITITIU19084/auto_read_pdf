@@ -144,14 +144,15 @@ const PaperSlot: React.FC<SlotProps> = ({ testId, image, alt, doc, side, busy, o
     <span className="absolute top-2 left-2 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">{side}</span>
   );
   return (
-    <div className="relative" data-testid={testId}>
+    // its own layer: the scan is not repainted each time a box elsewhere is picked or edited
+    <div className="relative will-change-transform" data-testid={testId}>
       {image ? (
         <div className={`group relative aspect-[1.586] overflow-hidden rounded-xl ring-1 bg-slate-100 dark:bg-slate-800 ${over
           ? 'ring-2 ring-primary-500' : 'ring-slate-200 dark:ring-slate-700'}`} {...drop}>
           <button type="button" onClick={onView || pick}
             aria-label={onView ? tf(t.fleet.photo.view, { name: alt }) : `${D.changeImage} · ${doc} – ${side}`}
             className={`block w-full h-full ${onView ? 'cursor-zoom-in' : ''}`}>
-            <img src={image} alt={alt} className="w-full h-full object-cover" />
+            <img src={image} alt={alt} decoding="async" className="w-full h-full object-cover" />
           </button>
           {sideTag}
           <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 p-1.5 bg-gradient-to-t from-slate-900/70 to-transparent opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
