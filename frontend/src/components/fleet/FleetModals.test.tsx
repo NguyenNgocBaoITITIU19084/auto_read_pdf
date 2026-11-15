@@ -10,18 +10,23 @@ vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToas
 vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => vi.fn() }));
 
 const updateVehicle = vi.fn();
+const createDriver = vi.fn();
+const uploadDocument = vi.fn();
+const deleteDocument = vi.fn();
 const uploadVehiclePhoto = vi.fn();
 vi.mock('../../services/api', () => ({
   updateFleetVehicleApi: (...a: unknown[]) => updateVehicle(...a),
   uploadFleetVehiclePhotoApi: (...a: unknown[]) => uploadVehiclePhoto(...a),
-  createFleetVehicleApi: vi.fn(), deleteFleetVehiclePhotoApi: vi.fn(), createFleetDriverApi: vi.fn(),
+  createFleetVehicleApi: vi.fn(), deleteFleetVehiclePhotoApi: vi.fn(), createFleetDriverApi: (...a: unknown[]) => createDriver(...a),
+  uploadFleetDriverDocumentApi: (...a: unknown[]) => uploadDocument(...a),
+  deleteFleetDriverDocumentApi: (...a: unknown[]) => deleteDocument(...a),
   updateFleetDriverApi: vi.fn(), uploadFleetDriverPhotoApi: vi.fn(), deleteFleetDriverPhotoApi: vi.fn(),
   moveDriverTemporaryApi: vi.fn(), setDriverHomeVehicleApi: vi.fn(), setFleetVehicleStatusApi: vi.fn(), unassignDriverApi: vi.fn(),
   fleetPhotoUrl: (n: string) => (n ? `http://api/fleet/photos/${n}` : ''),
   getFleetTrailersApi: async () => [],
 }));
 
-import { VehicleFormModal } from './FleetModals';
+import { DriverFormModal, VehicleFormModal } from './FleetModals';
 
 const p = translations.vi.fleet.photo;
 const truck: FleetVehicle = {
@@ -63,5 +68,27 @@ describe('VehicleFormModal photo', () => {
     uploadVehiclePhoto.mockRejectedValue({ response: { status: 400, data: { detail: 'Ảnh HEIC chưa hỗ trợ' } } });
     await pickAndSave();
     await waitFor(() => expect(addToast).toHaveBeenCalledWith('Đã lưu thông tin nhưng chưa tải được ảnh: Ảnh HEIC chưa hỗ trợ', 'error'));
+  });
+});
+
+describe('DriverFormModal papers', () => {
+  it('uploads the licence / CCCD images picked in the add form once the driver exists', async () => {
+    globalThis.URL.createObjectURL = vi.fn(() => 'blob:x');
+    globalThis.URL.revokeObjectURL = vi.fn();
+    createDriver.mockReset().mockResolvedValue({ id: 42 });
+    uploadDocument.mockReset().mockResolvedValue({});
+    render(<DriverFormModal isOpen driver={null} vehicles={[]} onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/Họ tên/), { target: { value: 'An' } });
+    const front = new File([new Uint8Array(10)], 'gplx.jpg', { type: 'image/jpeg' });
+    const back = new File([new Uint8Array(10)], 'cccd-sau.png', { type: 'image/png' });
+    fireEvent.change(screen.getByTestId('paper-picker-license_front-input'), { target: { files: [front] } });
+    fireEvent.change(screen.getByTestId('paper-picker-id_back-input'), { target: { files: [back] } });
+    expect(screen.getByAltText(`${translations.vi.fleet.detail.license} – ${translations.vi.fleet.detail.front}`)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(translations.vi.common.save));
+    await waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(2));
+    expect(uploadDocument).toHaveBeenCalledWith(42, 'license_front', front);
+    expect(uploadDocument).toHaveBeenCalledWith(42, 'id_back', back);
+    expect(deleteDocument).not.toHaveBeenCalled();
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(translations.vi.fleet.toast.saved, 'success'));
   });
 });

@@ -6,7 +6,8 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { deleteFleetDriverDocumentApi, fleetPhotoUrl, uploadFleetDriverDocumentApi } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import type { DriverDocument, FleetDriver } from '../../types';
-import { photoProblem } from './FleetPhoto';
+import { photoProblem, type PhotoChoice } from './FleetPhoto';
+import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { copyTextToClipboard } from '../../utils/formatters';
 import { apiError } from './fleetUtils';
 
@@ -185,6 +186,72 @@ export const DriverPaperCard: React.FC<CardProps> = ({ driver, kind, fields, onO
         <DocumentTile driver={driver} which={`${kind}_front`} doc={doc} side={D.front} onOpen={onOpen} onChanged={onChanged} />
         <DocumentTile driver={driver} which={`${kind}_back`} doc={doc} side={D.back} onOpen={onOpen} onChanged={onChanged} />
       </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// The driver form's scans: picked now, uploaded when the form is saved
+// ---------------------------------------------------------------------------
+export type PaperChoices = Record<DriverDocument, PhotoChoice>;
+export const NO_PAPER_CHANGES: PaperChoices = {
+  license_front: { file: null, remove: false }, license_back: { file: null, remove: false },
+  id_front: { file: null, remove: false }, id_back: { file: null, remove: false },
+};
+
+interface PaperPickerProps {
+  which: DriverDocument;
+  doc: string;
+  side: string;
+  /** the scan stored now ('' = none) */
+  current: string;
+  value: PhotoChoice;
+  onChange: (next: PhotoChoice) => void;
+  onError: (message: string) => void;
+}
+
+/** One side of a licence / CCCD in the driver form: preview, pick (click or drop), change, remove. */
+export const PaperPicker: React.FC<PaperPickerProps> = ({ which, doc, side, current, value, onChange, onError }) => {
+  const { t } = useApp();
+  const D = t.fleet.detail;
+  const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const preview = useObjectUrl(value.file);
+  const shown = preview || (!value.remove && current ? fleetPhotoUrl(current) : '');
+
+  const take = (file: File | undefined) => {
+    if (!file) return;
+    const problem = photoProblem(file);
+    if (problem) {
+      onError(t.fleet.photo[problem]);
+      return;
+    }
+    onError('');
+    onChange({ file, remove: false });
+  };
+
+  return (
+    <div className="relative" data-testid={`paper-picker-${which}`}>
+      <button type="button" onClick={() => input.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); }}
+        aria-label={`${shown ? D.changeImage : D.addImage} · ${doc} – ${side}`} title={D.dropHint}
+        className={`relative flex w-full aspect-[1.586] items-center justify-center overflow-hidden rounded-lg border-2 transition-colors ${
+          shown ? 'border-transparent ring-1 ring-slate-200 dark:ring-slate-700' : 'border-dashed'} ${over
+          ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30'
+          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:border-primary-300'}`}>
+        {shown ? <img src={shown} alt={`${doc} – ${side}`} className="w-full h-full object-cover" />
+          : <span className="flex flex-col items-center gap-1 text-[11px] font-semibold text-slate-400"><ImagePlus className="w-5 h-5" />{D.addImage}</span>}
+        <span className="absolute top-1.5 left-1.5 rounded bg-slate-900/70 px-1 py-px text-[10px] font-semibold text-white">{side}</span>
+      </button>
+      {shown && (
+        <button type="button" onClick={() => onChange({ file: null, remove: !!current })} title={D.removeImage}
+          aria-label={`${D.removeImage} · ${doc} – ${side}`}
+          className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/90 text-rose-600 hover:bg-white shadow-sm"><Trash2 className="w-3 h-3" /></button>
+      )}
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
+        data-testid={`paper-picker-${which}-input`} onChange={(e) => { take(e.target.files?.[0]); e.target.value = ''; }} />
     </div>
   );
 };

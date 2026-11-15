@@ -9,11 +9,12 @@ import {
   createFleetDriverApi, createFleetVehicleApi, deleteFleetDriverPhotoApi, deleteFleetVehiclePhotoApi, getFleetTrailersApi,
   moveDriverTemporaryApi,
   setDriverHomeVehicleApi, setFleetVehicleStatusApi, unassignDriverApi, updateFleetDriverApi, updateFleetVehicleApi,
-  uploadFleetDriverPhotoApi, uploadFleetVehiclePhotoApi,
+  uploadFleetDriverPhotoApi, uploadFleetVehiclePhotoApi, uploadFleetDriverDocumentApi, deleteFleetDriverDocumentApi,
 } from '../../services/api';
+import { NO_PAPER_CHANGES, PaperPicker, type PaperChoices } from './DriverPapers';
 import { PhotoPicker, type PhotoChoice } from './FleetPhoto';
 import {
-  DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleStatus,
+  DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleStatus,
 } from '../../types';
 import { apiError, freeVehicles, isConflict } from './fleetUtils';
 
@@ -214,12 +215,15 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<PhotoChoice>(NO_PHOTO_CHANGE);
+  const [papers, setPapers] = useState<PaperChoices>(NO_PAPER_CHANGES);
+  const D = t.fleet.detail;
 
   useEffect(() => {
     if (!isOpen) return;
     setError('');
     setHomeId('');
     setPhoto(NO_PHOTO_CHANGE);
+    setPapers(NO_PAPER_CHANGES);
     setForm(driver ? {
       name: driver.name, phone: driver.phone, id_number: driver.id_number, license_no: driver.license_no,
       license_class: driver.license_class, license_expiry: driver.license_expiry, status: driver.status, note: driver.note,
@@ -245,8 +249,14 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
       const id = driver
         ? (await updateFleetDriverApi(driver.id, form)).id
         : (await createFleetDriverApi({ ...form, home_vehicle_id: homeId ? Number(homeId) : null })).id;
-      const photoError = await savePhoto(photo, id, uploadFleetDriverPhotoApi, deleteFleetDriverPhotoApi, t.fleet.toast.error, t.fleet.photo.outdatedBackend);
-      if (photoError !== null) addToast(tf(t.fleet.photo.uploadFailed, { error: photoError }), 'error');
+      const errors = [await savePhoto(photo, id, uploadFleetDriverPhotoApi, deleteFleetDriverPhotoApi, t.fleet.toast.error,
+        t.fleet.photo.outdatedBackend)];
+      for (const which of DRIVER_DOCUMENTS) {
+        errors.push(await savePhoto(papers[which], id, (i, file) => uploadFleetDriverDocumentApi(i, which, file),
+          (i) => deleteFleetDriverDocumentApi(i, which), t.fleet.toast.error, t.fleet.photo.outdatedBackend));
+      }
+      const failed = errors.filter((x): x is string => x !== null);
+      if (failed.length) addToast(tf(t.fleet.photo.uploadFailed, { error: [...new Set(failed)].join('; ') }), 'error');
       else addToast(t.fleet.toast.saved, 'success');
       onSaved();
       onClose();
@@ -258,7 +268,7 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={driver ? tf(f.editTitle, { name: driver.name }) : f.addTitle} maxWidth="max-w-lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={driver ? tf(f.editTitle, { name: driver.name }) : f.addTitle} maxWidth="max-w-2xl">
       <form onSubmit={submit} className="space-y-3" noValidate>
         <PhotoPicker kind="driver" name={form.name} current={driver?.photo || ''} value={photo} onChange={setPhoto} onError={setError} />
         <div className="grid grid-cols-2 gap-3">
@@ -267,18 +277,6 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
           </Field>
           <Field label={f.phone}>
             <input className={INPUT} value={form.phone} onChange={set('phone')} inputMode="tel" />
-          </Field>
-          <Field label={f.idNumber}>
-            <input className={INPUT} value={form.id_number} onChange={set('id_number')} />
-          </Field>
-          <Field label={f.licenseNo}>
-            <input className={INPUT} value={form.license_no} onChange={set('license_no')} />
-          </Field>
-          <Field label={f.licenseClass}>
-            <input className={INPUT} value={form.license_class} onChange={set('license_class')} placeholder={f.licenseClassPh} />
-          </Field>
-          <Field label={f.licenseExpiry}>
-            <input type="date" className={INPUT} value={form.license_expiry} onChange={set('license_expiry')} />
           </Field>
           <Field label={f.status}>
             <select className={INPUT} value={form.status} onChange={set('status')}>
@@ -295,6 +293,43 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
           )}
         </div>
         <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>
+        {([
+          ['license', D.license, (
+            <>
+              <Field label={f.licenseNo}>
+                <input className={INPUT} value={form.license_no} onChange={set('license_no')} />
+              </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label={f.licenseClass}>
+                  <input className={INPUT} value={form.license_class} onChange={set('license_class')} placeholder={f.licenseClassPh} />
+                </Field>
+                <Field label={f.licenseExpiry}>
+                  <input type="date" className={INPUT} value={form.license_expiry} onChange={set('license_expiry')} />
+                </Field>
+              </div>
+            </>
+          )],
+          ['id', D.idCard, (
+            <Field label={f.idNumber}>
+              <input className={INPUT} value={form.id_number} onChange={set('id_number')} />
+            </Field>
+          )],
+        ] as ['license' | 'id', string, React.ReactNode][]).map(([kind, doc, fields]) => (
+          <fieldset key={kind} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3" data-testid={`driver-form-${kind}`}>
+            <legend className="px-1 text-xs font-bold text-slate-700 dark:text-slate-200">{doc}</legend>
+            <div className="grid grid-cols-2 sm:grid-cols-[1fr,9.5rem,9.5rem] items-start gap-3">
+              <div className="col-span-2 sm:col-span-1 space-y-2">{fields}</div>
+              {(['front', 'back'] as const).map((side) => {
+                const which = `${kind}_${side}` as const;
+                return (
+                  <PaperPicker key={which} which={which} doc={doc} side={side === 'front' ? D.front : D.back}
+                    current={driver?.[which] || ''} value={papers[which]}
+                    onChange={(next) => setPapers((prev) => ({ ...prev, [which]: next }))} onError={setError} />
+                );
+              })}
+            </div>
+          </fieldset>
+        ))}
         <Field label={f.note}>
           <textarea className={`${INPUT} h-16 py-1.5`} value={form.note} onChange={set('note')} />
         </Field>
