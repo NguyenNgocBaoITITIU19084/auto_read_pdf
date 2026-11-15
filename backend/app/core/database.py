@@ -601,6 +601,10 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auto_import_processed ON auto_import_files(processed_at);")
 
+        # Trucks, drivers and who drives which truck (see backend/app/core/fleet.py)
+        from backend.app.core.fleet import create_fleet_tables
+        create_fleet_tables(conn)
+
         # Create system_settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -2765,8 +2769,15 @@ def get_booking_tasks(col_id: int | None = None, now: datetime | None = None) ->
 
 
 def run_reminders(now: datetime | None = None) -> dict:
-    """The periodic reminder pass: cut-off reminders, then the morning brief when it is due."""
-    return {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
+    """The periodic reminder pass: cut-off reminders, the morning brief when it is due, then fleet document expiry."""
+    from backend.app.core.fleet import scan_expiry_reminders
+    result = {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
+    try:
+        result["fleet"] = scan_expiry_reminders(now)
+    except Exception:
+        logger.exception("Fleet expiry reminders failed")
+        result["fleet"] = 0
+    return result
 
 
 def record_test_notification() -> dict:

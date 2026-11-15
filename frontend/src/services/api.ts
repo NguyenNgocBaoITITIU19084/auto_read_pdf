@@ -5,6 +5,7 @@ import {
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
+  FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -810,3 +811,71 @@ export const getAutoImportHistoryApi = async (limit = 30): Promise<AutoImportFil
 export const forgetAutoImportFileApi = async (sha256: string): Promise<void> => {
   await apiClient.delete(`/auto-import/history/${encodeURIComponent(sha256)}`);
 };
+
+// ---------------------------------------------------------------------------
+// Fleet (trucks, drivers, assignments). Errors carry a Vietnamese `detail` naming the conflict.
+// ---------------------------------------------------------------------------
+export type VehicleInput = Partial<Pick<FleetVehicle,
+  'plate' | 'trailer_plate' | 'vehicle_type' | 'registration_expiry' | 'insurance_expiry' | 'status' | 'note'>>;
+export type DriverInput = Partial<Pick<FleetDriver,
+  'name' | 'phone' | 'id_number' | 'license_no' | 'license_class' | 'license_expiry' | 'status' | 'note'>> & {
+  home_vehicle_id?: number | null;
+};
+
+export const getFleetVehiclesApi = async (): Promise<FleetVehicle[]> =>
+  (await apiClient.get<FleetVehicle[]>('/fleet/vehicles')).data;
+export const createFleetVehicleApi = async (data: VehicleInput): Promise<FleetVehicle> =>
+  (await apiClient.post<FleetVehicle>('/fleet/vehicles', data)).data;
+export const updateFleetVehicleApi = async (id: number, data: VehicleInput): Promise<FleetVehicle> =>
+  (await apiClient.put<FleetVehicle>(`/fleet/vehicles/${id}`, data)).data;
+export const deleteFleetVehicleApi = async (id: number): Promise<void> => {
+  await apiClient.delete(`/fleet/vehicles/${id}`);
+};
+/** Status change and, for a truck that stops running, where its driver goes (null: gets off it) — one step.
+ *  `bringHomeDriver` ("Đã sửa xong"): a truck running again also gets its home driver back from a temporary truck. */
+export const setFleetVehicleStatusApi = async (
+  id: number, status: VehicleStatus, reason = '', moveToVehicleId: number | null = null, bringHomeDriver = false,
+): Promise<VehicleStatusResult> =>
+  (await apiClient.post<VehicleStatusResult>(`/fleet/vehicles/${id}/status`, {
+    status, reason, move_to_vehicle_id: moveToVehicleId, bring_home_driver: bringHomeDriver,
+  })).data;
+
+export const getFleetDriversApi = async (): Promise<FleetDriver[]> =>
+  (await apiClient.get<FleetDriver[]>('/fleet/drivers')).data;
+export const createFleetDriverApi = async (data: DriverInput): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>('/fleet/drivers', data)).data;
+export const updateFleetDriverApi = async (id: number, data: DriverInput): Promise<FleetDriver> =>
+  (await apiClient.put<FleetDriver>(`/fleet/drivers/${id}`, data)).data;
+export const deleteFleetDriverApi = async (id: number): Promise<void> => {
+  await apiClient.delete(`/fleet/drivers/${id}`);
+};
+/** 409 when the truck is someone else's home truck or driven by someone else, unless `force`. */
+export const setDriverHomeVehicleApi = async (id: number, vehicleId: number | null, force = false): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/home`, { vehicle_id: vehicleId, force })).data;
+export const moveDriverTemporaryApi = async (id: number, vehicleId: number, reason = ''): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/temporary`, { vehicle_id: vehicleId, reason })).data;
+export const returnDriverHomeApi = async (id: number): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/return-home`)).data;
+export const unassignDriverApi = async (id: number, reason = ''): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/unassign`, { reason })).data;
+
+/** URL of a stored truck / driver photo ('' when there is none). */
+export const fleetPhotoUrl = (name: string | null | undefined): string =>
+  name ? `${API_BASE}/fleet/photos/${encodeURIComponent(name)}` : '';
+
+const uploadPhoto = async <T,>(path: string, file: Blob): Promise<T> => {
+  const form = new FormData();
+  form.append('file', file, (file as File).name || 'photo.jpg');
+  return (await apiClient.post<T>(path, form, { timeout: LONG_TIMEOUT })).data;
+};
+export const uploadFleetVehiclePhotoApi = (id: number, file: Blob) => uploadPhoto<FleetVehicle>(`/fleet/vehicles/${id}/photo`, file);
+export const deleteFleetVehiclePhotoApi = async (id: number): Promise<FleetVehicle> =>
+  (await apiClient.delete<FleetVehicle>(`/fleet/vehicles/${id}/photo`)).data;
+export const uploadFleetDriverPhotoApi = (id: number, file: Blob) => uploadPhoto<FleetDriver>(`/fleet/drivers/${id}/photo`, file);
+export const deleteFleetDriverPhotoApi = async (id: number): Promise<FleetDriver> =>
+  (await apiClient.delete<FleetDriver>(`/fleet/drivers/${id}/photo`)).data;
+
+export const getFleetHistoryApi = async (params: { driver_id?: number; vehicle_id?: number; limit?: number } = {}) =>
+  (await apiClient.get<FleetAssignment[]>('/fleet/history', { params })).data;
+export const getFleetExpiringApi = async (days = 30): Promise<FleetDocument[]> =>
+  (await apiClient.get<FleetDocument[]>('/fleet/expiring', { params: { days } })).data;

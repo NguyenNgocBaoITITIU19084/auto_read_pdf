@@ -1,8 +1,8 @@
 import React from 'react';
-import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock } from 'lucide-react';
+import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Truck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
-export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'logs';
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'logs';
 
 interface TabsProps {
   activeTab: TabId;
@@ -38,6 +38,11 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab }) =
       id: 'tasks',
       label: t.tabs.tasks,
       icon: <CalendarClock className="w-4 h-4" />,
+    },
+    {
+      id: 'fleet',
+      label: t.tabs.fleet,
+      icon: <Truck className="w-4 h-4" />,
     },
     {
       id: 'logs',

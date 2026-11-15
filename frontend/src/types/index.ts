@@ -566,6 +566,8 @@ export type NotificationKind =
   | 'morning_brief'
   /** PDFs read from the watched folder (detail.imported / detail.skipped) */
   | 'booking_auto_import'
+  /** truck registration / insurance or driving licences about to expire (detail.documents) */
+  | 'fleet_expiry'
   /** the sample sent by the "send a test" button */
   | 'test';
 
@@ -611,8 +613,10 @@ export interface AppNotification {
     collections?: { name: string; today: number; late: number; tomorrow: number }[];
     // booking_auto_import (count = bookings added)
     skipped_count?: number; imported?: AutoImportNoticeItem[]; skipped?: AutoImportNoticeItem[];
+    // fleet_expiry (count = documents; expired = how many of them already expired)
+    expired?: number; documents?: FleetDocument[];
   };
-  nav_tab: 'vessel' | 'container' | 'booking' | null;
+  nav_tab: 'vessel' | 'container' | 'booking' | 'fleet' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
@@ -701,4 +705,90 @@ export interface NotificationSettings {
   all_kinds: NotificationKind[];
   /** 'HH:MM' of the morning brief */
   brief_time: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleet (trucks, drivers, who drives which truck)
+// ---------------------------------------------------------------------------
+export const VEHICLE_STATUSES = ['active', 'broken', 'maintenance', 'inactive'] as const;
+export type VehicleStatus = typeof VEHICLE_STATUSES[number];
+export const DRIVER_STATUSES = ['active', 'leave', 'left'] as const;
+export type DriverStatus = typeof DRIVER_STATUSES[number];
+/** primary: the driver on their home truck; temporary: on another truck while theirs cannot run */
+export type AssignmentKind = 'primary' | 'temporary';
+
+export interface FleetVehicle {
+  id: number;
+  plate: string;
+  trailer_plate: string;
+  vehicle_type: string;
+  /** 'YYYY-MM-DD' or '' */
+  registration_expiry: string;
+  insurance_expiry: string;
+  status: VehicleStatus;
+  note: string;
+  /** stored photo name ('' = none); see fleetPhotoUrl */
+  photo: string;
+  created_at: string;
+  updated_at: string;
+  /** whose home truck it is; driving_* = the truck that driver is on now (another one when away) */
+  home_driver: {
+    id: number; name: string; status: DriverStatus; photo: string; driving_vehicle_id: number | null; driving_plate: string;
+  } | null;
+  current_driver: { id: number; name: string; phone: string; photo: string; kind: AssignmentKind; since: string; reason: string } | null;
+}
+
+export interface FleetDriver {
+  id: number;
+  name: string;
+  phone: string;
+  id_number: string;
+  license_no: string;
+  license_class: string;
+  license_expiry: string;
+  status: DriverStatus;
+  note: string;
+  /** stored photo name ('' = none); see fleetPhotoUrl */
+  photo: string;
+  created_at: string;
+  updated_at: string;
+  home_vehicle: { id: number; plate: string; status: VehicleStatus } | null;
+  current_vehicle: {
+    id: number; plate: string; trailer_plate: string; photo: string; kind: AssignmentKind; since: string; reason: string;
+  } | null;
+}
+
+export interface FleetAssignment {
+  id: number;
+  driver_id: number | null;
+  vehicle_id: number | null;
+  driver_name: string;
+  vehicle_plate: string;
+  kind: AssignmentKind;
+  home_vehicle_plate: string;
+  reason: string;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string;
+}
+
+export type FleetDocumentKind = 'registration' | 'insurance' | 'license';
+export interface FleetDocument {
+  kind: FleetDocumentKind;
+  label: string;
+  entity: 'vehicle' | 'driver';
+  entity_id: number;
+  subject: string;
+  /** 'YYYY-MM-DD' from /fleet/expiring, 'dd/mm/YYYY' inside a notification */
+  expiry: string;
+  days_left: number;
+}
+
+export interface VehicleStatusResult {
+  vehicle_id: number;
+  status: VehicleStatus;
+  moved_driver: { id: number; name: string; to_vehicle_id: number | null; to_plate: string } | null;
+  home_driver_away: { id: number; name: string; plate: string } | null;
+  /** with bringHomeDriver: the home driver brought back from their temporary truck */
+  returned_driver: { id: number; name: string; from_plate: string; plate: string } | null;
 }

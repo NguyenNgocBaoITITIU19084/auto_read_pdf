@@ -39,6 +39,7 @@ from backend.app.api.mobile import router as mobile_router
 from backend.app.api.system import router as system_router
 from backend.app.api.notifications import router as notifications_router
 from backend.app.api.auto_import import router as auto_import_router
+from backend.app.api.fleet import router as fleet_router
 from backend.app.services.mobile_bridge import bridge
 from backend.app.services.lan_server import lan_server
 
@@ -101,6 +102,7 @@ app.include_router(mobile_router, prefix="/api/v1")
 app.include_router(system_router, prefix="/api/v1")
 app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(auto_import_router, prefix="/api/v1")
+app.include_router(fleet_router, prefix="/api/v1")
 
 # Docker: serve the built React app from the same origin. Mounted last so API routes win.
 FRONTEND_DIST = os.environ.get("FRONTEND_DIST", "")
