@@ -54,7 +54,12 @@ HISTORY_MAX_LIMIT = 1000
 PHOTO_MAX_BYTES = 15 * 1024 * 1024
 PHOTO_MAX_SIDE = 1200
 PHOTO_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers", "trailer": "fleet_trailers"}
-_PHOTO_NAME = re.compile(r"^(vehicle|driver|trailer)_\d+_[0-9a-f]{8}\.jpg$")
+# Scans of a driver's papers, front and back: a column of fleet_drivers each, stored like photos but larger
+DRIVER_DOCUMENTS = ("license_front", "license_back", "id_front", "id_back")
+DOCUMENT_MAX_SIDE = 2000
+# the image columns of each table (all deleted with the row when it is purged)
+IMAGE_COLUMNS = {"fleet_vehicles": ("photo",), "fleet_drivers": ("photo", *DRIVER_DOCUMENTS), "fleet_trailers": ("photo",)}
+_PHOTO_NAME = re.compile(r"^(vehicle|driver|trailer)_\d+_(?:(?:license|id)_(?:front|back)_)?[0-9a-f]{8}\.jpg$")
 _NOT_FOUND = {"vehicle": "Không tìm thấy xe", "driver": "Không tìm thấy tài xế", "trailer": "Không tìm thấy moóc"}
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -150,6 +155,10 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
         if "deleted_at" not in columns:
             # set = in the trash (see "Trash"): hidden everywhere, restorable for TRASH_KEEP_DAYS days
             conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT;")
+    driver_columns = {r[1] for r in conn.execute("PRAGMA table_info(fleet_drivers);")}
+    for column in DRIVER_DOCUMENTS:
+        if column not in driver_columns:
+            conn.execute(f"ALTER TABLE fleet_drivers ADD COLUMN {column} TEXT NOT NULL DEFAULT '';")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_fleet_drivers_home ON fleet_drivers(home_vehicle_id) "
                  "WHERE home_vehicle_id IS NOT NULL;")
     conn.execute("""
@@ -276,7 +285,8 @@ def list_drivers() -> list[dict]:
     for d in drivers:
         c = current.get(d["id"])
         item = {k: d[k] for k in ("id", "name", "phone", "id_number", "license_no", "license_class",
-                                  "license_expiry", "status", "note", "photo", "created_at", "updated_at")}
+                                  "license_expiry", "status", "note", "photo", *DRIVER_DOCUMENTS,
+                                  "created_at", "updated_at")}
         item["home_vehicle"] = ({"id": d["home_vehicle_id"], "plate": d["home_plate"], "status": d["home_status"]}
                                 if d["home_vehicle_id"] else None)
         item["current_vehicle"] = ({"id": c["vehicle_id"], "plate": c["plate"], "trailer_plate": c["trailer_plate"],
@@ -797,12 +807,14 @@ def restore_from_trash(kind: str, ids) -> int:
 
 
 def _purge(conn, table: str, where: str, params: tuple) -> int:
-    rows = conn.execute(f"SELECT id, photo FROM {table} WHERE deleted_at IS NOT NULL AND {where};", params).fetchall()
+    images = ", ".join(IMAGE_COLUMNS[table])
+    rows = conn.execute(f"SELECT id, {images} FROM {table} WHERE deleted_at IS NOT NULL AND {where};", params).fetchall()
     if not rows:
         return 0
     conn.execute(f"DELETE FROM {table} WHERE id IN ({','.join('?' * len(rows))});", tuple(r[0] for r in rows))
-    for _, photo in rows:
-        _delete_photo_file(photo)
+    for _, *names in rows:
+        for name in names:
+            _delete_photo_file(name)
     return len(rows)
 
 
@@ -853,7 +865,7 @@ def _delete_photo_file(name) -> None:
             logger.warning(f"Could not delete fleet photo {name}")
 
 
-def _to_jpeg(data: bytes) -> bytes:
+def _to_jpeg(data: bytes, max_side: int = PHOTO_MAX_SIDE, quality: int = 85) -> bytes:
     from PIL import Image, ImageOps, UnidentifiedImageError
     if not data:
         raise FleetError("Ảnh trống")
@@ -875,39 +887,65 @@ def _to_jpeg(data: bytes) -> bytes:
         img = bg
     else:
         img = img.convert("RGB")
-    img.thumbnail((PHOTO_MAX_SIDE, PHOTO_MAX_SIDE))
+    img.thumbnail((max_side, max_side))
     out = io.BytesIO()
-    img.save(out, "JPEG", quality=85, optimize=True)
+    img.save(out, "JPEG", quality=quality, optimize=True)
     return out.getvalue()
 
 
-def set_photo(entity: str, entity_id: int, data: bytes) -> str:
-    """Store `data` (any image Pillow reads) as the truck's / driver's photo, replacing the old one. Every photo gets
-    a new name, so a browser never shows the old one from its cache. Returns the new name."""
+def _store_image(entity: str, entity_id: int, column: str, jpeg: bytes) -> str:
+    """Write `jpeg` into the row's image `column`, replacing (and deleting) the old file. Every image gets a new name,
+    so a browser never shows the old one from its cache. Returns the new name."""
     table = PHOTO_ENTITIES[entity]
-    jpeg = _to_jpeg(data)
     with _conn() as conn:
-        row = conn.execute(f"SELECT photo FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
+        row = conn.execute(f"SELECT {column} FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
         if not row:
             raise FleetError(_NOT_FOUND[entity], 404)
         old = row[0]
-        name = f"{entity}_{entity_id}_{secrets.token_hex(4)}.jpg"
+        tag = "" if column == "photo" else f"{column}_"
+        name = f"{entity}_{entity_id}_{tag}{secrets.token_hex(4)}.jpg"
         folder = photo_dir()
         folder.mkdir(parents=True, exist_ok=True)
         (folder / name).write_bytes(jpeg)
-        conn.execute(f"UPDATE {table} SET photo = ?, updated_at = ? WHERE id = ?;", (name, _now(), entity_id))
+        conn.execute(f"UPDATE {table} SET {column} = ?, updated_at = ? WHERE id = ?;", (name, _now(), entity_id))
     _delete_photo_file(old)
     return name
 
 
-def remove_photo(entity: str, entity_id: int) -> None:
+def _clear_image(entity: str, entity_id: int, column: str) -> None:
     table = PHOTO_ENTITIES[entity]
     with _conn() as conn:
-        row = conn.execute(f"SELECT photo FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
+        row = conn.execute(f"SELECT {column} FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
         if not row:
             raise FleetError(_NOT_FOUND[entity], 404)
-        conn.execute(f"UPDATE {table} SET photo = '', updated_at = ? WHERE id = ?;", (_now(), entity_id))
+        conn.execute(f"UPDATE {table} SET {column} = '', updated_at = ? WHERE id = ?;", (_now(), entity_id))
     _delete_photo_file(row[0])
+
+
+def set_photo(entity: str, entity_id: int, data: bytes) -> str:
+    """Store `data` (any image Pillow reads) as the truck's / driver's / trailer's photo. Returns the new name."""
+    return _store_image(entity, entity_id, "photo", _to_jpeg(data))
+
+
+def remove_photo(entity: str, entity_id: int) -> None:
+    _clear_image(entity, entity_id, "photo")
+
+
+def _document_column(which: str) -> str:
+    if which not in DRIVER_DOCUMENTS:
+        raise FleetError(f"Loại giấy tờ không hợp lệ: {which}")
+    return which
+
+
+def set_driver_document(driver_id: int, which: str, data: bytes) -> str:
+    """Store a scan of the driver's licence / CCCD (`which`: license_front, license_back, id_front, id_back), kept
+    larger than a photo so its text stays readable. Returns the new name."""
+    column = _document_column(which)
+    return _store_image("driver", driver_id, column, _to_jpeg(data, DOCUMENT_MAX_SIDE, 90))
+
+
+def remove_driver_document(driver_id: int, which: str) -> None:
+    _clear_image("driver", driver_id, _document_column(which))
 
 
 # ---------------------------------------------------------------------------

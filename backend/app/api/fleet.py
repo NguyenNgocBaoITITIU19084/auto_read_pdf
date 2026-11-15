@@ -261,6 +261,19 @@ def delete_driver_photo(driver_id: int):
     return _driver(driver_id)
 
 
+@router.post("/drivers/{driver_id}/documents/{which}")
+async def upload_driver_document(driver_id: int, which: str, file: UploadFile = File(...)):
+    """A scan of the driver's papers: which = license_front, license_back, id_front or id_back."""
+    _run(fleet.set_driver_document, driver_id, which, await file.read())
+    return _driver(driver_id)
+
+
+@router.delete("/drivers/{driver_id}/documents/{which}")
+def delete_driver_document(driver_id: int, which: str):
+    _run(fleet.remove_driver_document, driver_id, which)
+    return _driver(driver_id)
+
+
 @router.get("/photos/{name}")
 def get_photo(name: str):
     """A stored photo. Names change with every upload, so it can be cached for good."""

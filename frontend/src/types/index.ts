@@ -754,6 +754,11 @@ export interface FleetDriver {
   photo: string;
   created_at: string;
   updated_at: string;
+  /** scans of the driver's papers (stored image names, '' = none); see fleetPhotoUrl */
+  license_front: string;
+  license_back: string;
+  id_front: string;
+  id_back: string;
   home_vehicle: { id: number; plate: string; status: VehicleStatus } | null;
   current_vehicle: {
     id: number; plate: string; trailer_plate: string; photo: string; kind: AssignmentKind; since: string; reason: string;
@@ -774,6 +779,8 @@ export interface FleetAssignment {
   end_reason: string;
 }
 
+export const DRIVER_DOCUMENTS = ['license_front', 'license_back', 'id_front', 'id_back'] as const;
+export type DriverDocument = typeof DRIVER_DOCUMENTS[number];
 export type FleetDocumentKind = 'registration' | 'insurance' | 'license' | 'trailer_registration' | 'trailer_insurance';
 export interface FleetDocument {
   kind: FleetDocumentKind;

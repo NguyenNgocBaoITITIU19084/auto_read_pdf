@@ -6,7 +6,7 @@ import {
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
   FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
-  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
+  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -875,6 +875,12 @@ export const deleteFleetVehiclePhotoApi = async (id: number): Promise<FleetVehic
 export const uploadFleetDriverPhotoApi = (id: number, file: Blob) => uploadPhoto<FleetDriver>(`/fleet/drivers/${id}/photo`, file);
 export const deleteFleetDriverPhotoApi = async (id: number): Promise<FleetDriver> =>
   (await apiClient.delete<FleetDriver>(`/fleet/drivers/${id}/photo`)).data;
+
+/** A scan of the driver's licence / CCCD, front or back. */
+export const uploadFleetDriverDocumentApi = (id: number, which: DriverDocument, file: Blob) =>
+  uploadPhoto<FleetDriver>(`/fleet/drivers/${id}/documents/${which}`, file);
+export const deleteFleetDriverDocumentApi = async (id: number, which: DriverDocument): Promise<FleetDriver> =>
+  (await apiClient.delete<FleetDriver>(`/fleet/drivers/${id}/documents/${which}`)).data;
 
 export const getFleetHistoryApi = async (params: { driver_id?: number; vehicle_id?: number; limit?: number } = {}) =>
   (await apiClient.get<FleetAssignment[]>('/fleet/history', { params })).data;

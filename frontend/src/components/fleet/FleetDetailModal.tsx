@@ -9,6 +9,7 @@ import type { FleetAssignment, FleetDriver, FleetVehicle } from '../../types';
 import { Modal } from '../common/Modal';
 import { daysLeftText } from '../common/ReminderViews';
 import { FleetAvatar } from './FleetPhoto';
+import { DriverPaperCard } from './DriverPapers';
 import { EXPIRY_WARN_DAYS, daysUntil, formatIsoDate, formatStampShort, todayVnIso } from './fleetUtils';
 
 export type FleetDetailTarget = { kind: 'vehicle'; item: FleetVehicle } | { kind: 'driver'; item: FleetDriver };
@@ -76,10 +77,12 @@ interface Props {
   onShowHistory: () => void;
   onEdit: () => void;
   actions: DetailAction[];
+  /** after a change made here (a driver's licence / CCCD scan): reload the row */
+  onChanged?: () => void;
 }
 
 /** Everything about one truck or driver, opened by double-clicking its row. Its actions are the row's own. */
-export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto, onShowHistory, onEdit, actions }) => {
+export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto, onShowHistory, onEdit, actions, onChanged }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
   const f = t.fleet;
@@ -124,7 +127,7 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
         : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400';
 
   return (
-    <Modal isOpen onClose={onClose} title={title} maxWidth="max-w-2xl">
+    <Modal isOpen onClose={onClose} title={title} maxWidth={isVehicle ? 'max-w-2xl' : 'max-w-3xl'}>
       <div className="space-y-5" data-testid="fleet-detail">
         <div className="flex items-center gap-4">
           {target.item.photo ? (
@@ -142,6 +145,24 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
             {isVehicle && target.item.vehicle_type && <div className="text-sm text-slate-500 dark:text-slate-400">{target.item.vehicle_type}</div>}
             {!isVehicle && target.item.phone && <div className="text-sm text-slate-500 dark:text-slate-400">{phoneLine(target.item.phone)}</div>}
           </div>
+          {!isVehicle && (
+            <div className="ml-auto self-start min-w-[13rem] rounded-xl border border-slate-200 dark:border-slate-700 p-3" data-testid="driver-current-vehicle">
+              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">{D.currentVehicle}</div>
+              {target.item.current_vehicle ? (
+                <div className="flex items-center gap-2.5">
+                  <FleetAvatar photo={target.item.current_vehicle.photo} kind="vehicle" name={target.item.current_vehicle.plate} size="wideSm" />
+                  <div>
+                    <div className="font-semibold text-slate-800 dark:text-slate-100">{target.item.current_vehicle.plate}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      {[target.item.current_vehicle.kind === 'temporary' ? f.kind.temporary : '',
+                        target.item.current_vehicle.since ? tf(D.since, { time: formatStampShort(target.item.current_vehicle.since) }) : '']
+                        .filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                </div>
+              ) : <span className="text-sm text-slate-400">{f.noVehicle}</span>}
+            </div>
+          )}
         </div>
 
         {isVehicle ? (
@@ -170,38 +191,23 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
             </div>
           </Section>
         ) : (
-          <Section title={D.currentVehicle}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-              <div>
-                <div className="mb-1.5 text-[11px] text-slate-400">{D.currentVehicle}</div>
-                {target.item.current_vehicle ? (
-                  <div className="flex items-center gap-2.5">
-                    <FleetAvatar photo={target.item.current_vehicle.photo} kind="vehicle" name={target.item.current_vehicle.plate} size="wideSm" />
-                    <div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">{target.item.current_vehicle.plate}</div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        {[target.item.current_vehicle.kind === 'temporary' ? f.kind.temporary : '',
-                          target.item.current_vehicle.since ? tf(D.since, { time: formatStampShort(target.item.current_vehicle.since) }) : '']
-                          .filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
-                  </div>
-                ) : <span className="text-sm text-slate-400">{f.noVehicle}</span>}
-              </div>
-              <div>
-                <div className="mb-1.5 text-[11px] text-slate-400">{D.homeVehicle}</div>
-                {target.item.home_vehicle ? (
-                  <div>
-                    <div className="font-semibold text-slate-800 dark:text-slate-100">{target.item.home_vehicle.plate}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">{f.vehicleStatus[target.item.home_vehicle.status]}</div>
-                  </div>
-                ) : <span className="text-sm text-slate-400">{f.none}</span>}
-              </div>
+          <Section title={D.papers}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <DriverPaperCard driver={target.item} kind="license" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} facts={
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span>{D.licenseClass} <b className="font-semibold text-slate-700 dark:text-slate-200">{target.item.license_class || f.none}</b></span>
+                  <span>· {D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.license_no || f.none}</b></span>
+                  <span>· {D.expiry} <b className="font-semibold text-slate-700 dark:text-slate-200"><DateValue iso={target.item.license_expiry} /></b></span>
+                </span>
+              } />
+              <DriverPaperCard driver={target.item} kind="id" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} facts={
+                <span>{D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.id_number || f.none}</b></span>
+              } />
             </div>
           </Section>
         )}
 
-        <Section title={D.info}>
+        <Section title={isVehicle ? D.info : D.other}>
           <dl className="grid grid-cols-[auto,1fr] gap-x-6 gap-y-2 text-sm">
             {isVehicle ? (
               <>
@@ -209,14 +215,7 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
                 <Row label={f.vehicleForm.registration}><DateValue iso={target.item.registration_expiry} /></Row>
                 <Row label={f.vehicleForm.insurance}><DateValue iso={target.item.insurance_expiry} /></Row>
               </>
-            ) : (
-              <>
-                <Row label={f.driverForm.idNumber}>{target.item.id_number || f.none}</Row>
-                <Row label={f.driverForm.licenseNo}>{target.item.license_no || f.none}</Row>
-                <Row label={f.driverForm.licenseClass}>{target.item.license_class || f.none}</Row>
-                <Row label={f.driverForm.licenseExpiry}><DateValue iso={target.item.license_expiry} /></Row>
-              </>
-            )}
+            ) : null}
             <Row label={f.vehicleForm.note}><span className="whitespace-pre-wrap">{target.item.note || f.none}</span></Row>
             <Row label={D.added}>{formatStampShort(target.item.created_at)}</Row>
           </dl>

@@ -1016,7 +1016,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         onChanged={() => { reload(); loadTrashCount(); }} />
       <RowContextMenu position={menu.state && menuGroups.length ? { x: menu.state.x, y: menu.state.y } : null}
         groups={menuGroups} onClose={menu.close} />
-      <FleetDetailModal target={detailTarget} onClose={() => setDetail(null)} actions={detailActions}
+      <FleetDetailModal target={detailTarget} onClose={() => setDetail(null)} actions={detailActions} onChanged={reload}
         onOpenPhoto={(photo, name) => setViewing({ photo, name })}
         onShowHistory={() => {
           const row = detailTarget;

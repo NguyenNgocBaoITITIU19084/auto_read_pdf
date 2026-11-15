@@ -509,3 +509,40 @@ def test_fleet_tables_have_their_own_export_templates_and_export():
     assert [c.value for c in ws[1]] == ["Biển số", "Trạng thái"]
     assert [c.value for c in ws[2]] == ["51C-123.45", "Đang chạy"]
     assert "doi_xe.xlsx" in out.headers["content-disposition"]
+
+
+# --- driver papers (licence / CCCD scans) ------------------------------------------------
+def test_driver_documents_are_stored_larger_replaced_and_purged():
+    from PIL import Image
+    import io
+    a = _driver("An")
+    name = fleet.set_driver_document(a, "license_front", _png(size=(3000, 1900)))
+    assert name.startswith(f"driver_{a}_license_front_") and fleet.photo_path(name) is not None
+    assert max(Image.open(fleet.photo_path(name)).size) == fleet.DOCUMENT_MAX_SIDE
+    back = fleet.set_driver_document(a, "id_back", _png(size=(200, 120)))
+    d = _drivers()["An"]
+    assert d["license_front"] == name and d["id_back"] == back and d["license_back"] == "" and d["photo"] == ""
+
+    again = fleet.set_driver_document(a, "license_front", _png(size=(200, 120)))
+    assert again != name and fleet.photo_path(name) is None          # the old scan is gone
+    fleet.remove_driver_document(a, "id_back")
+    assert fleet.photo_path(back) is None and _drivers()["An"]["id_back"] == ""
+    with pytest.raises(fleet.FleetError):
+        fleet.set_driver_document(a, "passport", _png(size=(20, 20)))
+
+    fleet.delete_driver(a)                                             # trash keeps the scans...
+    assert fleet.photo_path(again) is not None
+    assert fleet.delete_from_trash("driver", [a]) == 1                 # ...deleting for good removes them
+    assert fleet.photo_path(again) is None
+
+
+def test_driver_documents_api():
+    d = client.post("/api/v1/fleet/drivers", json={"name": "An"}).json()
+    res = client.post(f"/api/v1/fleet/drivers/{d['id']}/documents/id_front",
+                      files={"file": ("cccd.png", _png(size=(400, 250)), "image/png")})
+    assert res.status_code == 200, res.text
+    name = res.json()["id_front"]
+    assert client.get(f"/api/v1/fleet/photos/{name}").status_code == 200
+    assert client.post(f"/api/v1/fleet/drivers/{d['id']}/documents/nope",
+                       files={"file": ("x.png", _png(size=(20, 20)), "image/png")}).status_code == 400
+    assert client.delete(f"/api/v1/fleet/drivers/{d['id']}/documents/id_front").json()["id_front"] == ""

@@ -27,6 +27,8 @@ const api = {
   setDriverHomeVehicleApi: vi.fn(),
   moveDriverTemporaryApi: vi.fn(),
   deleteFleetVehicleApi: vi.fn(),
+  uploadFleetDriverDocumentApi: vi.fn(),
+  deleteFleetDriverDocumentApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -59,6 +61,8 @@ vi.mock('../../services/api', () => ({
   deleteFleetDriverPhotoApi: vi.fn(),
   fleetPhotoUrl: (name: string) => (name ? `http://api/fleet/photos/${name}` : ''),
   getFleetTrailersApi: async () => [],
+  uploadFleetDriverDocumentApi: (...a: unknown[]) => api.uploadFleetDriverDocumentApi(...a),
+  deleteFleetDriverDocumentApi: (...a: unknown[]) => api.deleteFleetDriverDocumentApi(...a),
 }));
 
 import { FleetTab } from './FleetTab';
@@ -71,6 +75,7 @@ const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): 
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
   id, name, phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active', note: '', photo: '',
+  license_front: '', license_back: '', id_front: '', id_back: '',
   created_at: '', updated_at: '', home_vehicle: null, current_vehicle: null, ...extra,
 });
 
@@ -522,5 +527,38 @@ describe('FleetTab Excel export', () => {
     expect(props.data).toHaveLength(1200);
     expect(props.data[0]).toEqual(expect.objectContaining({ STT: 1, ended_at: f.stillOpen, started_at: '15/11/2026 08:00' }));
     expect(api.getFleetHistoryPageApi).toHaveBeenCalledWith(expect.objectContaining({ limit: 1000, offset: 1000 }));
+  });
+});
+
+describe('FleetTab driver details', () => {
+  it('shows the licence and CCCD with both sides, uploads and removes a scan, and no own-truck box', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', {
+      license_class: 'FC', license_no: '790123', id_number: '079091006789', license_front: 'driver_1_license_front_0a1b2c3d.jpg',
+      home_vehicle: { id: 1, plate: '51C-1', status: 'active' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' },
+    })]);
+    api.getFleetHistoryApi.mockResolvedValue([]);
+    api.uploadFleetDriverDocumentApi.mockResolvedValue({});
+    api.deleteFleetDriverDocumentApi.mockResolvedValue({});
+    confirmMock.mockResolvedValue(true);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.keyDown(await screen.findByTestId('driver-1'), { key: 'Enter' });
+    const detail = screen.getByTestId('fleet-detail');
+    const D = f.detail;
+    expect(within(detail).queryByText(D.homeVehicle)).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('driver-current-vehicle')).getByText('51C-1')).toBeInTheDocument();
+    expect(within(detail).getByText(D.license)).toBeInTheDocument();
+    expect(within(detail).getByText('079091006789')).toBeInTheDocument();
+    expect(within(screen.getByTestId('doc-license_front')).getByRole('img')).toHaveAttribute(
+      'src', 'http://api/fleet/photos/driver_1_license_front_0a1b2c3d.jpg');
+
+    const file = new File(['x'], 'cccd.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByTestId('doc-id_front-input'), { target: { files: [file] } });
+    await waitFor(() => expect(api.uploadFleetDriverDocumentApi).toHaveBeenCalledWith(1, 'id_front', file));
+    expect(addToast).toHaveBeenCalledWith(`Đã lưu ảnh ${D.idCard} – ${D.front}`, 'success');
+
+    fireEvent.click(within(screen.getByTestId('doc-license_front')).getByLabelText(`${D.removeImage} · ${D.license} – ${D.front}`));
+    await waitFor(() => expect(api.deleteFleetDriverDocumentApi).toHaveBeenCalledWith(1, 'license_front'));
   });
 });
