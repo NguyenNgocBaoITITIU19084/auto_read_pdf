@@ -1,4 +1,5 @@
-"""Fleet: trucks (đầu kéo, with the trailer they pull), drivers, and who drives which truck.
+"""Fleet: trucks (đầu kéo), drivers, and who drives which truck. Trailers (rơ moóc) and which tractor pulls which
+are in fleet_trailers.py.
 
 Fleet data is the company's, not a collection's: nothing here is scoped by collection.
 
@@ -37,15 +38,24 @@ EXPIRY_FIELDS = (
     ("fleet_vehicles", "registration_expiry", "registration", "Đăng kiểm"),
     ("fleet_vehicles", "insurance_expiry", "insurance", "Bảo hiểm"),
     ("fleet_drivers", "license_expiry", "license", "Bằng lái"),
+    ("fleet_trailers", "registration_expiry", "trailer_registration", "Đăng kiểm moóc"),
+    ("fleet_trailers", "insurance_expiry", "trailer_insurance", "Bảo hiểm moóc"),
 )
+# per table: (entity, the column naming it, the status left out of reminders, the app tab showing it)
+EXPIRY_ENTITIES = {
+    "fleet_vehicles": ("vehicle", "plate", "inactive", "fleet"),
+    "fleet_drivers": ("driver", "name", "left", "drivers"),
+    "fleet_trailers": ("trailer", "plate", "inactive", "trailers"),
+}
 EXPIRY_LIST_LIMIT = 20
 HISTORY_MAX_LIMIT = 1000
 
 # Photos: one per truck / driver, kept next to the database as JPEG (never larger than PHOTO_MAX_SIDE)
 PHOTO_MAX_BYTES = 15 * 1024 * 1024
 PHOTO_MAX_SIDE = 1200
-PHOTO_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers"}
-_PHOTO_NAME = re.compile(r"^(vehicle|driver)_\d+_[0-9a-f]{8}\.jpg$")
+PHOTO_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers", "trailer": "fleet_trailers"}
+_PHOTO_NAME = re.compile(r"^(vehicle|driver|trailer)_\d+_[0-9a-f]{8}\.jpg$")
+_NOT_FOUND = {"vehicle": "Không tìm thấy xe", "driver": "Không tìm thấy tài xế", "trailer": "Không tìm thấy moóc"}
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PLATE_JUNK = re.compile(r"[\s.\-_/]+")
@@ -113,6 +123,8 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_fleet_vehicles_trailer ON fleet_vehicles(trailer_key) "
                  "WHERE trailer_key != '';")
+    from backend.app.core.fleet_trailers import create_trailer_tables, migrate_trailer_plates
+    create_trailer_tables(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS fleet_drivers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +182,8 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (entity_key, expiry, threshold)
         );
     """)
+    # tractors from before trailers had records: their typed trailer plate becomes a trailer, hitched
+    migrate_trailer_plates(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -565,49 +579,52 @@ _IN_TRASH = "đang nằm trong thùng rác: hãy khôi phục xe đó hoặc xó
 
 
 def _check_vehicle_unique(conn, fields: dict, exclude_id: int | None) -> None:
-    """Plates and trailers stay unique across trucks in the trash too, so a restore never clashes."""
+    """Plates stay unique across trucks in the trash too, so a restore never clashes."""
     if "plate" in fields:
         row = conn.execute("SELECT plate, deleted_at FROM fleet_vehicles WHERE plate_key = ? AND id != ?;",
                            (plate_key(fields["plate"]), exclude_id or -1)).fetchone()
         if row:
             raise FleetError(f"Biển số {row[0]} {_IN_TRASH}" if row[1] else f"Biển số {row[0]} đã có trong danh sách", 409)
-    if fields.get("trailer_plate"):
-        row = conn.execute("SELECT plate, deleted_at FROM fleet_vehicles WHERE trailer_key = ? AND id != ?;",
-                           (plate_key(fields["trailer_plate"]), exclude_id or -1)).fetchone()
-        if row:
-            raise FleetError(f"Moóc {fields['trailer_plate']} gắn với xe {row[0]} {_IN_TRASH}" if row[1]
-                             else f"Moóc {fields['trailer_plate']} đang gắn với xe {row[0]}", 409)
 
 
 def create_vehicle(data: dict) -> int:
+    """A new tractor; its "trailer_plate" hitches that trailer (made when it is new, see hitch_by_plate)."""
+    from backend.app.core.fleet_trailers import hitch_by_plate
     fields = _clean_vehicle(data, partial=False)
     stamp = _now()
     with _conn() as conn:
         _check_vehicle_unique(conn, fields, None)
         cur = conn.execute(
-            "INSERT INTO fleet_vehicles (plate, plate_key, trailer_plate, trailer_key, vehicle_type, registration_expiry, "
-            "insurance_expiry, status, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-            (fields["plate"], plate_key(fields["plate"]), fields["trailer_plate"], plate_key(fields["trailer_plate"]),
+            "INSERT INTO fleet_vehicles (plate, plate_key, vehicle_type, registration_expiry, "
+            "insurance_expiry, status, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            (fields["plate"], plate_key(fields["plate"]),
              fields["vehicle_type"], fields["registration_expiry"], fields["insurance_expiry"], fields["status"],
              fields["note"], stamp, stamp))
-        return cur.lastrowid
+        vehicle_id = cur.lastrowid
+        if fields["trailer_plate"]:
+            hitch_by_plate(conn, _vehicle(conn, vehicle_id), fields["trailer_plate"], stamp)
+        return vehicle_id
 
 
 def update_vehicle(vehicle_id: int, data: dict) -> None:
     """Edit a truck's details. A status change goes through set_vehicle_status() (it moves drivers), not here."""
+    from backend.app.core.fleet_trailers import hitch_by_plate
     fields = _clean_vehicle({k: v for k, v in data.items() if k in _VEHICLE_FIELDS and k != "status"}, partial=True)
+    trailer_plate = fields.pop("trailer_plate", None)
     stamp = _now()
     with _conn() as conn:
         _vehicle(conn, vehicle_id)
         _check_vehicle_unique(conn, fields, vehicle_id)
         if "plate" in fields:
             fields["plate_key"] = plate_key(fields["plate"])
-        if "trailer_plate" in fields:
-            fields["trailer_key"] = plate_key(fields["trailer_plate"])
+            conn.execute("UPDATE fleet_trailer_hitches SET vehicle_plate = ? WHERE vehicle_id = ? AND ended_at IS NULL;",
+                         (fields["plate"], vehicle_id))
         if fields:
             sets = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(f"UPDATE fleet_vehicles SET {sets}, updated_at = ? WHERE id = ?;",
                          (*fields.values(), stamp, vehicle_id))
+        if trailer_plate is not None:
+            hitch_by_plate(conn, _vehicle(conn, vehicle_id), trailer_plate, stamp)
     if "status" in data and data["status"] is not None:
         with _conn() as conn:
             current = _vehicle(conn, vehicle_id)["status"]
@@ -616,11 +633,14 @@ def update_vehicle(vehicle_id: int, data: dict) -> None:
 
 
 def delete_vehicle(vehicle_id: int) -> None:
-    """Move a truck to the trash. Its driver gets off it and its home driver loses it; the history keeps its plate."""
+    """Move a truck to the trash. Its driver gets off it, its home driver loses it and its trailer comes off (a free
+    trailer again); the history keeps its plate."""
+    from backend.app.core.fleet_trailers import release_vehicle
     stamp = _now()
     with _conn() as conn:
         vehicle = _vehicle(conn, vehicle_id)
         _close(conn, _open_by_vehicle(conn, vehicle_id), f"Xóa xe {vehicle['plate']}", stamp)
+        release_vehicle(conn, vehicle, f"Xóa xe {vehicle['plate']}", stamp)
         conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE home_vehicle_id = ?;",
                      (stamp, vehicle_id))
         conn.execute("UPDATE fleet_vehicles SET deleted_at = ? WHERE id = ?;", (stamp, vehicle_id))
@@ -708,7 +728,7 @@ def delete_driver(driver_id: int) -> None:
 # ---------------------------------------------------------------------------
 # Trash: deleted trucks / drivers wait TRASH_KEEP_DAYS days (photos kept) before being purged
 # ---------------------------------------------------------------------------
-TRASH_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers"}
+TRASH_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers", "trailer": "fleet_trailers"}
 
 
 def _keep_days() -> int:
@@ -869,7 +889,7 @@ def set_photo(entity: str, entity_id: int, data: bytes) -> str:
     with _conn() as conn:
         row = conn.execute(f"SELECT photo FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
         if not row:
-            raise FleetError("Không tìm thấy xe" if entity == "vehicle" else "Không tìm thấy tài xế", 404)
+            raise FleetError(_NOT_FOUND[entity], 404)
         old = row[0]
         name = f"{entity}_{entity_id}_{secrets.token_hex(4)}.jpg"
         folder = photo_dir()
@@ -885,7 +905,7 @@ def remove_photo(entity: str, entity_id: int) -> None:
     with _conn() as conn:
         row = conn.execute(f"SELECT photo FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
         if not row:
-            raise FleetError("Không tìm thấy xe" if entity == "vehicle" else "Không tìm thấy tài xế", 404)
+            raise FleetError(_NOT_FOUND[entity], 404)
         conn.execute(f"UPDATE {table} SET photo = '', updated_at = ? WHERE id = ?;", (_now(), entity_id))
     _delete_photo_file(row[0])
 
@@ -895,14 +915,12 @@ def remove_photo(entity: str, entity_id: int) -> None:
 # ---------------------------------------------------------------------------
 def expiring_documents(today: date, within_days: int = EXPIRY_REMINDER_DAYS[0]) -> list[dict]:
     """Documents expiring within `within_days` days or already expired, soonest first:
-    [{"kind", "label", "entity", "entity_id", "subject", "expiry" (YYYY-MM-DD), "days_left"}]. Trucks that no longer
-    run (inactive) and drivers who quit are left out."""
+    [{"kind", "label", "entity", "entity_id", "subject", "expiry" (YYYY-MM-DD), "days_left"}]. Trucks / trailers that no
+    longer run (inactive) and drivers who quit are left out."""
     out = []
     with _conn() as conn:
         for table, column, kind, label in EXPIRY_FIELDS:
-            entity = "vehicle" if table == "fleet_vehicles" else "driver"
-            name_col = "plate" if entity == "vehicle" else "name"
-            skip = "inactive" if entity == "vehicle" else "left"
+            entity, name_col, skip, _tab = EXPIRY_ENTITIES[table]
             for row_id, subject, expiry in conn.execute(
                     f"SELECT id, {name_col}, {column} FROM {table} WHERE {column} != '' AND status != ? "
                     "AND deleted_at IS NULL;", (skip,)):
@@ -915,6 +933,11 @@ def expiring_documents(today: date, within_days: int = EXPIRY_REMINDER_DAYS[0]) 
                                 "subject": subject, "expiry": expiry, "days_left": left})
     out.sort(key=lambda r: (r["days_left"], r["subject"]))
     return out
+
+
+def _doc_tab(doc: dict) -> str:
+    """The app tab listing the document's truck / driver / trailer."""
+    return next(tab for entity, _, _, tab in EXPIRY_ENTITIES.values() if entity == doc["entity"])
 
 
 def _days_text(days_left: int) -> str:
@@ -962,7 +985,7 @@ def scan_expiry_reminders(now: datetime | None = None) -> int:
             "kind": cd.FLEET_EXPIRY,
             "entity_key": f"fleet_expiry|{stamp}",
             "title": title, "old": "", "new": summary,
-            "nav_tab": "fleet", "nav_query": first["subject"] if len(docs) == 1 else None,
+            "nav_tab": _doc_tab(first) if len(docs) == 1 else "fleet", "nav_query": first["subject"] if len(docs) == 1 else None,
             "detail": {"count": len(docs), "expired": expired,
                        "documents": [{**d, "expiry": date.fromisoformat(d["expiry"]).strftime("%d/%m/%Y")}
                                  for d in docs[:EXPIRY_LIST_LIMIT]]},

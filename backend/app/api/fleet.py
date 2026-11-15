@@ -1,4 +1,4 @@
-"""Fleet: trucks, drivers and who drives which truck. Errors answer {"detail": "<Vietnamese message>"}."""
+"""Fleet: trucks, drivers, trailers, who drives which truck and which truck pulls which trailer. Errors answer {"detail": "<Vietnamese message>"}."""
 from typing import List, Optional
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.app.core import fleet
+from backend.app.core import fleet_trailers as trailers
 
 router = APIRouter(prefix="/fleet", tags=["Fleet"])
 
@@ -51,6 +52,24 @@ class MoveIn(BaseModel):
 
 
 class ReasonIn(BaseModel):
+    reason: str = ""
+
+
+class TrailerIn(BaseModel):
+    plate: Optional[str] = None
+    trailer_type: Optional[str] = None
+    chassis_no: Optional[str] = None
+    payload: Optional[str] = None
+    year: Optional[str] = None
+    registration_expiry: Optional[str] = None
+    insurance_expiry: Optional[str] = None
+    status: Optional[str] = None
+    note: Optional[str] = None
+    vehicle_id: Optional[int] = None      # on create only: hitch it to this tractor
+
+
+class HitchIn(BaseModel):
+    vehicle_id: Optional[int] = None      # null: unhitch
     reason: str = ""
 
 
@@ -158,6 +177,65 @@ def unassign(driver_id: int, payload: ReasonIn):
     return _driver(driver_id)
 
 
+# --- trailers -------------------------------------------------------------
+@router.get("/trailers")
+def list_trailers():
+    return trailers.list_trailers()
+
+
+@router.post("/trailers")
+def create_trailer(payload: TrailerIn):
+    trailer_id = _run(trailers.create_trailer, payload.model_dump(exclude_none=True))
+    return _run(trailers.get_trailer, trailer_id)
+
+
+@router.put("/trailers/{trailer_id}")
+def update_trailer(trailer_id: int, payload: TrailerIn):
+    data = payload.model_dump(exclude_unset=True)
+    data.pop("vehicle_id", None)  # hitching goes through /hitch
+    _run(trailers.update_trailer, trailer_id, data)
+    return _run(trailers.get_trailer, trailer_id)
+
+
+@router.delete("/trailers/{trailer_id}")
+def delete_trailer(trailer_id: int):
+    _run(trailers.delete_trailer, trailer_id)
+    return {"status": "success"}
+
+
+@router.post("/trailers/{trailer_id}/hitch")
+def hitch_trailer(trailer_id: int, payload: HitchIn):
+    """Hitch to a tractor (off any other one, and the tractor's own trailer off it), or unhitch (vehicle_id null).
+    Answers the trailer plus {"replaced", "from_plate"}."""
+    moved = _run(trailers.hitch, trailer_id, payload.vehicle_id, payload.reason)
+    return {**_run(trailers.get_trailer, trailer_id), **moved}
+
+
+@router.get("/trailers/history/page")
+def trailer_history_page(trailer_id: Optional[int] = None, vehicle_id: Optional[int] = None,
+                         states: Optional[List[str]] = Query(None), q: str = "", sort_by: Optional[str] = None,
+                         sort_dir: str = "desc", limit: int = 50, offset: int = 0):
+    """A page of the hitch history: {"items", "total"} (see fleet_trailers.hitch_page)."""
+    return trailers.hitch_page(trailer_id, vehicle_id, states, q, sort_by, sort_dir, limit, offset)
+
+
+@router.get("/trailers/history")
+def trailer_history(trailer_id: Optional[int] = None, vehicle_id: Optional[int] = None, limit: int = 200):
+    return trailers.hitch_history(trailer_id, vehicle_id, limit)
+
+
+@router.post("/trailers/{trailer_id}/photo")
+async def upload_trailer_photo(trailer_id: int, file: UploadFile = File(...)):
+    _run(fleet.set_photo, "trailer", trailer_id, await file.read())
+    return _run(trailers.get_trailer, trailer_id)
+
+
+@router.delete("/trailers/{trailer_id}/photo")
+def delete_trailer_photo(trailer_id: int):
+    _run(fleet.remove_photo, "trailer", trailer_id)
+    return _run(trailers.get_trailer, trailer_id)
+
+
 # --- photos -----------------------------------------------------------------
 @router.post("/vehicles/{vehicle_id}/photo")
 async def upload_vehicle_photo(vehicle_id: int, file: UploadFile = File(...)):
@@ -200,7 +278,7 @@ class TrashIdsIn(BaseModel):
 
 @router.get("/trash")
 def list_trash(kind: str, limit: int = 50, offset: int = 0):
-    """Trucks (kind=vehicle) or drivers (kind=driver) in the trash, last deleted first."""
+    """Trucks (kind=vehicle), drivers (kind=driver) or trailers (kind=trailer) in the trash, last deleted first."""
     return _run(fleet.trash_page, kind, limit, offset)
 
 
@@ -211,7 +289,7 @@ def list_trash_ids(kind: str):
 
 @router.get("/trash/count")
 def trash_count():
-    """{"vehicle": n, "driver": n}"""
+    """{"vehicle": n, "driver": n, "trailer": n}"""
     return fleet.trash_count()
 
 
