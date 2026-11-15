@@ -33,6 +33,7 @@ const api = {
   deleteFleetDriverDocumentApi: vi.fn(),
   updateFleetDriverApi: vi.fn(),
   deleteFleetDriverApi: vi.fn(),
+  uploadFleetVehicleDocumentApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -64,8 +65,11 @@ vi.mock('../../services/api', () => ({
   uploadFleetDriverPhotoApi: vi.fn(),
   deleteFleetDriverPhotoApi: vi.fn(),
   fleetPhotoUrl: (name: string) => (name ? `http://api/fleet/photos/${name}` : ''),
-  getFleetTrailersApi: async () => [],
+  getFleetTrailersApi: async () => [{ id: 7, plate: '51R-1', trailer_type: "Sàn 40'", payload: '32 tấn', photo: '',
+    vehicle: { id: 1, plate: '51C-1', since: '2026-11-15 08:00:00' } }],
   uploadFleetDriverDocumentApi: (...a: unknown[]) => api.uploadFleetDriverDocumentApi(...a),
+  uploadFleetVehicleDocumentApi: (...a: unknown[]) => api.uploadFleetVehicleDocumentApi(...a),
+  deleteFleetVehicleDocumentApi: vi.fn(),
   deleteFleetDriverDocumentApi: (...a: unknown[]) => api.deleteFleetDriverDocumentApi(...a),
 }));
 
@@ -75,7 +79,7 @@ const f = translations.vi.fleet;
 
 const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
   id, plate, trailer_plate: '', vehicle_type: '', registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
-  created_at: '', updated_at: '', home_driver: null, current_driver: null, ...extra,
+  created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null, ...extra,
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
   id, name, phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active', note: '', photo: '',
@@ -620,6 +624,51 @@ describe('FleetTab driver details', () => {
 });
 
 describe('FleetTab truck details', () => {
+  it('has đăng kiểm, bảo hiểm and đăng ký xe (if any) with front and back scans, saved at once', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { registration_expiry: '2027-03-01',
+      insurance_front: 'vehicle_1_insurance_front_0a1b2c3d.jpg' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetHistoryApi.mockResolvedValue([]);
+    api.uploadFleetVehicleDocumentApi.mockResolvedValue({});
+    render(<FleetTab />);
+    fireEvent.keyDown(await screen.findByTestId('vehicle-1'), { key: 'Enter' });
+    const D = f.detail;
+    expect(within(screen.getByTestId('paper-registration')).getByText('01/03/2027')).toBeInTheDocument();
+    expect(within(screen.getByTestId('paper-ownership')).getByText(D.ifAny)).toBeInTheDocument();
+    expect(within(screen.getByTestId('doc-insurance_front')).getByRole('img')).toHaveAttribute(
+      'src', 'http://api/fleet/photos/vehicle_1_insurance_front_0a1b2c3d.jpg');
+    const file = new File(['x'], 'dk.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByTestId('doc-registration_front-input'), { target: { files: [file] } });
+    await waitFor(() => expect(api.uploadFleetVehicleDocumentApi).toHaveBeenCalledWith(1, 'registration_front', file));
+    expect(addToast).toHaveBeenCalledWith(`Đã lưu ảnh ${D.inspection} – ${D.front}`, 'success');
+  });
+
+  it('picks boxes with one click each and copies them together, or one at once', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { trailer_plate: '51R-1', vehicle_type: 'Hino',
+      current_driver: { id: 2, name: 'An', phone: '0909', photo: '', kind: 'primary', since: '', reason: '' } })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetHistoryApi.mockResolvedValue([]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<FleetTab />);
+    fireEvent.keyDown(await screen.findByTestId('vehicle-1'), { key: 'Enter' });
+    const detail = screen.getByTestId('fleet-detail');
+    expect(await within(screen.getByTestId('field-trailer')).findByText("Sàn 40' · 32 tấn")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('pick-trailer'));
+    fireEvent.click(screen.getByTestId('pick-plate'));
+    fireEvent.click(screen.getByTestId('pick-driver'));
+    expect(screen.getByTestId('field-plate')).toHaveAttribute('data-selected', 'true');
+    fireEvent.click(within(detail).getByText(translations.vi.common.fieldCopy.copyLabeled));
+    const VF = f.vehicleForm;
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${VF.plate}: 51C-1\n${f.detail.driving}: An – 0909\n${translations.vi.tabs.trailers}: 51R-1 – Sàn 40' · 32 tấn`));
+    fireEvent.click(screen.getByTestId('pick-plate'));                    // one more click unpicks it
+    expect(screen.getByTestId('pick-plate')).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(within(screen.getByTestId('field-type')).getByLabelText(`${translations.vi.common.copy} ${VF.type}`));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('Hino'));
+    expect(screen.queryByTestId('pick-home')).not.toBeInTheDocument();    // the home driver box gave way to the trailer
+    expect(within(screen.getByTestId('field-trailer')).getByText('51R-1')).toBeInTheDocument();
+  });
+
   it('"Sửa thông tin" opens the edit form over the details, not hidden under them', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
     api.getFleetDriversApi.mockResolvedValue([]);

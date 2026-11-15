@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Camera, Check, Copy, History, Loader2, Save, Trash2, Undo2 } from 'lucide-react';
+import { Camera, History, Loader2, Save, Trash2, Undo2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -8,7 +8,6 @@ import {
   deleteFleetDriverPhotoApi, fleetPhotoUrl, getFleetHistoryApi, updateFleetDriverApi, uploadFleetDriverPhotoApi,
 } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
-import { copyTextToClipboard } from '../../utils/formatters';
 import type { CopyEntry } from '../../utils/fieldCopy';
 import { DRIVER_STATUSES, type DriverStatus, type FleetAssignment, type FleetDriver } from '../../types';
 import { FieldCopyBar } from '../common/FieldCopyBar';
@@ -17,6 +16,7 @@ import { daysLeftText } from '../common/ReminderViews';
 import { DocumentTile, DriverSection, FieldBox, PaperRow } from './DriverPapers';
 import type { DetailAction } from './FleetDetailModal';
 import { FleetAvatar, photoProblem } from './FleetPhoto';
+import { PickBox, PickToggle, boxTone, type Selection } from './FieldPick';
 import { EXPIRY_WARN_DAYS, apiError, daysUntil, formatIsoDate, formatStampShort, todayVnIso } from './fleetUtils';
 
 const HISTORY_SHOWN = 5;
@@ -25,75 +25,21 @@ const HISTORY_SHOWN = 5;
 type Editable = 'name' | 'phone' | 'status' | 'license_class' | 'license_no' | 'license_expiry' | 'id_number' | 'note';
 const EDITABLE: Editable[] = ['name', 'phone', 'status', 'license_class', 'license_no', 'license_expiry', 'id_number', 'note'];
 
-type Selection = ReturnType<typeof useFieldSelection>;
-
-/** A box of the details that is both edited in place and picked for copying (like the booking details): its text is
- *  an input; a click on the box around it selects it; the copy button copies it at once. */
-/** A box's look: picked wins (blue), then edited (amber), else plain. One class set each, so they never fight. */
-const boxTone = (selected: boolean, dirty: boolean) =>
-  selected ? 'border-primary-400 dark:border-primary-500 bg-primary-50/80 dark:bg-primary-950/40'
-    : dirty ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/20'
-      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80';
-
-/** The box's name with a tick in front: one click picks it for copying, the next one unpicks it (the text below is
- *  for editing, so picking has its own target). */
-const PickToggle: React.FC<{ id: string; label: string; picked: Selection; disabled?: boolean }> = ({ id, label, picked, disabled }) => {
-  const selected = picked.selected.has(id);
-  return (
-    <button type="button" role="checkbox" aria-checked={selected} disabled={disabled} onClick={() => picked.toggle(id)}
-      data-testid={`pick-${id}`}
-      className="group/pick -ml-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-primary-50 dark:hover:bg-primary-950/40 disabled:cursor-default disabled:hover:bg-transparent">
-      <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors ${selected
-        ? 'border-primary-500 bg-primary-600 text-white'
-        : 'border-slate-300 dark:border-slate-600 group-hover/pick:border-primary-400 group-disabled/pick:opacity-40'}`}>
-        {selected && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
-      </span>
-      <span className={`truncate text-[10px] font-semibold uppercase tracking-wider ${selected
-        ? 'text-primary-700 dark:text-primary-300' : 'text-slate-500 dark:text-slate-400'}`}>{label}</span>
-    </button>
-  );
-};
-
+/** A box of the details that is both edited in place and picked for copying: its text is an input. */
 const EditBox: React.FC<{
   id: string; label: string; copyValue: string; picked: Selection; dirty: boolean; className?: string;
   badge?: React.ReactNode; children: React.ReactElement;
-}> = ({ id, label, copyValue, picked, dirty, className = '', badge, children }) => {
-  const { t } = useApp();
-  const { addToast } = useToastActions();
-  const [copied, setCopied] = useState(false);
-  const empty = !copyValue.trim();
-  const copy = async () => {
-    const ok = await copyTextToClipboard(copyValue);
-    addToast(ok ? t.common.copySuccess : t.fleet.toast.error, ok ? 'success' : 'error');
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }
-  };
-  const selected = picked.selected.has(id);
-  return (
-    <div data-testid={`driver-field-${id}`} data-selected={selected || undefined}
-      className={`flex flex-col px-2.5 py-1.5 rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-primary-500/30 ${
-        boxTone(selected, dirty)} ${className}`}>
-      <div className="flex items-center justify-between gap-2">
-        <PickToggle id={id} label={label} picked={picked} disabled={empty} />
-        {!empty && (
-          <button type="button" onClick={() => void copy()} title={t.common.copy} aria-label={`${t.common.copy} ${label}`}
-            className="p-0.5 rounded text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-          </button>
-        )}
-      </div>
-      <div className="flex items-center gap-2 min-w-0">
-        {React.cloneElement(children, {
-          'aria-label': label,
-          className: 'min-w-0 flex-1 bg-transparent p-0 border-0 text-sm font-semibold text-slate-800 dark:text-slate-100 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-0',
-        })}
-        {badge}
-      </div>
+}> = ({ id, label, copyValue, picked, dirty, className = '', badge, children }) => (
+  <PickBox id={id} label={label} copyValue={copyValue} picked={picked} dirty={dirty} className={className} testId={`driver-field-${id}`}>
+    <div className="flex items-center gap-2 min-w-0">
+      {React.cloneElement(children, {
+        'aria-label': label,
+        className: 'min-w-0 flex-1 bg-transparent p-0 border-0 text-sm font-semibold text-slate-800 dark:text-slate-100 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-0',
+      })}
+      {badge}
     </div>
-  );
-};
+  </PickBox>
+);
 
 interface Props {
   driver: FleetDriver;
@@ -220,7 +166,7 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
     <EditBox id={k} label={label} copyValue={copyOf(k)} picked={picked} dirty={isDirty(k)} {...extra}>{input}</EditBox>
   );
   const doc = (kind: 'license' | 'id', side: 'front' | 'back') => (
-    <DocumentTile driver={driver} which={`${kind}_${side}`} doc={kind === 'license' ? D.license : D.idCard}
+    <DocumentTile kind="driver" item={driver} which={`${kind}_${side}`} doc={kind === 'license' ? D.license : D.idCard}
       side={side === 'front' ? D.front : D.back} onOpen={onOpenPhoto} onChanged={onChanged} />
   );
 

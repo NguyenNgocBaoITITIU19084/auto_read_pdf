@@ -546,3 +546,29 @@ def test_driver_documents_api():
     assert client.post(f"/api/v1/fleet/drivers/{d['id']}/documents/nope",
                        files={"file": ("x.png", _png(size=(20, 20)), "image/png")}).status_code == 400
     assert client.delete(f"/api/v1/fleet/drivers/{d['id']}/documents/id_front").json()["id_front"] == ""
+
+
+def test_truck_documents_are_stored_and_purged():
+    t = _truck("51C-1")
+    name = fleet.set_document("vehicle", t, "registration_front", _png(size=(300, 200)))
+    assert name.startswith(f"vehicle_{t}_registration_front_") and fleet.photo_path(name) is not None
+    own = fleet.set_document("vehicle", t, "ownership_back", _png(size=(300, 200)))
+    v = _trucks()["51C-1"]
+    assert v["registration_front"] == name and v["ownership_back"] == own and v["insurance_front"] == ""
+    with pytest.raises(fleet.FleetError):
+        fleet.set_document("vehicle", t, "license_front", _png(size=(20, 20)))   # a driver's paper, not a truck's
+    fleet.remove_document("vehicle", t, "ownership_back")
+    assert fleet.photo_path(own) is None
+    fleet.delete_vehicle(t)
+    fleet.delete_from_trash("vehicle", [t])
+    assert fleet.photo_path(name) is None
+
+
+def test_truck_documents_api():
+    t = client.post("/api/v1/fleet/vehicles", json={"plate": "51C-1"}).json()
+    res = client.post(f"/api/v1/fleet/vehicles/{t['id']}/documents/insurance_front",
+                      files={"file": ("bh.png", _png(size=(300, 200)), "image/png")})
+    assert res.status_code == 200, res.text
+    assert client.get(f"/api/v1/fleet/photos/{res.json()['insurance_front']}").status_code == 200
+    assert client.delete(f"/api/v1/fleet/vehicles/{t['id']}/documents/insurance_front").json()["insurance_front"] == ""
+    assert client.delete(f"/api/v1/fleet/vehicles/{t['id']}/documents/id_front").status_code == 400

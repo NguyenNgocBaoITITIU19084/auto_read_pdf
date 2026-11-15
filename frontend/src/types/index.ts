@@ -731,6 +731,13 @@ export interface FleetVehicle {
   note: string;
   /** stored photo name ('' = none); see fleetPhotoUrl */
   photo: string;
+  /** scans of its papers (stored image names, '' = none) */
+  registration_front: string;
+  registration_back: string;
+  insurance_front: string;
+  insurance_back: string;
+  ownership_front: string;
+  ownership_back: string;
   created_at: string;
   updated_at: string;
   /** whose home truck it is; driving_* = the truck that driver is on now (another one when away) */
@@ -781,6 +788,11 @@ export interface FleetAssignment {
 
 export const DRIVER_DOCUMENTS = ['license_front', 'license_back', 'id_front', 'id_back'] as const;
 export type DriverDocument = typeof DRIVER_DOCUMENTS[number];
+/** A truck's papers: đăng kiểm (registration), bảo hiểm (insurance), giấy đăng ký xe (ownership, if any) */
+export const VEHICLE_DOCUMENTS = ['registration_front', 'registration_back', 'insurance_front', 'insurance_back',
+  'ownership_front', 'ownership_back'] as const;
+export type VehicleDocument = typeof VEHICLE_DOCUMENTS[number];
+export type FleetDocumentImage = DriverDocument | VehicleDocument;
 export type FleetDocumentKind = 'registration' | 'insurance' | 'license' | 'trailer_registration' | 'trailer_insurance';
 export interface FleetDocument {
   kind: FleetDocumentKind;

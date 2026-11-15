@@ -1,12 +1,14 @@
 import React, { useRef, useState } from 'react';
-import { Check, Copy, CreditCard, IdCard, ImagePlus, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, ClipboardCheck, Copy, CreditCard, FileText, IdCard, ImagePlus, Loader2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { useObjectUrl } from '../../hooks/useObjectUrl';
-import { deleteFleetDriverDocumentApi, fleetPhotoUrl, uploadFleetDriverDocumentApi } from '../../services/api';
+import {
+  deleteFleetDriverDocumentApi, deleteFleetVehicleDocumentApi, fleetPhotoUrl, uploadFleetDriverDocumentApi, uploadFleetVehicleDocumentApi,
+} from '../../services/api';
 import { tf } from '../../services/i18nFormat';
-import type { DriverDocument, FleetDriver } from '../../types';
+import type { DriverDocument, FleetDriver, FleetVehicle, VehicleDocument } from '../../types';
 import { copyTextToClipboard } from '../../utils/formatters';
 import { photoProblem, type PhotoChoice } from './FleetPhoto';
 import { apiError } from './fleetUtils';
@@ -30,18 +32,32 @@ export const DriverSection: React.FC<{ title: string; children: React.ReactNode;
 // ---------------------------------------------------------------------------
 // A paper's row: icon + title, then [its facts | front | back]. Every row uses the same columns, so the sides line up.
 // ---------------------------------------------------------------------------
-export const PaperRow: React.FC<{ kind: 'license' | 'id'; facts: React.ReactNode; front: React.ReactNode; back: React.ReactNode }> = ({
-  kind, facts, front, back,
-}) => {
+export type PaperKind = 'license' | 'id' | 'registration' | 'insurance' | 'ownership';
+
+/** A paper's name, and its icon. */
+export const usePaperTitle = () => {
   const { t } = useApp();
   const D = t.fleet.detail;
+  return (kind: PaperKind) => ({ license: D.license, id: D.idCard, registration: D.inspection, insurance: D.insuranceDoc,
+    ownership: D.ownership })[kind];
+};
+const PAPER_ICON: Record<PaperKind, React.ElementType> = {
+  license: CreditCard, id: IdCard, registration: ClipboardCheck, insurance: ShieldCheck, ownership: FileText,
+};
+
+export const PaperRow: React.FC<{ kind: PaperKind; facts: React.ReactNode; front: React.ReactNode; back: React.ReactNode; hint?: string }> = ({
+  kind, facts, front, back, hint,
+}) => {
+  const title = usePaperTitle();
+  const Icon = PAPER_ICON[kind];
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5" data-testid={`paper-${kind}`}>
       <div className="flex items-center gap-2">
         <span className="p-1.5 rounded-lg bg-primary-50 dark:bg-primary-950/40 text-primary-600 dark:text-primary-300">
-          {kind === 'license' ? <CreditCard className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
+          <Icon className="w-4 h-4" />
         </span>
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{kind === 'license' ? D.license : D.idCard}</span>
+        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title(kind)}</span>
+        {hint && <span className="text-xs text-slate-400">{hint}</span>}
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-[14rem,1fr,1fr] items-start gap-3">
         <div className="col-span-2 sm:col-span-1 space-y-2">{facts}</div>
@@ -187,23 +203,30 @@ const PaperSlot: React.FC<SlotProps> = ({ testId, image, alt, doc, side, busy, o
 // ---------------------------------------------------------------------------
 // Details: a side saved and removed at once
 // ---------------------------------------------------------------------------
-interface TileProps {
-  driver: FleetDriver;
-  which: DriverDocument;
+type TileOwner = { kind: 'driver'; item: FleetDriver; which: DriverDocument } | { kind: 'vehicle'; item: FleetVehicle; which: VehicleDocument };
+type TileProps = TileOwner & {
   doc: string;
   side: string;
   onOpen: (photo: string, name: string) => void;
   onChanged: () => void;
-}
+};
 
-export const DocumentTile: React.FC<TileProps> = ({ driver, which, doc, side, onOpen, onChanged }) => {
+/** One side of a driver's or a truck's paper in its details: saved and removed at once. */
+export const DocumentTile: React.FC<TileProps> = (props) => {
+  const { doc, side, onOpen, onChanged } = props;
+  const owner = props.kind === 'driver' ? props.item.name : props.item.plate;
+  const which = props.which;
   const { t } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
   const D = t.fleet.detail;
   const [busy, setBusy] = useState(false);
-  const image = driver[which];
-  const label = tf(D.imageName, { doc, side, name: driver.name });
+  const image = props.kind === 'driver' ? props.item[props.which] : props.item[props.which];
+  const label = tf(D.imageName, { doc, side, name: owner });
+  const save = (file: File) => (props.kind === 'driver' ? uploadFleetDriverDocumentApi(props.item.id, props.which, file)
+    : uploadFleetVehicleDocumentApi(props.item.id, props.which, file));
+  const drop = () => (props.kind === 'driver' ? deleteFleetDriverDocumentApi(props.item.id, props.which)
+    : deleteFleetVehicleDocumentApi(props.item.id, props.which));
 
   const run = async (work: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -224,11 +247,11 @@ export const DocumentTile: React.FC<TileProps> = ({ driver, which, doc, side, on
       addToast(t.fleet.photo[problem], 'error');
       return;
     }
-    void run(() => uploadFleetDriverDocumentApi(driver.id, which, file), tf(D.saved, { doc, side }));
+    void run(() => save(file), tf(D.saved, { doc, side }));
   };
   const remove = async () => {
-    if (!(await confirm({ message: tf(D.removeConfirm, { doc, side, name: driver.name }), confirmText: D.removeImage, danger: true }))) return;
-    void run(() => deleteFleetDriverDocumentApi(driver.id, which), tf(D.removed, { doc, side }));
+    if (!(await confirm({ message: tf(D.removeConfirm, { doc, side, name: owner }), confirmText: D.removeImage, danger: true }))) return;
+    void run(drop, tf(D.removed, { doc, side }));
   };
 
   return (

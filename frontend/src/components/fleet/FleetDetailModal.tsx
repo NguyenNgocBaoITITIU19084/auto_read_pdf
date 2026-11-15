@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Copy, History, Loader2, Pencil } from 'lucide-react';
+import { History, Loader2, Pencil } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { useToastActions } from '../../context/ToastContext';
-import { fleetPhotoUrl, getFleetHistoryApi } from '../../services/api';
+import { useFieldSelection } from '../../hooks/useFieldSelection';
+import { fleetPhotoUrl, getFleetHistoryApi, getFleetTrailersApi } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
-import { copyTextToClipboard } from '../../utils/formatters';
-import type { FleetAssignment, FleetDriver, FleetVehicle } from '../../types';
+import type { CopyEntry } from '../../utils/fieldCopy';
+import type { FleetAssignment, FleetDriver, FleetTrailer, FleetVehicle } from '../../types';
+import { FieldCopyBar } from '../common/FieldCopyBar';
 import { Modal } from '../common/Modal';
 import { daysLeftText } from '../common/ReminderViews';
 import { FleetAvatar } from './FleetPhoto';
-import { DriverSection } from './DriverPapers';
+import { DocumentTile, DriverSection, PaperRow, usePaperTitle } from './DriverPapers';
 import { DriverDetailModal } from './DriverDetail';
+import { PickBox } from './FieldPick';
 import { EXPIRY_WARN_DAYS, daysUntil, formatIsoDate, formatStampShort, todayVnIso } from './fleetUtils';
 
 export type FleetDetailTarget = { kind: 'vehicle'; item: FleetVehicle } | { kind: 'driver'; item: FleetDriver };
@@ -24,24 +26,19 @@ export interface DetailAction {
 }
 
 const HISTORY_SHOWN = 5;
+const VALUE = 'text-sm font-semibold text-slate-800 dark:text-slate-100 break-words';
 
-const Row: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <>
-    <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
-    <dd className="font-medium text-slate-800 dark:text-slate-100 break-words">{children}</dd>
-  </>
-);
-
+/** A date and, once inside the reminder window, the days left. */
 const DateValue: React.FC<{ iso: string }> = ({ iso }) => {
   const { t } = useApp();
   const days = daysUntil(iso, todayVnIso());
-  if (days === null) return <span className="text-slate-400">{t.fleet.none}</span>;
+  if (days === null) return <span className="text-sm text-slate-400">{t.fleet.none}</span>;
   const warn = days <= EXPIRY_WARN_DAYS;
   return (
-    <span>
+    <span className={`${VALUE} flex flex-wrap items-center gap-2`}>
       {formatIsoDate(iso)}
       {warn && (
-        <span className={`ml-2 inline-block whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${days < 0
+        <span className={`inline-block whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${days < 0
           ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
           : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'}`}>
           {daysLeftText(days, t)}
@@ -51,9 +48,8 @@ const DateValue: React.FC<{ iso: string }> = ({ iso }) => {
   );
 };
 
-
 const Person: React.FC<{ photo: string; name: string; lines: React.ReactNode[] }> = ({ photo, name, lines }) => (
-  <div className="flex items-center gap-2.5">
+  <div className="flex items-center gap-2.5 mt-1">
     <FleetAvatar photo={photo} kind="driver" name={name} size="sm" />
     <div className="min-w-0">
       <div className="font-semibold text-slate-800 dark:text-slate-100">{name}</div>
@@ -69,60 +65,94 @@ interface Props {
   onShowHistory: () => void;
   onEdit: () => void;
   actions: DetailAction[];
-  /** after a change made here (a driver's licence / CCCD scan): reload the row */
+  /** after a change made here (a driver's edits, scans, photo): reload the row */
   onChanged?: () => void;
 }
 
 /** Everything about one truck or driver, opened by double-clicking its row. Its actions are the row's own. A driver's
- *  details are DriverDetailModal (edited in place). */
+ *  details are edited in place (DriverDetailModal); a truck's are read here. Both let boxes be picked and copied
+ *  together, like the booking details. */
 export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto, onShowHistory, onEdit, actions, onChanged }) => {
-  const { t } = useApp();
-  const { addToast } = useToastActions();
-  const f = t.fleet;
-  const D = f.detail;
-  const [history, setHistory] = useState<FleetAssignment[] | null>(null);
-  const key = target ? `${target.kind}-${target.item.id}-${target.item.updated_at}` : '';
-
-  useEffect(() => {
-    if (!target || target.kind === 'driver') return; // a driver's details load their own (DriverDetailModal)
-    let alive = true;
-    setHistory(null);
-    getFleetHistoryApi({ vehicle_id: target.item.id, limit: HISTORY_SHOWN })
-      .then((rows) => alive && setHistory(rows))
-      .catch(() => alive && setHistory([]));
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-
   if (!target) return null;
-  // a driver's details are edited in place, with their own save and copy bar
   if (target.kind === 'driver') {
     return (
       <DriverDetailModal driver={target.item} onClose={onClose} onOpenPhoto={onOpenPhoto} onShowHistory={onShowHistory}
         actions={actions} onChanged={() => onChanged?.()} />
     );
   }
+  return (
+    <VehicleDetailModal vehicle={target.item} onClose={onClose} onOpenPhoto={onOpenPhoto} onShowHistory={onShowHistory}
+      onEdit={onEdit} actions={actions} onChanged={() => onChanged?.()} />
+  );
+};
 
-  const v = target.item;
-  const copyPhone = async (phone: string) => {
-    const ok = await copyTextToClipboard(phone);
-    addToast(ok ? tf(D.phoneCopied, { phone }) : f.toast.error, ok ? 'success' : 'error');
-  };
-  const phoneLine = (phone: string) => phone ? (
-    <button type="button" onClick={() => void copyPhone(phone)} title={D.copyPhone} aria-label={`${D.copyPhone} ${phone}`}
-      className="inline-flex items-center gap-1 hover:text-primary-600">
-      {phone}<Copy className="w-3 h-3" />
-    </button>
-  ) : null;
+const VehicleDetailModal: React.FC<{
+  vehicle: FleetVehicle; onClose: () => void; onOpenPhoto: (photo: string, name: string) => void; onShowHistory: () => void;
+  onEdit: () => void; actions: DetailAction[]; onChanged: () => void;
+}> = ({ vehicle: v, onClose, onOpenPhoto, onShowHistory, onEdit, actions, onChanged }) => {
+  const paperTitle = usePaperTitle();
+  const { t } = useApp();
+  const f = t.fleet;
+  const D = f.detail;
+  const VF = f.vehicleForm;
+  const [history, setHistory] = useState<FleetAssignment[] | null>(null);
+  // the trailer it pulls, for its type / photo / since (the truck row carries only the plate)
+  const [trailer, setTrailer] = useState<FleetTrailer | null>(null);
+  const picked = useFieldSelection(v.id);
+
+  useEffect(() => {
+    let alive = true;
+    if (!v.trailer_plate) {
+      setTrailer(null);
+      return;
+    }
+    getFleetTrailersApi()
+      .then((list) => alive && setTrailer(list.find((r) => r.vehicle?.id === v.id) || null))
+      .catch(() => alive && setTrailer(null));
+    return () => { alive = false; };
+  }, [v.id, v.trailer_plate]);
+
+  useEffect(() => {
+    let alive = true;
+    setHistory(null);
+    getFleetHistoryApi({ vehicle_id: v.id, limit: HISTORY_SHOWN })
+      .then((rows) => alive && setHistory(rows))
+      .catch(() => alive && setHistory([]));
+    return () => { alive = false; };
+  }, [v.id, v.updated_at]);
+
   const statusTone = v.status === 'active' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
     : v.status === 'broken' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
       : v.status === 'maintenance' ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
         : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400';
+  const c = v.current_driver;
+  const trailerFacts = trailer ? [trailer.trailer_type, trailer.payload].filter(Boolean).join(' · ') : '';
+
+  // what the boxes copy, in the order shown (the copy bar copies the picked ones in this order)
+  const entries: CopyEntry[] = [
+    { key: 'plate', label: VF.plate, value: v.plate },
+    { key: 'status', label: VF.status, value: f.vehicleStatus[v.status] },
+    { key: 'type', label: VF.type, value: v.vehicle_type },
+    { key: 'driver', label: D.driving, value: c ? [c.name, c.phone].filter(Boolean).join(' – ') : '' },
+    { key: 'trailer', label: t.tabs.trailers, value: [v.trailer_plate, trailerFacts].filter(Boolean).join(' – ') },
+    { key: 'registration', label: VF.registration, value: formatIsoDate(v.registration_expiry) },
+    { key: 'insurance', label: VF.insurance, value: formatIsoDate(v.insurance_expiry) },
+    { key: 'note', label: VF.note, value: v.note },
+    { key: 'created', label: D.added, value: formatStampShort(v.created_at) },
+  ];
+  const value = (key: string) => entries.find((e) => e.key === key)?.value || '';
+  const label = (key: string) => entries.find((e) => e.key === key)?.label || '';
+  const box = (key: string, content?: React.ReactNode, className = '') => (
+    <PickBox id={key} label={label(key)} copyValue={value(key)} picked={picked} className={className}>
+      {content ?? (value(key) ? <div className={VALUE}>{value(key)}</div> : <div className="text-sm text-slate-400">{f.none}</div>)}
+    </PickBox>
+  );
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(D.vehicleTitle, { plate: v.plate })} maxWidth="max-w-2xl">
+    <Modal isOpen onClose={onClose} title={tf(D.vehicleTitle, { plate: v.plate })} maxWidth="max-w-3xl">
       <div className="space-y-5" data-testid="fleet-detail">
-        <div className="flex items-center gap-4">
+        {/* the truck: photo, then plate / status / type */}
+        <div className="flex items-start gap-4">
           {v.photo ? (
             <button type="button" onClick={() => onOpenPhoto(v.photo, v.plate)} aria-label={tf(f.photo.view, { name: v.plate })}
               className="shrink-0 overflow-hidden cursor-zoom-in ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-primary-400 w-48 h-32 rounded-xl">
@@ -131,46 +161,65 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
           ) : (
             <FleetAvatar photo="" kind="vehicle" name={v.plate} size="wide" />
           )}
-          <div className="min-w-0 space-y-1.5">
-            <div className="text-xl font-bold text-slate-900 dark:text-slate-100">{v.plate}</div>
-            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>{f.vehicleStatus[v.status]}</span>
-            {v.vehicle_type && <div className="text-sm text-slate-500 dark:text-slate-400">{v.vehicle_type}</div>}
+          <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+            {box('plate', <div className="text-lg font-bold text-slate-900 dark:text-slate-100">{v.plate}</div>, 'col-span-2')}
+            {box('status', <span className={`mt-0.5 self-start inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>{f.vehicleStatus[v.status]}</span>)}
+            {box('type')}
           </div>
         </div>
 
-        <DriverSection title={D.driving}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-            <div>
-              <div className="mb-1.5 text-[11px] text-slate-400">{D.driving}</div>
-              {v.current_driver ? (
-                <Person photo={v.current_driver.photo} name={v.current_driver.name} lines={[
-                  phoneLine(v.current_driver.phone),
-                  v.current_driver.kind === 'temporary' ? f.kind.temporary : null,
-                  v.current_driver.since ? tf(D.since, { time: formatStampShort(v.current_driver.since) }) : null,
-                ]} />
-              ) : <span className="text-sm text-slate-400">{f.noDriver}</span>}
-            </div>
-            <div>
-              <div className="mb-1.5 text-[11px] text-slate-400">{D.owner}</div>
-              {v.home_driver ? (
-                <Person photo={v.home_driver.photo} name={v.home_driver.name} lines={[
-                  v.home_driver.status !== 'active' ? f.driverStatus[v.home_driver.status] : null,
-                  v.home_driver.driving_vehicle_id && v.home_driver.driving_vehicle_id !== v.id
-                    ? tf(f.homeAway, { plate: v.home_driver.driving_plate }) : null,
-                ]} />
-              ) : <span className="text-sm text-slate-400">{f.none}</span>}
-            </div>
+        <div className="space-y-1.5">
+          <FieldCopyBar entries={entries} {...picked.barProps} />
+          <p className="text-[11px] text-slate-400">{D.pickHint}</p>
+        </div>
+
+        <DriverSection title={D.crew}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {box('driver', c ? (
+              <Person photo={c.photo} name={c.name} lines={[
+                c.phone,
+                c.kind === 'temporary' ? f.kind.temporary : null,
+                c.since ? tf(D.since, { time: formatStampShort(c.since) }) : null,
+              ]} />
+            ) : <div className="text-sm text-slate-400">{f.noDriver}</div>)}
+            {box('trailer', v.trailer_plate ? (
+              <div className="flex items-center gap-2.5 mt-1">
+                <FleetAvatar photo={trailer?.photo || ''} kind="trailer" name={v.trailer_plate} size="wideSm" />
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-800 dark:text-slate-100">{v.trailer_plate}</div>
+                  {trailerFacts && <div className="text-xs text-slate-500 dark:text-slate-400">{trailerFacts}</div>}
+                  {trailer?.vehicle?.since && (
+                    <div className="text-xs text-slate-500 dark:text-slate-400">{tf(D.since, { time: formatStampShort(trailer.vehicle.since) })}</div>
+                  )}
+                </div>
+              </div>
+            ) : <div className="text-sm text-slate-400">{D.noTrailer}</div>)}
           </div>
         </DriverSection>
 
-        <DriverSection title={D.info}>
-          <dl className="grid grid-cols-[auto,1fr] gap-x-6 gap-y-2 text-sm">
-            <Row label={f.vehicleForm.trailer}>{v.trailer_plate || f.none}</Row>
-            <Row label={f.vehicleForm.registration}><DateValue iso={v.registration_expiry} /></Row>
-            <Row label={f.vehicleForm.insurance}><DateValue iso={v.insurance_expiry} /></Row>
-            <Row label={f.vehicleForm.note}><span className="whitespace-pre-wrap">{v.note || f.none}</span></Row>
-            <Row label={D.added}>{formatStampShort(v.created_at)}</Row>
-          </dl>
+        {/* its papers, laid out like a driver's: the facts, then front and back scans (saved at once) */}
+        <DriverSection title={D.papers}>
+          <div className="space-y-3">
+            {(['registration', 'insurance', 'ownership'] as const).map((kind) => {
+              const tile = (side: 'front' | 'back') => (
+                <DocumentTile kind="vehicle" item={v} which={`${kind}_${side}`} doc={paperTitle(kind)}
+                  side={side === 'front' ? D.front : D.back} onOpen={onOpenPhoto} onChanged={onChanged} />
+              );
+              return (
+                <PaperRow key={kind} kind={kind} front={tile('front')} back={tile('back')}
+                  hint={kind === 'ownership' ? D.ifAny : undefined}
+                  facts={kind === 'registration' ? box('registration', <DateValue iso={v.registration_expiry} />)
+                    : kind === 'insurance' ? box('insurance', <DateValue iso={v.insurance_expiry} />) : null} />
+              );
+            })}
+          </div>
+        </DriverSection>
+
+        <DriverSection title={D.other}>
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr,14rem] gap-2 items-start">
+            {box('note', v.note ? <div className={`${VALUE} whitespace-pre-wrap font-medium`}>{v.note}</div> : undefined)}
+            {box('created')}
+          </div>
         </DriverSection>
 
         <DriverSection title={D.history} extra={
@@ -184,15 +233,15 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
             <p className="text-sm text-slate-400">{D.noHistory}</p>
           ) : (
             <ol className="space-y-1.5">
-              {history.map((h) => (
-                <li key={h.id} className="flex items-start gap-2.5 text-sm">
-                  <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${h.ended_at ? 'bg-slate-300 dark:bg-slate-600' : 'bg-emerald-500'}`} />
+              {history.map((row) => (
+                <li key={row.id} className="flex items-start gap-2.5 text-sm">
+                  <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${row.ended_at ? 'bg-slate-300 dark:bg-slate-600' : 'bg-emerald-500'}`} />
                   <span className="min-w-0">
-                    <span className="font-semibold text-slate-800 dark:text-slate-100">{h.driver_name}</span>
-                    {h.kind === 'temporary' && <span className="ml-1.5 text-xs text-sky-700 dark:text-sky-300">{f.kind.temporary}</span>}
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">{row.driver_name}</span>
+                    {row.kind === 'temporary' && <span className="ml-1.5 text-xs text-sky-700 dark:text-sky-300">{f.kind.temporary}</span>}
                     <span className="block text-xs text-slate-500 dark:text-slate-400 tabular-nums">
-                      {formatStampShort(h.started_at)} → {h.ended_at ? formatStampShort(h.ended_at) : f.stillOpen}
-                      {(h.end_reason || h.reason) && ` · ${h.end_reason || h.reason}`}
+                      {formatStampShort(row.started_at)} → {row.ended_at ? formatStampShort(row.ended_at) : f.stillOpen}
+                      {(row.end_reason || row.reason) && ` · ${row.end_reason || row.reason}`}
                     </span>
                   </span>
                 </li>

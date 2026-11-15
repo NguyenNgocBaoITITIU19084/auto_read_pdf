@@ -57,9 +57,15 @@ PHOTO_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers", "trail
 # Scans of a driver's papers, front and back: a column of fleet_drivers each, stored like photos but larger
 DRIVER_DOCUMENTS = ("license_front", "license_back", "id_front", "id_back")
 DOCUMENT_MAX_SIDE = 2000
+# ... and of a truck's: đăng kiểm (registration, as registration_expiry), bảo hiểm, giấy đăng ký xe (ownership, if any)
+VEHICLE_DOCUMENTS = ("registration_front", "registration_back", "insurance_front", "insurance_back",
+                     "ownership_front", "ownership_back")
+DOCUMENTS = {"driver": DRIVER_DOCUMENTS, "vehicle": VEHICLE_DOCUMENTS}
 # the image columns of each table (all deleted with the row when it is purged)
-IMAGE_COLUMNS = {"fleet_vehicles": ("photo",), "fleet_drivers": ("photo", *DRIVER_DOCUMENTS), "fleet_trailers": ("photo",)}
-_PHOTO_NAME = re.compile(r"^(vehicle|driver|trailer)_\d+_(?:(?:license|id)_(?:front|back)_)?[0-9a-f]{8}\.jpg$")
+IMAGE_COLUMNS = {"fleet_vehicles": ("photo", *VEHICLE_DOCUMENTS), "fleet_drivers": ("photo", *DRIVER_DOCUMENTS),
+                 "fleet_trailers": ("photo",)}
+_PHOTO_NAME = re.compile(r"^(vehicle|driver|trailer)_\d+_"
+                         r"(?:(?:license|id|registration|insurance|ownership)_(?:front|back)_)?[0-9a-f]{8}\.jpg$")
 _NOT_FOUND = {"vehicle": "Không tìm thấy xe", "driver": "Không tìm thấy tài xế", "trailer": "Không tìm thấy moóc"}
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -155,10 +161,11 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
         if "deleted_at" not in columns:
             # set = in the trash (see "Trash"): hidden everywhere, restorable for TRASH_KEEP_DAYS days
             conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT;")
-    driver_columns = {r[1] for r in conn.execute("PRAGMA table_info(fleet_drivers);")}
-    for column in DRIVER_DOCUMENTS:
-        if column not in driver_columns:
-            conn.execute(f"ALTER TABLE fleet_drivers ADD COLUMN {column} TEXT NOT NULL DEFAULT '';")
+    for table, documents in (("fleet_drivers", DRIVER_DOCUMENTS), ("fleet_vehicles", VEHICLE_DOCUMENTS)):
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table});")}
+        for column in documents:
+            if column not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT '';")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_fleet_drivers_home ON fleet_drivers(home_vehicle_id) "
                  "WHERE home_vehicle_id IS NOT NULL;")
     conn.execute("""
@@ -255,7 +262,8 @@ def list_vehicles() -> list[dict]:
         h = homes.get(v["id"])
         c = current.get(v["id"])
         item = {k: v[k] for k in ("id", "plate", "trailer_plate", "vehicle_type", "registration_expiry",
-                                  "insurance_expiry", "status", "note", "photo", "created_at", "updated_at")}
+                                  "insurance_expiry", "status", "note", "photo", *VEHICLE_DOCUMENTS,
+                                  "created_at", "updated_at")}
         item["home_driver"] = None
         if h:
             where = away.get(h["id"])
@@ -931,21 +939,29 @@ def remove_photo(entity: str, entity_id: int) -> None:
     _clear_image(entity, entity_id, "photo")
 
 
-def _document_column(which: str) -> str:
-    if which not in DRIVER_DOCUMENTS:
+def _document_column(entity: str, which: str) -> str:
+    if which not in DOCUMENTS[entity]:
         raise FleetError(f"Loại giấy tờ không hợp lệ: {which}")
     return which
 
 
+def set_document(entity: str, entity_id: int, which: str, data: bytes) -> str:
+    """Store a scan of a driver's / truck's papers (`which`: one of DOCUMENTS[entity]), kept larger than a photo so
+    its text stays readable. Returns the new name."""
+    column = _document_column(entity, which)
+    return _store_image(entity, entity_id, column, _to_jpeg(data, DOCUMENT_MAX_SIDE, 90))
+
+
+def remove_document(entity: str, entity_id: int, which: str) -> None:
+    _clear_image(entity, entity_id, _document_column(entity, which))
+
+
 def set_driver_document(driver_id: int, which: str, data: bytes) -> str:
-    """Store a scan of the driver's licence / CCCD (`which`: license_front, license_back, id_front, id_back), kept
-    larger than a photo so its text stays readable. Returns the new name."""
-    column = _document_column(which)
-    return _store_image("driver", driver_id, column, _to_jpeg(data, DOCUMENT_MAX_SIDE, 90))
+    return set_document("driver", driver_id, which, data)
 
 
 def remove_driver_document(driver_id: int, which: str) -> None:
-    _clear_image("driver", driver_id, _document_column(which))
+    remove_document("driver", driver_id, which)
 
 
 # ---------------------------------------------------------------------------

@@ -274,6 +274,20 @@ def delete_driver_document(driver_id: int, which: str):
     return _driver(driver_id)
 
 
+@router.post("/vehicles/{vehicle_id}/documents/{which}")
+async def upload_vehicle_document(vehicle_id: int, which: str, file: UploadFile = File(...)):
+    """A scan of the truck's papers: which = registration_front / _back (đăng kiểm), insurance_front / _back,
+    ownership_front / _back (giấy đăng ký xe)."""
+    _run(fleet.set_document, "vehicle", vehicle_id, which, await file.read())
+    return _vehicle(vehicle_id)
+
+
+@router.delete("/vehicles/{vehicle_id}/documents/{which}")
+def delete_vehicle_document(vehicle_id: int, which: str):
+    _run(fleet.remove_document, "vehicle", vehicle_id, which)
+    return _vehicle(vehicle_id)
+
+
 @router.get("/photos/{name}")
 def get_photo(name: str):
     """A stored photo. Names change with every upload, so it can be cached for good."""

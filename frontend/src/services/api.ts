@@ -6,7 +6,7 @@ import {
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
   FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
-  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
+  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, VehicleDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -876,6 +876,11 @@ export const uploadFleetDriverPhotoApi = (id: number, file: Blob) => uploadPhoto
 export const deleteFleetDriverPhotoApi = async (id: number): Promise<FleetDriver> =>
   (await apiClient.delete<FleetDriver>(`/fleet/drivers/${id}/photo`)).data;
 
+/** A scan of a truck's đăng kiểm / bảo hiểm / đăng ký xe, front or back. */
+export const uploadFleetVehicleDocumentApi = (id: number, which: VehicleDocument, file: Blob) =>
+  uploadPhoto<FleetVehicle>(`/fleet/vehicles/${id}/documents/${which}`, file);
+export const deleteFleetVehicleDocumentApi = async (id: number, which: VehicleDocument): Promise<FleetVehicle> =>
+  (await apiClient.delete<FleetVehicle>(`/fleet/vehicles/${id}/documents/${which}`)).data;
 /** A scan of the driver's licence / CCCD, front or back. */
 export const uploadFleetDriverDocumentApi = (id: number, which: DriverDocument, file: Blob) =>
   uploadPhoto<FleetDriver>(`/fleet/drivers/${id}/documents/${which}`, file);
