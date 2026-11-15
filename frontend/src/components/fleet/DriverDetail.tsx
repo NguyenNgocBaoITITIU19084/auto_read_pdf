@@ -29,6 +29,31 @@ type Selection = ReturnType<typeof useFieldSelection>;
 
 /** A box of the details that is both edited in place and picked for copying (like the booking details): its text is
  *  an input; a click on the box around it selects it; the copy button copies it at once. */
+/** A box's look: picked wins (blue), then edited (amber), else plain. One class set each, so they never fight. */
+const boxTone = (selected: boolean, dirty: boolean) =>
+  selected ? 'border-primary-400 dark:border-primary-500 bg-primary-50/80 dark:bg-primary-950/40'
+    : dirty ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/20'
+      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80';
+
+/** The box's name with a tick in front: one click picks it for copying, the next one unpicks it (the text below is
+ *  for editing, so picking has its own target). */
+const PickToggle: React.FC<{ id: string; label: string; picked: Selection; disabled?: boolean }> = ({ id, label, picked, disabled }) => {
+  const selected = picked.selected.has(id);
+  return (
+    <button type="button" role="checkbox" aria-checked={selected} disabled={disabled} onClick={() => picked.toggle(id)}
+      data-testid={`pick-${id}`}
+      className="group/pick -ml-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-primary-50 dark:hover:bg-primary-950/40 disabled:cursor-default disabled:hover:bg-transparent">
+      <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors ${selected
+        ? 'border-primary-500 bg-primary-600 text-white'
+        : 'border-slate-300 dark:border-slate-600 group-hover/pick:border-primary-400 group-disabled/pick:opacity-40'}`}>
+        {selected && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+      </span>
+      <span className={`truncate text-[10px] font-semibold uppercase tracking-wider ${selected
+        ? 'text-primary-700 dark:text-primary-300' : 'text-slate-500 dark:text-slate-400'}`}>{label}</span>
+    </button>
+  );
+};
+
 const EditBox: React.FC<{
   id: string; label: string; copyValue: string; picked: Selection; dirty: boolean; className?: string;
   badge?: React.ReactNode; children: React.ReactElement;
@@ -45,13 +70,13 @@ const EditBox: React.FC<{
       setTimeout(() => setCopied(false), 1500);
     }
   };
+  const selected = picked.selected.has(id);
   return (
-    <div {...picked.cardProps(id, empty)} data-testid={`driver-field-${id}`}
+    <div data-testid={`driver-field-${id}`} data-selected={selected || undefined}
       className={`flex flex-col px-2.5 py-1.5 rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-primary-500/30 ${
-        dirty ? 'border-amber-400 dark:border-amber-500 bg-amber-50/50 dark:bg-amber-950/20'
-          : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700'} ${picked.cardClass(id, empty)} ${className}`}>
+        boxTone(selected, dirty)} ${className}`}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</span>
+        <PickToggle id={id} label={label} picked={picked} disabled={empty} />
         {!empty && (
           <button type="button" onClick={() => void copy()} title={t.common.copy} aria-label={`${t.common.copy} ${label}`}
             className="p-0.5 rounded text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
@@ -237,9 +262,9 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
             ))}
             {isDirty('status') && <p className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{F.statusHint}</p>}
           </div>
-          <div {...picked.cardProps('vehicle', !current)} data-testid="driver-current-vehicle"
-            className={`self-start min-w-[13rem] rounded-xl border border-slate-200 dark:border-slate-700 p-3 ${picked.cardClass('vehicle', !current)}`}>
-            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{D.currentVehicle}</div>
+          <div data-testid="driver-current-vehicle"
+            className={`self-start min-w-[13rem] rounded-xl border p-3 transition-colors ${boxTone(picked.selected.has('vehicle'), false)}`}>
+            <div className="mb-1.5"><PickToggle id="vehicle" label={D.currentVehicle} picked={picked} disabled={!current} /></div>
             {current ? (
               <div className="flex items-center gap-2.5">
                 <FleetAvatar photo={current.photo} kind="vehicle" name={current.plate} size="wideSm" />

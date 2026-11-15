@@ -584,14 +584,21 @@ describe('FleetTab driver details', () => {
     const detail = await open();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    fireEvent.click(screen.getByTestId('driver-field-name'));
-    fireEvent.click(screen.getByTestId('driver-field-id_number'));
-    fireEvent.click(screen.getByTestId('driver-current-vehicle'));
+    fireEvent.click(screen.getByTestId('pick-name'));
+    fireEvent.click(screen.getByTestId('pick-id_number'));
+    fireEvent.click(screen.getByTestId('pick-vehicle'));
+    expect(screen.getByTestId('pick-name')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('driver-field-name')).toHaveAttribute('data-selected', 'true');
     fireEvent.click(within(detail).getByText(translations.vi.common.fieldCopy.copyLabeled));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${F.name}: An\n${D.currentVehicle}: 51C-1\n${F.idNumber}: 079091006789`));
+    // one more click unpicks it at once, even right after (no double-click guessing)
+    fireEvent.click(screen.getByTestId('pick-name'), { detail: 2 });
+    expect(screen.getByTestId('pick-name')).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByTestId('pick-name'), { detail: 3 });
+    expect(screen.getByTestId('pick-name')).toHaveAttribute('aria-checked', 'true');
     // a click in the text edits it, it does not pick the box
     fireEvent.click(within(detail).getByLabelText(F.licenseClass));
-    expect(screen.getByTestId('driver-field-license_class')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('pick-license_class')).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(within(screen.getByTestId('driver-field-license_no')).getByLabelText(`${translations.vi.common.copy} ${F.licenseNo}`));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('790123'));
   });
