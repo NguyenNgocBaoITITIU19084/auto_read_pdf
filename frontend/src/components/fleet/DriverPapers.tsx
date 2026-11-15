@@ -114,32 +114,31 @@ const DocumentTile: React.FC<TileProps> = ({ driver, which, doc, side, onOpen, o
 interface CardProps {
   driver: FleetDriver;
   kind: 'license' | 'id';
-  /** the card's facts (number, class, expiry), shown above its two sides */
+  /** the card's facts (number, class, expiry), one per line, left of its two sides */
   facts: React.ReactNode;
   onOpen: (photo: string, name: string) => void;
   onChanged: () => void;
 }
 
-/** A licence or CCCD: its facts and both sides. */
+/** A licence or CCCD on one row: its facts, then both sides. Rows share the same columns, so the sides line up. */
 export const DriverPaperCard: React.FC<CardProps> = ({ driver, kind, facts, onOpen, onChanged }) => {
   const { t } = useApp();
   const D = t.fleet.detail;
   const doc = kind === 'license' ? D.license : D.idCard;
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5">
-      <div className="flex items-start gap-2.5">
+    <div className="grid grid-cols-2 sm:grid-cols-[13rem,1fr,1fr] items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3"
+      data-testid={`paper-${kind}`}>
+      <div className="col-span-2 sm:col-span-1 flex items-start gap-2.5 min-w-0">
         <span className="p-1.5 rounded-lg bg-primary-50 dark:bg-primary-950/40 text-primary-600 dark:text-primary-300">
           {kind === 'license' ? <CreditCard className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
         </span>
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-1">
           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{doc}</div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">{facts}</div>
+          <div className="space-y-0.5 text-xs text-slate-500 dark:text-slate-400">{facts}</div>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <DocumentTile driver={driver} which={`${kind}_front`} doc={doc} side={D.front} onOpen={onOpen} onChanged={onChanged} />
-        <DocumentTile driver={driver} which={`${kind}_back`} doc={doc} side={D.back} onOpen={onOpen} onChanged={onChanged} />
-      </div>
+      <DocumentTile driver={driver} which={`${kind}_front`} doc={doc} side={D.front} onOpen={onOpen} onChanged={onChanged} />
+      <DocumentTile driver={driver} which={`${kind}_back`} doc={doc} side={D.back} onOpen={onOpen} onChanged={onChanged} />
     </div>
   );
 };

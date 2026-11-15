@@ -40,7 +40,7 @@ const DateValue: React.FC<{ iso: string }> = ({ iso }) => {
     <span>
       {formatIsoDate(iso)}
       {warn && (
-        <span className={`ml-2 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${days < 0
+        <span className={`ml-2 inline-block whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${days < 0
           ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
           : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'}`}>
           {daysLeftText(days, t)}
@@ -192,16 +192,16 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
           </Section>
         ) : (
           <Section title={D.papers}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-3">
               <DriverPaperCard driver={target.item} kind="license" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} facts={
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span>{D.licenseClass} <b className="font-semibold text-slate-700 dark:text-slate-200">{target.item.license_class || f.none}</b></span>
-                  <span>· {D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.license_no || f.none}</b></span>
-                  <span>· {D.expiry} <b className="font-semibold text-slate-700 dark:text-slate-200"><DateValue iso={target.item.license_expiry} /></b></span>
-                </span>
+                <>
+                  <div>{D.licenseClass} <b className="font-semibold text-slate-700 dark:text-slate-200">{target.item.license_class || f.none}</b></div>
+                  <div>{D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.license_no || f.none}</b></div>
+                  <div>{D.expiry} <b className="font-semibold text-slate-700 dark:text-slate-200"><DateValue iso={target.item.license_expiry} /></b></div>
+                </>
               } />
               <DriverPaperCard driver={target.item} kind="id" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} facts={
-                <span>{D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.id_number || f.none}</b></span>
+                <div>{D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.id_number || f.none}</b></div>
               } />
             </div>
           </Section>
