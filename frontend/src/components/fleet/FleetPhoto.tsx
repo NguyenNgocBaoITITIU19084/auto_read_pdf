@@ -91,8 +91,9 @@ export const PhotoLightbox: React.FC<{ photo: string | null; name: string; onClo
         onClose();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // capture: closes only the photo, not a dialog open underneath it
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [photo, onClose]);
   if (!photo) return null;
   return (

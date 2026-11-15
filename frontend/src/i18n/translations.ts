@@ -1455,6 +1455,13 @@ export const translations = {
       },
       menu: { more: "Thêm thao tác", edit: "Sửa thông tin", status: "Đổi trạng thái", move: "Đổi xe", history: "Xem lịch sử", delete: "Xóa" },
       quick: { report: "Báo hư", repaired: "Đã sửa xong" },
+      detail: {
+        vehicleTitle: "Chi tiết xe {plate}", driverTitle: "Chi tiết tài xế {name}", open: "Xem chi tiết",
+        driving: "Đang lái", owner: "Tài xế cố định", homeVehicle: "Xe cố định", currentVehicle: "Đang lái xe",
+        info: "Thông tin", history: "Lịch sử gần đây", allHistory: "Xem toàn bộ lịch sử", noHistory: "Chưa có lịch sử phân công.",
+        since: "từ {time}", added: "Ngày thêm", updated: "Cập nhật", copyPhone: "Sao chép số điện thoại", phoneCopied: "Đã sao chép {phone}",
+        hint: "Nhấp đúp vào một dòng để xem chi tiết · nhấp chuột phải để mở menu",
+      },
       confirmDeleteVehicle: "Xóa xe {plate}? Tài xế đang lái sẽ xuống xe, lịch sử phân công vẫn được giữ.",
       confirmDeleteDriver: "Xóa tài xế {name}? Lịch sử phân công vẫn được giữ.",
       toast: {
@@ -3003,6 +3010,13 @@ export const translations = {
       },
       menu: { more: "More actions", edit: "Edit details", status: "Change status", move: "Change truck", history: "View history", delete: "Delete" },
       quick: { report: "Report breakdown", repaired: "Repaired" },
+      detail: {
+        vehicleTitle: "Truck {plate}", driverTitle: "Driver {name}", open: "View details",
+        driving: "Driven by", owner: "Assigned driver", homeVehicle: "Own truck", currentVehicle: "Driving",
+        info: "Details", history: "Recent history", allHistory: "View full history", noHistory: "No assignment history yet.",
+        since: "since {time}", added: "Added", updated: "Updated", copyPhone: "Copy phone number", phoneCopied: "Copied {phone}",
+        hint: "Double-click a row for details · right-click for the menu",
+      },
       confirmDeleteVehicle: "Delete truck {plate}? Its driver gets off it; the assignment history is kept.",
       confirmDeleteDriver: "Delete driver {name}? The assignment history is kept.",
       toast: {

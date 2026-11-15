@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeftRight, CheckCircle2, History, Loader2, Pencil, Plus, RefreshCw, Search, StickyNote, Trash2, Truck,
-  Undo2, Wrench, X,
+  AlertTriangle, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search, StickyNote,
+  Trash2, Truck, Undo2, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -15,7 +15,8 @@ import type { DriverStatus, FleetAssignment, FleetDocumentKind, FleetDriver, Fle
 import { daysLeftText } from '../common/ReminderViews';
 import { DriverFormModal, DriverMoveModal, VehicleFormModal, VehicleStatusModal } from './FleetModals';
 import { FleetAvatar, PhotoLightbox } from './FleetPhoto';
-import { RowMenu } from './RowMenu';
+import { RowContextMenu, useRowContextMenu, type MenuGroup } from '../common/RowContextMenu';
+import { FleetDetailModal, type DetailAction, type FleetDetailTarget } from './FleetDetailModal';
 import {
   EXPIRY_WARN_DAYS, apiError, awayHomeDrivers, canReturnHome, daysUntil, formatIsoDate, formatStampShort, matches, todayVnIso,
 } from './fleetUtils';
@@ -24,6 +25,7 @@ type View = 'vehicles' | 'drivers' | 'history';
 type HistoryFilter = { driver_id?: number; vehicle_id?: number; label: string } | null;
 type VehicleFilter = 'all' | 'running' | 'down' | 'free' | 'expiring';
 type DriverFilter = 'all' | 'idle' | 'temporary' | 'expiring';
+type RowRef = { kind: 'vehicle' | 'driver'; id: number };
 
 const VIEW_KEY = 'fleet.view';
 
@@ -65,6 +67,10 @@ const readView = (): View => {
 const TH = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 whitespace-nowrap';
 const TD = 'px-4 py-3 align-middle';
 const MUTED = 'text-xs text-slate-500 dark:text-slate-400';
+const ROW = 'cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500';
+
+/** A double-click on a button / link inside a row is that control's, not the row's. */
+const fromControl = (e: React.SyntheticEvent) => !!(e.target as HTMLElement).closest('button, a, input, select, textarea');
 
 interface DocWarning { kind: FleetDocumentKind; days: number; date: string }
 
@@ -137,6 +143,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const [statusFor, setStatusFor] = useState<FleetVehicle | null>(null);
   const [moveFor, setMoveFor] = useState<FleetDriver | null>(null);
   const [viewing, setViewing] = useState<{ photo: string; name: string } | null>(null);
+  const [detail, setDetail] = useState<RowRef | null>(null);
+  const menu = useRowContextMenu<RowRef>();
   const closeViewer = useCallback(() => setViewing(null), []);
   const openPhoto = (photo: string, name: string) => () => setViewing({ photo, name });
   const today = todayVnIso();
@@ -279,6 +287,104 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     }
   };
 
+  // ---- one place for each row's actions: the right-click / "⋯" menu and the detail window use them alike ----
+  const vehicleMain = (v: FleetVehicle): DetailAction | null =>
+    v.status === 'active' ? { label: f.quick.report, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v), primary: true }
+      : v.status === 'broken' || v.status === 'maintenance'
+        ? { label: f.quick.repaired, icon: <CheckCircle2 className="w-4 h-4" />, onClick: () => void markRepaired(v), primary: true }
+        : null;
+  const driverMain = (d: FleetDriver): DetailAction[] => {
+    const move = { label: f.actions.move, icon: <ArrowLeftRight className="w-4 h-4" />, onClick: () => setMoveFor(d) };
+    if (canReturnHome(d, vs)) {
+      return [move, { label: f.actions.returnHome, icon: <Undo2 className="w-4 h-4" />, onClick: () => void returnHome(d.id, d.name), primary: true }];
+    }
+    return d.status === 'left' ? [] : [{ ...move, primary: true }];
+  };
+
+  const vehicleMenu = (v: FleetVehicle): MenuGroup[] => {
+    const main = vehicleMain(v);
+    return [
+      { label: v.plate, items: [
+        { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'vehicle', id: v.id }) },
+        ...(main ? [{ key: 'main', label: main.label, icon: v.status === 'active' ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
+      ] },
+      { items: [
+        { key: 'edit', label: f.menu.edit, icon: Pencil, onClick: () => setVehicleForm({ open: true, vehicle: v }) },
+        { key: 'status', label: f.menu.status, icon: Wrench, onClick: () => setStatusFor(v) },
+        { key: 'history', label: f.menu.history, icon: History, onClick: () => showHistory({ vehicle_id: v.id, label: v.plate }) },
+      ] },
+      { items: [{ key: 'delete', label: f.menu.delete, icon: Trash2, danger: true, onClick: () => void removeVehicle(v) }] },
+    ];
+  };
+  const driverMenu = (d: FleetDriver): MenuGroup[] => [
+    { label: d.name, items: [
+      { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'driver', id: d.id }) },
+      ...(canReturnHome(d, vs)
+        ? [{ key: 'home', label: f.actions.returnHome, icon: Undo2, onClick: () => void returnHome(d.id, d.name) }] : []),
+      ...(d.status !== 'left' ? [{ key: 'move', label: f.actions.move, icon: ArrowLeftRight, onClick: () => setMoveFor(d) }] : []),
+    ] },
+    { items: [
+      { key: 'edit', label: f.menu.edit, icon: Pencil, onClick: () => setDriverForm({ open: true, driver: d }) },
+      { key: 'history', label: f.menu.history, icon: History, onClick: () => showHistory({ driver_id: d.id, label: d.name }) },
+    ] },
+    { items: [{ key: 'delete', label: f.menu.delete, icon: Trash2, danger: true, onClick: () => void removeDriver(d) }] },
+  ];
+
+  const menuVehicle = menu.state?.row.kind === 'vehicle' ? vs.find((v) => v.id === menu.state!.row.id) : undefined;
+  const menuDriver = menu.state?.row.kind === 'driver' ? ds.find((d) => d.id === menu.state!.row.id) : undefined;
+  const menuGroups = menuVehicle ? vehicleMenu(menuVehicle) : menuDriver ? driverMenu(menuDriver) : [];
+
+  const detailVehicle = detail?.kind === 'vehicle' ? vs.find((v) => v.id === detail.id) : undefined;
+  const detailDriver = detail?.kind === 'driver' ? ds.find((d) => d.id === detail.id) : undefined;
+  const detailTarget: FleetDetailTarget | null = detailVehicle ? { kind: 'vehicle', item: detailVehicle }
+    : detailDriver ? { kind: 'driver', item: detailDriver } : null;
+  /** A truck's detail window: its main action, plus "Đổi trạng thái" for a stopped truck (or alone for one out of service). */
+  const vehicleDetailActions = (v: FleetVehicle): DetailAction[] => {
+    const status = { label: f.menu.status, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v) };
+    const main = vehicleMain(v);
+    if (!main) return [status];
+    return v.status === 'active' ? [main] : [status, main];
+  };
+  const detailActions: DetailAction[] = detailVehicle ? vehicleDetailActions(detailVehicle)
+    : detailDriver ? driverMain(detailDriver) : [];
+
+  /** Right-click, the context-menu key or Shift+F10 open the row's menu; double-click or Enter its details. */
+  const rowEvents = (row: RowRef) => ({
+    tabIndex: 0,
+    onContextMenu: (e: React.MouseEvent) => {
+      e.preventDefault();
+      menu.open(row, e.clientX, e.clientY);
+    },
+    onDoubleClick: (e: React.MouseEvent) => {
+      if (!fromControl(e)) setDetail(row);
+    },
+    onMouseDown: (e: React.MouseEvent) => {
+      if (e.detail > 1 && !fromControl(e)) e.preventDefault(); // no word selected by the double-click
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        setDetail(row);
+      } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+        e.preventDefault();
+        const r = e.currentTarget.getBoundingClientRect();
+        menu.open(row, r.left + 24, r.top + r.height / 2);
+      }
+    },
+  });
+
+  const moreButton = (row: RowRef, label: string) => (
+    <button type="button" aria-label={`${f.menu.more} · ${label}`} title={f.menu.more} aria-haspopup="menu"
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        menu.open(row, r.left - 160, r.bottom + 4);
+      }}
+      className="p-1.5 rounded-md text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800">
+      <MoreHorizontal className="w-4 h-4" />
+    </button>
+  );
+
   const tabs: { id: View; label: string; count?: number }[] = [
     { id: 'vehicles', label: f.views.vehicles, count: vehicles?.length },
     { id: 'drivers', label: f.views.drivers, count: drivers?.length },
@@ -338,8 +444,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
             const down = v.status === 'broken' || v.status === 'maintenance';
             const sub = [v.vehicle_type, v.trailer_plate ? tf(L.trailer, { plate: v.trailer_plate }) : ''].filter(Boolean).join(' · ');
             return (
-              <tr key={v.id} data-testid={`vehicle-${v.id}`}
-                className={`group hover:bg-slate-50/80 dark:hover:bg-slate-800/40 ${v.status === 'inactive' ? 'opacity-60' : ''}`}>
+              <tr key={v.id} data-testid={`vehicle-${v.id}`} {...rowEvents({ kind: 'vehicle', id: v.id })}
+                className={`${ROW} ${menu.state?.row.kind === 'vehicle' && menu.state.row.id === v.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${v.status === 'inactive' ? 'opacity-60' : ''}`}>
                 <td className={TD}>
                   <div className="flex items-center gap-3">
                     <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wide" onClick={openPhoto(v.photo, v.plate)} />
@@ -390,12 +496,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
                         {f.quick.repaired}
                       </button>
                     )}
-                    <RowMenu label={`${f.menu.more} · ${v.plate}`} items={[
-                      { label: f.menu.edit, icon: <Pencil className="w-4 h-4" />, onSelect: () => setVehicleForm({ open: true, vehicle: v }) },
-                      { label: f.menu.status, icon: <Wrench className="w-4 h-4" />, onSelect: () => setStatusFor(v) },
-                      { label: f.menu.history, icon: <History className="w-4 h-4" />, onSelect: () => showHistory({ vehicle_id: v.id, label: v.plate }) },
-                      { label: f.menu.delete, icon: <Trash2 className="w-4 h-4" />, danger: true, onSelect: () => void removeVehicle(v) },
-                    ]} />
+                    {moreButton({ kind: 'vehicle', id: v.id }, v.plate)}
                   </div>
                 </td>
               </tr>
@@ -429,8 +530,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
               : tf(L.tempHome, { plate: home.plate })) : '';
             const licence = [d.license_class, d.license_no].filter(Boolean).join(' · ');
             return (
-              <tr key={d.id} data-testid={`driver-${d.id}`}
-                className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 ${d.status === 'left' ? 'opacity-60' : ''}`}>
+              <tr key={d.id} data-testid={`driver-${d.id}`} {...rowEvents({ kind: 'driver', id: d.id })}
+                className={`${ROW} ${menu.state?.row.kind === 'driver' && menu.state.row.id === d.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${d.status === 'left' ? 'opacity-60' : ''}`}>
                 <td className={TD}>
                   <div className="flex items-center gap-3">
                     <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="md" onClick={openPhoto(d.photo, d.name)} />
@@ -483,12 +584,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
                         <ArrowLeftRight className="w-3.5 h-3.5" />{f.actions.move}
                       </button>
                     )}
-                    <RowMenu label={`${f.menu.more} · ${d.name}`} items={[
-                      { label: f.menu.edit, icon: <Pencil className="w-4 h-4" />, onSelect: () => setDriverForm({ open: true, driver: d }) },
-                      { label: f.menu.move, icon: <ArrowLeftRight className="w-4 h-4" />, onSelect: () => setMoveFor(d), hidden: d.status === 'left' || !back },
-                      { label: f.menu.history, icon: <History className="w-4 h-4" />, onSelect: () => showHistory({ driver_id: d.id, label: d.name }) },
-                      { label: f.menu.delete, icon: <Trash2 className="w-4 h-4" />, danger: true, onSelect: () => void removeDriver(d) },
-                    ]} />
+                    {moreButton({ kind: 'driver', id: d.id }, d.name)}
                   </div>
                 </td>
               </tr>
@@ -598,7 +694,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
       </div>
 
       {filterChips.length > 0 && vehicles && (
-        <div role="group" aria-label={f.filters.label} className="flex flex-wrap gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 shrink-0">
+        <div role="group" aria-label={f.filters.label} className="flex flex-wrap gap-1.5">
           {filterChips.filter((c) => c.id === 'all' || c.count > 0 || c.active).map((c) => (
             <button key={c.id} type="button" aria-pressed={c.active} onClick={c.select}
               className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold border transition-colors ${c.active
@@ -608,6 +705,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
               <span className={`min-w-[1.25rem] px-1 rounded-full text-[11px] ${c.active ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{c.count}</span>
             </button>
           ))}
+        </div>
+        <span className="ml-auto text-[11px] text-slate-400 dark:text-slate-500">{f.detail.hint}</span>
         </div>
       )}
 
@@ -636,6 +735,19 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
       <DriverFormModal isOpen={driverForm.open} driver={driverForm.driver} vehicles={vs}
         onClose={() => setDriverForm({ open: false, driver: null })} onSaved={reload} />
       <VehicleStatusModal vehicle={statusFor} vehicles={vs} onClose={() => setStatusFor(null)} onSaved={reload} />
+      <RowContextMenu position={menu.state && menuGroups.length ? { x: menu.state.x, y: menu.state.y } : null}
+        groups={menuGroups} onClose={menu.close} />
+      <FleetDetailModal target={detailTarget} onClose={() => setDetail(null)} actions={detailActions}
+        onOpenPhoto={(photo, name) => setViewing({ photo, name })}
+        onShowHistory={() => {
+          const row = detailTarget;
+          setDetail(null);
+          if (row) showHistory(row.kind === 'vehicle' ? { vehicle_id: row.item.id, label: row.item.plate } : { driver_id: row.item.id, label: row.item.name });
+        }}
+        onEdit={() => {
+          if (detailVehicle) setVehicleForm({ open: true, vehicle: detailVehicle });
+          if (detailDriver) setDriverForm({ open: true, driver: detailDriver });
+        }} />
       <PhotoLightbox photo={viewing?.photo || null} name={viewing?.name || ''} onClose={closeViewer} />
       <DriverMoveModal driver={moveFor} vehicles={vs} onClose={() => setMoveFor(null)} onSaved={reload} />
     </div>

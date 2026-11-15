@@ -250,11 +250,68 @@ describe('FleetTab quick actions', () => {
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
     const menu = screen.getByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(
-      [f.menu.edit, f.menu.status, f.menu.history, f.menu.delete]);
+      [f.detail.open, f.quick.report, f.menu.edit, f.menu.status, f.menu.history, f.menu.delete]);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
     fireEvent.click(screen.getByRole('menuitem', { name: f.menu.delete }));
     await waitFor(() => expect(api.deleteFleetVehicleApi).toHaveBeenCalledWith(1));
+  });
+});
+
+describe('FleetTab row interactions', () => {
+  const setup = async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-1', { trailer_plate: '51R-1', registration_expiry: '2031-01-15', note: 'Xe mới',
+        current_driver: an, home_driver: { id: 1, name: an.name, status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { phone: '0909', license_class: 'FC',
+      home_vehicle: { id: 1, plate: '51C-1', status: 'active' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '51R-1', photo: '', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' } })]);
+    api.getFleetHistoryApi.mockResolvedValue([{
+      id: 3, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary', home_vehicle_plate: '',
+      reason: 'Gán xe cố định', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '',
+    }]);
+    render(<FleetTab />);
+    return screen.findByTestId('vehicle-1');
+  };
+
+  it('right-click opens the row menu at the pointer', async () => {
+    const row = await setup();
+    fireEvent.contextMenu(row, { clientX: 300, clientY: 200 });
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByText('51C-1')).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: f.quick.report }));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(screen.getByText('Trạng thái xe 51C-1')).toBeInTheDocument();
+  });
+
+  it('double-click opens the details with the documents and recent history', async () => {
+    const row = await setup();
+    fireEvent.doubleClick(within(row).getByText('51C-1'));
+    const detail = screen.getByTestId('fleet-detail');
+    expect(screen.getByText('Chi tiết xe 51C-1')).toBeInTheDocument();
+    expect(within(detail).getByText('51R-1')).toBeInTheDocument();
+    expect(within(detail).getByText('15/01/2031')).toBeInTheDocument();
+    expect(within(detail).getByText('Xe mới')).toBeInTheDocument();
+    expect(await within(detail).findByText(/15\/11\/2026 08:00 → Đang lái/)).toBeInTheDocument();
+    expect(api.getFleetHistoryApi).toHaveBeenLastCalledWith({ vehicle_id: 1, limit: 5 });
+
+    fireEvent.click(within(detail).getByText(f.detail.allHistory));
+    expect(screen.queryByTestId('fleet-detail')).not.toBeInTheDocument();
+    expect(screen.getByText('Đang xem lịch sử của: 51C-1')).toBeInTheDocument();
+  });
+
+  it('a double-click on a button in the row is that button\'s, and Enter opens the details too', async () => {
+    const row = await setup();
+    fireEvent.doubleClick(within(row).getByText(f.quick.report));
+    expect(screen.queryByTestId('fleet-detail')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /Tài xế/ }));
+    const driverRow = await screen.findByTestId('driver-1');
+    fireEvent.keyDown(driverRow, { key: 'Enter' });
+    expect(screen.getByText(`Chi tiết tài xế ${an.name}`)).toBeInTheDocument();
+    expect(within(screen.getByTestId('fleet-detail')).getByText('FC')).toBeInTheDocument();
+    expect(api.getFleetHistoryApi).toHaveBeenLastCalledWith({ driver_id: 1, limit: 5 });
   });
 });
