@@ -1366,8 +1366,8 @@ export const translations = {
       retry: "Thử lại",
       views: { vehicles: "Đầu kéo", drivers: "Tài xế", history: "Lịch sử phân công" },
       screens: {
-        vehicles: { title: "Đầu kéo", subtitle: "Xe đầu kéo, moóc, giấy tờ và tài xế đang lái", search: "Tìm biển số, moóc, loại xe, tài xế…" },
-        drivers: { title: "Tài xế", subtitle: "Tài xế, bằng lái và xe đang lái", search: "Tìm tên, SĐT, CCCD, bằng lái, biển số…" },
+        vehicles: { search: "Tìm biển số, moóc, loại xe, tài xế…" },
+        drivers: { search: "Tìm tên, SĐT, CCCD, bằng lái, biển số…" },
       },
       summary: {
         running: "{count} xe đang chạy",
@@ -1553,7 +1553,7 @@ export const translations = {
       confirmDeleteVehicle: "Chuyển xe {plate} vào thùng rác? Tài xế đang lái sẽ xuống xe. Có thể khôi phục trong {days} ngày.",
       confirmDeleteDriver: "Chuyển tài xế {name} vào thùng rác? Có thể khôi phục trong {days} ngày.",
       trailer: {
-        title: "Rơ moóc", subtitle: "Moóc, giấy tờ và đầu kéo đang kéo", search: "Tìm biển số moóc, loại, số khung, đầu kéo…",
+        search: "Tìm biển số moóc, loại, số khung, đầu kéo…",
         views: { list: "Rơ moóc", history: "Lịch sử gắn moóc" },
         status: { active: "Đang dùng", broken: "Hư hỏng", maintenance: "Bảo dưỡng", inactive: "Ngưng hoạt động" },
         filters: { all: "Tất cả", hitched: "Đang gắn", free: "Moóc trống", down: "Hư / bảo dưỡng", expiring: "Giấy tờ sắp hết hạn" },
@@ -3047,8 +3047,8 @@ export const translations = {
       retry: "Retry",
       views: { vehicles: "Tractors", drivers: "Drivers", history: "Assignment history" },
       screens: {
-        vehicles: { title: "Tractors", subtitle: "Tractor units, trailers, documents and who drives them", search: "Search plate, trailer, type, driver…" },
-        drivers: { title: "Drivers", subtitle: "Drivers, licences and the truck each one drives", search: "Search name, phone, ID, licence, plate…" },
+        vehicles: { search: "Search plate, trailer, type, driver…" },
+        drivers: { search: "Search name, phone, ID, licence, plate…" },
       },
       summary: {
         running: "{count} truck(s) running",
@@ -3234,7 +3234,7 @@ export const translations = {
       confirmDeleteVehicle: "Move truck {plate} to the trash? Its driver gets off it. It can be restored for {days} days.",
       confirmDeleteDriver: "Move driver {name} to the trash? It can be restored for {days} days.",
       trailer: {
-        title: "Trailers", subtitle: "Trailers, their documents and the tractor pulling each", search: "Search trailer plate, type, chassis, tractor…",
+        search: "Search trailer plate, type, chassis, tractor…",
         views: { list: "Trailers", history: "Hitch history" },
         status: { active: "In use", broken: "Broken", maintenance: "Maintenance", inactive: "Out of service" },
         filters: { all: "All", hitched: "Hitched", free: "Free", down: "Broken / maintenance", expiring: "Documents expiring" },

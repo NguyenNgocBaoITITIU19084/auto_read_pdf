@@ -64,7 +64,6 @@ describe('TrailerTab', () => {
     expect(within(row).getByText('51C-1')).toBeInTheDocument();
     expect(within(row).getByText('Tài xế: An')).toBeInTheDocument();
     expect(within(screen.getByTestId('trailer-2')).getByText(R.noVehicle)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: R.title })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${R.filters.free}`) }));
     expect(screen.queryByTestId('trailer-1')).not.toBeInTheDocument();

@@ -202,13 +202,11 @@ describe('FleetTab screens', () => {
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
     render(<FleetTab />);
     await screen.findByTestId('vehicle-1');
-    expect(screen.getByRole('heading', { name: 'Đầu kéo' })).toBeInTheDocument();
     expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual(['Đầu kéo1', f.views.history]);
 
     cleanup();
     render(<FleetTab screen="drivers" />);
     await screen.findByTestId('driver-1');
-    expect(screen.getByRole('heading', { name: 'Tài xế' })).toBeInTheDocument();
     expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual(['Tài xế1', f.views.history]);
     expect(screen.getByText(f.actions.addDriver)).toBeInTheDocument();
     expect(screen.queryByText(f.actions.addVehicle)).not.toBeInTheDocument();
