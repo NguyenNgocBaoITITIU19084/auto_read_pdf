@@ -8,10 +8,17 @@ import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
-  deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryApi, getFleetVehiclesApi, returnDriverHomeApi,
+  deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, returnDriverHomeApi,
   setFleetVehicleStatusApi,
 } from '../../services/api';
-import type { DriverStatus, FleetAssignment, FleetDocumentKind, FleetDriver, FleetVehicle, VehicleStatus } from '../../types';
+import { useTableSort } from '../../hooks/useTableSort';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { ResizableTh } from '../common/ResizableTh';
+import { ColumnValueFilter } from '../common/ColumnValueFilter';
+import { Pagination } from '../common/Pagination';
+import { PAGE_SIZE_OPTIONS, applyColumnFilters, sortRows, usePageRows, usePaging, valueCounts } from './fleetTable';
+import { DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDocumentKind, type FleetDriver, type FleetHistoryPage,
+  type FleetVehicle, type VehicleStatus } from '../../types';
 import { daysLeftText } from '../common/ReminderViews';
 import { DriverFormModal, DriverMoveModal, VehicleFormModal, VehicleStatusModal } from './FleetModals';
 import { FleetAvatar, PhotoLightbox } from './FleetPhoto';
@@ -82,13 +89,32 @@ function docWarnings(entries: [FleetDocumentKind, string][], today: string): Doc
     .sort((a, b) => a.days - b.days);
 }
 
+type DocState = 'expired' | 'soon' | 'ok' | 'none';
+const DOC_STATES: DocState[] = ['expired', 'soon', 'ok', 'none'];
+
+/** How a row's documents stand overall: the worst of them. */
+function docState(entries: [FleetDocumentKind, string][], today: string): DocState {
+  const days = entries.map(([, iso]) => daysUntil(iso, today)).filter((d): d is number => d !== null);
+  if (days.length === 0) return 'none';
+  const soonest = Math.min(...days);
+  return soonest < 0 ? 'expired' : soonest <= EXPIRY_WARN_DAYS ? 'soon' : 'ok';
+}
+
+/** Days until the soonest of a row's documents expires (null: no dates), for sorting. */
+function soonestDays(entries: [FleetDocumentKind, string][], today: string): number | null {
+  const days = entries.map(([, iso]) => daysUntil(iso, today)).filter((d): d is number => d !== null);
+  return days.length ? Math.min(...days) : null;
+}
+
 /** One cell for all of a row's documents: a green "Còn hạn", or the ones needing attention. Dates in the tooltip. */
 const DocsCell: React.FC<{ entries: [FleetDocumentKind, string][]; today: string; muted?: boolean }> = ({ entries, today, muted }) => {
   const { t } = useApp();
   const names = t.notifications.reminder.fleetDocs;
   const title = entries.map(([kind, iso]) => `${names[kind]}: ${iso ? formatIsoDate(iso) : t.fleet.none}`).join('\n');
   if (!entries.some(([, iso]) => iso)) return <span className={MUTED} title={title}>{t.fleet.list.noDates}</span>;
-  const warnings = muted ? [] : docWarnings(entries, today);
+  // a truck out of service / a driver who left: the real state, but quiet (nobody needs to act on it)
+  if (muted) return <span className={MUTED} title={title}>{t.fleet.table.docState[docState(entries, today)]}</span>;
+  const warnings = docWarnings(entries, today);
   if (warnings.length === 0) {
     return (
       <span title={title} className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
@@ -130,7 +156,13 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const [view, setView] = useState<View>(readView);
   const [vehicles, setVehicles] = useState<FleetVehicle[] | null>(null);
   const [drivers, setDrivers] = useState<FleetDriver[] | null>(null);
-  const [history, setHistory] = useState<FleetAssignment[] | null>(null);
+  const [history, setHistory] = useState<FleetHistoryPage | null>(null);
+  const [vehicleCols, setVehicleCols] = useState<Record<string, string[]>>({});
+  const [driverCols, setDriverCols] = useState<Record<string, string[]>>({});
+  const [historyCols, setHistoryCols] = useState<Record<string, string[]>>({});
+  const vehicleSort = useTableSort('fleet_vehicles_sort');
+  const driverSort = useTableSort('fleet_drivers_sort');
+  const historySort = useTableSort('fleet_history_sort');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>(null);
   const [vehicleFilter, setVehicleFilter] = useState<VehicleFilter>('all');
   const [driverFilter, setDriverFilter] = useState<DriverFilter>('all');
@@ -167,15 +199,20 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     }
   }, []);
 
+  const historyQuery = useDebouncedValue(query, 300);
+  const historyPaging = usePaging('fleet.history.pageSize', JSON.stringify([historyFilter, historyCols, historySort.sort, historyQuery]));
   const loadHistory = useCallback(async () => {
     try {
-      setHistory(await getFleetHistoryApi({
-        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, limit: 500,
+      setHistory(await getFleetHistoryPageApi({
+        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id,
+        kinds: historyCols.vehicle_plate, states: historyCols.ended_at, q: historyQuery.trim() || undefined,
+        sort_by: historySort.sort?.key, sort_dir: historySort.sort?.dir,
+        limit: historyPaging.pageSize, offset: (historyPaging.page - 1) * historyPaging.pageSize,
       }));
     } catch {
-      setHistory([]);
+      setHistory({ items: [], total: 0 });
     }
-  }, [historyFilter]);
+  }, [historyFilter, historyCols, historyQuery, historySort.sort, historyPaging.page, historyPaging.pageSize]);
 
   useEffect(() => {
     void load();
@@ -231,8 +268,61 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     v.vehicle_type, v.note, v.current_driver?.name, v.home_driver?.name)), [vs, query, vehicleFilter, vehicleTest]);
   const shownDrivers = useMemo(() => ds.filter((d) => driverTest[driverFilter](d) && matches(query, d.name, d.phone, d.id_number,
     d.license_no, d.note, d.home_vehicle?.plate, d.current_vehicle?.plate)), [ds, query, driverFilter, driverTest]);
-  const shownHistory = useMemo(() => (history || []).filter((h) => matches(query, h.driver_name, h.vehicle_plate,
-    h.home_vehicle_plate, h.reason, h.end_reason)), [history, query]);
+
+  // column values: what each column filters on, and what it sorts by
+  const vehicleValue: Record<string, (v: FleetVehicle) => string> = useMemo(() => ({
+    plate: (v) => v.vehicle_type,
+    status: (v) => v.status,
+    driver: (v) => (v.current_driver ? v.current_driver.kind : 'none'),
+    docs: (v) => docState(vehicleDocs(v), today),
+  }), [today]);
+  const vehicleSortValue = useMemo(() => ({
+    plate: (v: FleetVehicle) => v.plate,
+    status: (v: FleetVehicle) => VEHICLE_STATUSES.indexOf(v.status),
+    driver: (v: FleetVehicle) => v.current_driver?.name ?? null,
+    docs: (v: FleetVehicle) => soonestDays(vehicleDocs(v), today),
+  }), [today]);
+  const driverValue: Record<string, (d: FleetDriver) => string> = useMemo(() => ({
+    status: (d) => d.status,
+    truck: (d) => (d.current_vehicle ? d.current_vehicle.kind : 'none'),
+    license: (d) => docState(driverDocs(d), today),
+  }), [today]);
+  const driverSortValue = useMemo(() => ({
+    name: (d: FleetDriver) => d.name,
+    status: (d: FleetDriver) => DRIVER_STATUSES.indexOf(d.status),
+    truck: (d: FleetDriver) => d.current_vehicle?.plate ?? null,
+    license: (d: FleetDriver) => soonestDays(driverDocs(d), today),
+  }), [today]);
+
+  const sortedVehicles = useMemo(() => sortRows(applyColumnFilters(shownVehicles, vehicleCols, vehicleValue), vehicleSort.sort,
+    vehicleSortValue), [shownVehicles, vehicleCols, vehicleValue, vehicleSort.sort, vehicleSortValue]);
+  const sortedDrivers = useMemo(() => sortRows(applyColumnFilters(shownDrivers, driverCols, driverValue), driverSort.sort,
+    driverSortValue), [shownDrivers, driverCols, driverValue, driverSort.sort, driverSortValue]);
+  const vehiclePaging = usePaging('fleet.vehicles.pageSize', JSON.stringify([query, vehicleFilter, vehicleCols, vehicleSort.sort]));
+  const driverPaging = usePaging('fleet.drivers.pageSize', JSON.stringify([query, driverFilter, driverCols, driverSort.sort]));
+  const pageVehicles = usePageRows(sortedVehicles, vehiclePaging.page, vehiclePaging.pageSize);
+  const pageDrivers = usePageRows(sortedDrivers, driverPaging.page, driverPaging.pageSize);
+  const colFilterCount = view === 'vehicles' ? Object.values(vehicleCols).filter((v) => v.length).length
+    : view === 'drivers' ? Object.values(driverCols).filter((v) => v.length).length
+      : Object.values(historyCols).filter((v) => v.length).length;
+  const clearColFilters = () => (view === 'vehicles' ? setVehicleCols({}) : view === 'drivers' ? setDriverCols({}) : setHistoryCols({}));
+
+  /** A header cell that sorts, and filters when `options` is given. */
+  const header = (
+    key: string, label: string, sorter: ReturnType<typeof useTableSort>,
+    filter?: { options: () => { carrier: string; count: number }[]; value: string[]; onChange: (v: string[]) => void;
+      format: (v: string) => string; column?: string },
+  ) => (
+    <ResizableTh key={key} colKey={key} label={label} className="px-4 py-2.5" sortDir={sorter.sortDirOf(key)} onSort={sorter.toggleSort}
+      sortLabels={t.common.sort}
+      extra={filter && (
+        <ColumnValueFilter column={filter.column || label} loadOptions={async () => filter.options()} value={filter.value}
+          onChange={filter.onChange} labels={t.common.columnFilter} formatOption={filter.format} />
+      )} />
+  );
+  const setCol = (setter: React.Dispatch<React.SetStateAction<Record<string, string[]>>>, key: string) =>
+    (values: string[]) => setter((prev) => ({ ...prev, [key]: values }));
+  const T = f.table;
 
   const returnHome = async (driverId: number, name: string) => {
     setBusyId(`d${driverId}`);
@@ -421,24 +511,32 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
       {text}
     </div>
   );
-  const emptyText = (total: number, filtered: boolean, none: string) =>
-    !total ? none : filtered ? f.filters.empty : f.empty.search;
 
   const vehicleTable = () => {
-    if (shownVehicles.length === 0) return empty(emptyText(vs.length, vehicleFilter !== 'all', f.empty.vehicles));
+    if (vs.length === 0) return empty(f.empty.vehicles);
     return (
       <table className="min-w-full text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
           <tr>
-            <th className={TH}>{L.vehicle}</th>
-            <th className={TH}>{L.status}</th>
-            <th className={TH}>{L.driver}</th>
-            <th className={TH}>{L.docs}</th>
+            {header('plate', L.vehicle, vehicleSort, { column: T.type, options: () => valueCounts(shownVehicles, vehicleValue.plate),
+              value: vehicleCols.plate || [], onChange: setCol(setVehicleCols, 'plate'), format: (v) => v || t.common.columnFilter.empty })}
+            {header('status', L.status, vehicleSort, { options: () => valueCounts(shownVehicles, vehicleValue.status, [...VEHICLE_STATUSES]),
+              value: vehicleCols.status || [], onChange: setCol(setVehicleCols, 'status'), format: (v) => f.vehicleStatus[v as VehicleStatus] ?? v })}
+            {header('driver', L.driver, vehicleSort, { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'temporary', 'none']),
+              value: vehicleCols.driver || [], onChange: setCol(setVehicleCols, 'driver'),
+              format: (v) => T.driverState[v as keyof typeof T.driverState] ?? v })}
+            {header('docs', L.docs, vehicleSort, { options: () => valueCounts(shownVehicles, vehicleValue.docs, DOC_STATES),
+              value: vehicleCols.docs || [], onChange: setCol(setVehicleCols, 'docs'), format: (v) => T.docState[v as DocState] ?? v })}
             <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>
           </tr>
         </thead>
+        {pageVehicles.length === 0 && (
+          <tbody><tr><td colSpan={5} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+            {vehicleFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search}
+          </td></tr></tbody>
+        )}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {shownVehicles.map((v) => {
+          {pageVehicles.map((v) => {
             const c = v.current_driver;
             const h = v.home_driver;
             const down = v.status === 'broken' || v.status === 'maintenance';
@@ -508,20 +606,29 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   };
 
   const driverTable = () => {
-    if (shownDrivers.length === 0) return empty(emptyText(ds.length, driverFilter !== 'all', f.empty.drivers));
+    if (ds.length === 0) return empty(f.empty.drivers);
     return (
       <table className="min-w-full text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
           <tr>
-            <th className={TH}>{L.driver}</th>
-            <th className={TH}>{L.status}</th>
-            <th className={TH}>{L.truck}</th>
-            <th className={TH}>{L.license}</th>
+            {header('name', L.driver, driverSort)}
+            {header('status', L.status, driverSort, { options: () => valueCounts(shownDrivers, driverValue.status, [...DRIVER_STATUSES]),
+              value: driverCols.status || [], onChange: setCol(setDriverCols, 'status'), format: (v) => f.driverStatus[v as DriverStatus] ?? v })}
+            {header('truck', L.truck, driverSort, { options: () => valueCounts(shownDrivers, driverValue.truck, ['primary', 'temporary', 'none']),
+              value: driverCols.truck || [], onChange: setCol(setDriverCols, 'truck'),
+              format: (v) => T.truckState[v as keyof typeof T.truckState] ?? v })}
+            {header('license', L.license, driverSort, { options: () => valueCounts(shownDrivers, driverValue.license, DOC_STATES),
+              value: driverCols.license || [], onChange: setCol(setDriverCols, 'license'), format: (v) => T.docState[v as DocState] ?? v })}
             <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>
           </tr>
         </thead>
+        {pageDrivers.length === 0 && (
+          <tbody><tr><td colSpan={5} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+            {driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search}
+          </td></tr></tbody>
+        )}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {shownDrivers.map((d) => {
+          {pageDrivers.map((d) => {
             const c = d.current_vehicle;
             const home = d.home_vehicle;
             const back = canReturnHome(d, vs);
@@ -597,21 +704,30 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
 
   const historyTable = () => {
     if (!history) return <div className="flex-1 flex justify-center items-center py-16 text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>;
-    if (shownHistory.length === 0) return empty(history.length ? f.empty.search : f.empty.history);
+    // filtered on the server: the choices are fixed and their counts unknown (-1: not shown)
+    const fixed = (values: string[]) => () => values.map((v) => ({ carrier: v, count: -1 }));
     return (
       <table className="min-w-full text-sm">
         <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
           <tr>
-            <th className={TH}>{f.cols.started}</th>
-            <th className={TH}>{f.cols.ended}</th>
-            <th className={TH}>{f.cols.name}</th>
-            <th className={TH}>{f.cols.vehicle}</th>
-            <th className={TH}>{f.cols.reason}</th>
-            <th className={TH}>{f.cols.endReason}</th>
+            {header('started_at', f.cols.started, historySort)}
+            {header('ended_at', f.cols.ended, historySort, { options: fixed(['open', 'closed']), value: historyCols.ended_at || [],
+              onChange: setCol(setHistoryCols, 'ended_at'), format: (v) => T.historyState[v as 'open' | 'closed'] ?? v })}
+            {header('driver_name', f.cols.name, historySort)}
+            {header('vehicle_plate', f.cols.vehicle, historySort, { options: fixed(['primary', 'temporary']),
+              value: historyCols.vehicle_plate || [], onChange: setCol(setHistoryCols, 'vehicle_plate'),
+              format: (v) => f.kind[v as 'primary' | 'temporary'] ?? v })}
+            {header('reason', f.cols.reason, historySort)}
+            {header('end_reason', f.cols.endReason, historySort)}
           </tr>
         </thead>
+        {history.items.length === 0 && (
+          <tbody><tr><td colSpan={6} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+            {historyQuery || colFilterCount ? f.filters.empty : f.empty.history}
+          </td></tr></tbody>
+        )}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {shownHistory.map((h) => (
+          {history.items.map((h) => (
             <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
               <td className={`${TD} whitespace-nowrap tabular-nums text-slate-700 dark:text-slate-200`}>{formatStampShort(h.started_at)}</td>
               <td className={`${TD} whitespace-nowrap tabular-nums`}>
@@ -693,7 +809,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
         </div>
       </div>
 
-      {filterChips.length > 0 && vehicles && (
+      {vehicles && (view !== 'history' || colFilterCount > 0) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 shrink-0">
         <div role="group" aria-label={f.filters.label} className="flex flex-wrap gap-1.5">
           {filterChips.filter((c) => c.id === 'all' || c.count > 0 || c.active).map((c) => (
@@ -706,6 +822,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
             </button>
           ))}
         </div>
+        {colFilterCount > 0 && (
+          <button type="button" onClick={clearColFilters}
+            className="inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-xs font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/30">
+            <X className="w-3.5 h-3.5" />{tf(T.clearFilters, { count: colFilterCount })}
+          </button>
+        )}
         <span className="ml-auto text-[11px] text-slate-400 dark:text-slate-500">{f.detail.hint}</span>
         </div>
       )}
@@ -725,8 +847,25 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
       ) : !vehicles || !drivers ? (
         <div className="flex-1 flex justify-center items-center text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col overflow-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
-          {view === 'vehicles' ? vehicleTable() : view === 'drivers' ? driverTable() : historyTable()}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm">
+          <div className="flex-1 min-h-0 flex flex-col overflow-auto">
+            {view === 'vehicles' ? vehicleTable() : view === 'drivers' ? driverTable() : historyTable()}
+          </div>
+          {view === 'vehicles' && vs.length > 0 && (
+            <Pagination currentPage={vehiclePaging.page} totalItems={sortedVehicles.length} pageSize={vehiclePaging.pageSize}
+              onPageChange={vehiclePaging.setPage} onPageSizeChange={vehiclePaging.setPageSize} pageSizeOptions={PAGE_SIZE_OPTIONS}
+              className="border-t border-slate-200 dark:border-slate-800" />
+          )}
+          {view === 'drivers' && ds.length > 0 && (
+            <Pagination currentPage={driverPaging.page} totalItems={sortedDrivers.length} pageSize={driverPaging.pageSize}
+              onPageChange={driverPaging.setPage} onPageSizeChange={driverPaging.setPageSize} pageSizeOptions={PAGE_SIZE_OPTIONS}
+              className="border-t border-slate-200 dark:border-slate-800" />
+          )}
+          {view === 'history' && history && history.total > 0 && (
+            <Pagination currentPage={historyPaging.page} totalItems={history.total} pageSize={historyPaging.pageSize}
+              onPageChange={historyPaging.setPage} onPageSizeChange={historyPaging.setPageSize} pageSizeOptions={PAGE_SIZE_OPTIONS}
+              className="border-t border-slate-200 dark:border-slate-800" />
+          )}
         </div>
       )}
 

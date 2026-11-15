@@ -365,3 +365,57 @@ def test_repair_api_flag():
     client.post(f"/api/v1/fleet/vehicles/{home['id']}/status", json={"status": "broken", "move_to_vehicle_id": spare["id"]})
     res = client.post(f"/api/v1/fleet/vehicles/{home['id']}/status", json={"status": "active", "bring_home_driver": True}).json()
     assert res["returned_driver"]["plate"] == "51C-1"
+
+
+# --- history: paged, sorted, filtered -------------------------------------------------
+def _history_fixture():
+    home, spare, other = _truck("51C-1"), _truck("51C-9"), _truck("51C-5")
+    a = _driver("Nguyễn Văn Ân", home_vehicle_id=home)
+    b = _driver("Bình", home_vehicle_id=other)
+    fleet.set_vehicle_status(home, "broken", "Hư hộp số", move_to_vehicle_id=spare)
+    fleet.set_vehicle_status(home, "active", bring_home_driver=True)
+    return home, spare, a, b
+
+
+def test_history_page_filters_sorts_and_pages():
+    home, spare, a, b = _history_fixture()
+    everything = fleet.history_page(limit=100)
+    assert everything["total"] == 4                   # An x3, Bình x1
+    open_rows = fleet.history_page(states=["open"])
+    assert {(r["driver_name"], r["vehicle_plate"]) for r in open_rows["items"]} == {("Nguyễn Văn Ân", "51C-1"), ("Bình", "51C-5")}
+    temp = fleet.history_page(kinds=["temporary"])
+    assert [r["vehicle_plate"] for r in temp["items"]] == ["51C-9"]
+    assert fleet.history_page(kinds=["primary", "temporary"], states=["open", "closed"])["total"] == 4
+
+    # accent-insensitive search over names, plates and reasons
+    assert fleet.history_page(query="nguyen van an")["total"] == 3
+    assert fleet.history_page(query="hop so")["total"] >= 1
+
+    by_driver = fleet.history_page(sort_by="driver_name", sort_dir="asc")["items"]
+    assert by_driver[0]["driver_name"] == "Bình"
+    by_plate = fleet.history_page(sort_by="vehicle_plate", sort_dir="desc")["items"]
+    assert by_plate[0]["vehicle_plate"] == "51C-9"
+
+    page2 = fleet.history_page(limit=3, offset=3)
+    assert page2["total"] == 4 and len(page2["items"]) == 1
+    assert fleet.history_page(sort_by="'; DROP TABLE fleet_assignments; --")["total"] == 4   # unknown column: default order
+
+
+def test_history_page_api():
+    _history_fixture()
+    res = client.get("/api/v1/fleet/history/page", params=[("kinds", "temporary"), ("limit", "10")]).json()
+    assert res["total"] == 1 and res["items"][0]["vehicle_plate"] == "51C-9"
+    res = client.get("/api/v1/fleet/history/page", params={"q": "binh", "sort_by": "started_at", "sort_dir": "asc"}).json()
+    assert res["total"] == 1
+
+
+def test_history_sorts_vietnamese_names_like_people_expect():
+    t = _truck("51C-1")
+    for name in ("Nguyễn Văn An", "Ngô Văn Khoa", "Đặng Văn Em", "Dương Văn Bé", "Bùi Thị Giang"):
+        d = _driver(name)
+        fleet.move_temporary(d, t)
+        fleet.unassign(d)
+    names = [r["driver_name"] for r in fleet.history_page(sort_by="driver_name", sort_dir="asc")["items"]]
+    assert names == ["Bùi Thị Giang", "Đặng Văn Em", "Dương Văn Bé", "Ngô Văn Khoa", "Nguyễn Văn An"]
+    desc = [r["driver_name"] for r in fleet.history_page(sort_by="driver_name", sort_dir="desc")["items"]]
+    assert desc == list(reversed(names))

@@ -282,6 +282,58 @@ def list_history(driver_id: int | None = None, vehicle_id: int | None = None, li
         return _rows(conn, sql, (*params, limit))
 
 
+HISTORY_SORT_COLUMNS = ("started_at", "ended_at", "driver_name", "vehicle_plate", "kind", "reason", "end_reason")
+HISTORY_STATES = ("open", "closed")
+
+
+def history_page(driver_id: int | None = None, vehicle_id: int | None = None, kinds: list[str] | None = None,
+                 states: list[str] | None = None, query: str = "", sort_by: str | None = None, sort_dir: str = "desc",
+                 limit: int = 50, offset: int = 0) -> dict:
+    """One page of assignments: {"items", "total"}. `kinds` (primary / temporary) and `states` (open = still driving /
+    closed) filter; `query` matches the driver's name, the plate, the own-truck plate or a reason. Search and sort run
+    in Python, accents and case ignored, so "Ngô" comes before "Nguyễn" and "Đặng" next to "Dũng" (SQLite compares
+    bytes and its LOWER does not fold Vietnamese). Newest first unless `sort_by` is given; ties stay newest first.
+    A still-open assignment counts as the latest end."""
+    limit = max(1, min(int(limit or 50), HISTORY_MAX_LIMIT))
+    offset = max(0, int(offset or 0))
+    where, params = [], []
+    if driver_id is not None:
+        where.append("driver_id = ?")
+        params.append(driver_id)
+    if vehicle_id is not None:
+        where.append("vehicle_id = ?")
+        params.append(vehicle_id)
+    clean_kinds = [k for k in (kinds or []) if k in ASSIGNMENT_KINDS]
+    if clean_kinds:
+        where.append(f"kind IN ({','.join('?' * len(clean_kinds))})")
+        params.extend(clean_kinds)
+    clean_states = {s for s in (states or []) if s in HISTORY_STATES}
+    if len(clean_states) == 1:
+        where.append("ended_at IS NULL" if "open" in clean_states else "ended_at IS NOT NULL")
+    sql = ("SELECT * FROM fleet_assignments" + (f" WHERE {' AND '.join(where)}" if where else "")
+           + " ORDER BY started_at DESC, id DESC;")
+    with _conn() as conn:
+        rows = _rows(conn, sql, tuple(params))
+    needle = _fold(query)
+    if needle:
+        rows = [r for r in rows if any(needle in _fold(r[k]) for k in
+                                       ("driver_name", "vehicle_plate", "home_vehicle_plate", "reason", "end_reason"))]
+    if sort_by in HISTORY_SORT_COLUMNS:
+        if sort_by in ("started_at", "ended_at"):
+            key = (lambda r: r[sort_by] or "9999")
+        else:
+            key = (lambda r: (_fold(r[sort_by]), r[sort_by] or ""))
+        rows = sorted(rows, key=key, reverse=(sort_dir or "").lower() != "asc")   # stable: ties stay newest first
+    return {"items": rows[offset:offset + limit], "total": len(rows)}
+
+
+def _fold(value) -> str:
+    """Lowercase without Vietnamese accents ('Đặng Ân' -> 'dang an')."""
+    import unicodedata
+    text = unicodedata.normalize("NFD", str(value or "")).replace("đ", "d").replace("Đ", "D")
+    return "".join(ch for ch in text if not unicodedata.combining(ch)).casefold().strip()
+
+
 # ---------------------------------------------------------------------------
 # Assignment moves (each called inside the caller's transaction)
 # ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ const api = {
   getFleetVehiclesApi: vi.fn(),
   getFleetDriversApi: vi.fn(),
   getFleetHistoryApi: vi.fn(),
+  getFleetHistoryPageApi: vi.fn(),
   setFleetVehicleStatusApi: vi.fn(),
   returnDriverHomeApi: vi.fn(),
   setDriverHomeVehicleApi: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
   getFleetDriversApi: (...a: unknown[]) => api.getFleetDriversApi(...a),
   getFleetHistoryApi: (...a: unknown[]) => api.getFleetHistoryApi(...a),
+  getFleetHistoryPageApi: (...a: unknown[]) => api.getFleetHistoryPageApi(...a),
   setFleetVehicleStatusApi: (...a: unknown[]) => api.setFleetVehicleStatusApi(...a),
   returnDriverHomeApi: (...a: unknown[]) => api.returnDriverHomeApi(...a),
   setDriverHomeVehicleApi: (...a: unknown[]) => api.setDriverHomeVehicleApi(...a),
@@ -63,6 +65,7 @@ beforeEach(() => {
   confirmMock.mockReset();
   localStorage.clear();
   api.getFleetHistoryApi.mockResolvedValue([]);
+  api.getFleetHistoryPageApi.mockResolvedValue({ items: [], total: 0 });
 });
 
 describe('FleetTab', () => {
@@ -159,16 +162,16 @@ describe('FleetTab', () => {
   it('shows the assignment history of one truck', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
     api.getFleetDriversApi.mockResolvedValue([]);
-    api.getFleetHistoryApi.mockResolvedValue([{
+    api.getFleetHistoryPageApi.mockResolvedValue({ total: 1, items: [{
       id: 5, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'temporary',
       home_vehicle_plate: '51C-9', reason: 'Xe gốc hư', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '',
-    }]);
+    }] });
     render(<FleetTab />);
     const row = await screen.findByTestId('vehicle-1');
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
     fireEvent.click(screen.getByRole('menuitem', { name: f.menu.history }));
     expect(await screen.findByText('15/11/2026 08:00')).toBeInTheDocument();
-    expect(api.getFleetHistoryApi).toHaveBeenCalledWith({ driver_id: undefined, vehicle_id: 1, limit: 500 });
+    expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(expect.objectContaining({ vehicle_id: 1, limit: 25, offset: 0 }));
     expect(screen.getByText('Xe gốc: 51C-9')).toBeInTheDocument();
     expect(screen.getByText('Đang xem lịch sử của: 51C-1')).toBeInTheDocument();
   });
@@ -313,5 +316,77 @@ describe('FleetTab row interactions', () => {
     expect(screen.getByText(`Chi tiết tài xế ${an.name}`)).toBeInTheDocument();
     expect(within(screen.getByTestId('fleet-detail')).getByText('FC')).toBeInTheDocument();
     expect(api.getFleetHistoryApi).toHaveBeenLastCalledWith({ driver_id: 1, limit: 5 });
+  });
+});
+
+describe('FleetTab sort, column filters and pages', () => {
+  const plates = (testId = /^vehicle-/) => screen.getAllByTestId(testId).map((r) => r.querySelector('div.font-bold')!.textContent);
+
+  it('sorts a column ascending, then descending, then back', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-200', { current_driver: { ...an, name: 'Bảo' } }),
+      vehicle(2, '51C-100', { current_driver: { ...an, id: 2, name: 'An' } }),
+      vehicle(3, '51C-300'),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    expect(plates()).toEqual(['51C-200', '51C-100', '51C-300']);
+    const sortDriver = screen.getByLabelText(`${translations.vi.common.sort.none} ${f.list.driver}`);
+    fireEvent.click(sortDriver);
+    expect(plates()).toEqual(['51C-100', '51C-200', '51C-300']);   // An, Bảo, then the truck without a driver
+    fireEvent.click(sortDriver);
+    expect(plates()).toEqual(['51C-200', '51C-100', '51C-300']);   // Bảo, An — still no driver last
+    fireEvent.click(sortDriver);
+    expect(plates()).toEqual(['51C-200', '51C-100', '51C-300']);
+    expect(JSON.parse(localStorage.getItem('fleet_vehicles_sort') || 'null')).toBeNull();
+  });
+
+  it('filters a column by its values', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-1', { registration_expiry: '2000-01-01' }),
+      vehicle(2, '51C-2', { registration_expiry: '2099-01-01' }),
+      vehicle(3, '51C-3'),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    fireEvent.click(screen.getByTitle(`Lọc theo ${f.list.docs}`));
+    fireEvent.click(await screen.findByLabelText(new RegExp(f.table.docState.expired)));
+    expect(plates()).toEqual(['51C-1']);
+    fireEvent.click(screen.getByText('Bỏ lọc cột (1)'));
+    expect(plates()).toHaveLength(3);
+  });
+
+  it('pages long lists and goes back to page 1 on a new search', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue(Array.from({ length: 30 }, (_, i) => vehicle(i + 1, `51C-${String(i + 1).padStart(3, '0')}`)));
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    expect(screen.getAllByTestId(/^vehicle-/)).toHaveLength(25);
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    expect(plates()).toEqual(['51C-026', '51C-027', '51C-028', '51C-029', '51C-030']);
+    fireEvent.change(screen.getByLabelText(f.search), { target: { value: '51C-00' } });
+    expect(plates()).toEqual(['51C-001', '51C-002', '51C-003', '51C-004', '51C-005', '51C-006', '51C-007', '51C-008', '51C-009']);
+  });
+
+  it('asks the server for the sorted, filtered page of the history', async () => {
+    localStorage.setItem('fleet.view', 'history');
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetHistoryPageApi.mockResolvedValue({ total: 60, items: [{
+      id: 1, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary', home_vehicle_plate: '',
+      reason: '', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '' }] });
+    render(<FleetTab />);
+    await screen.findByText(an.name);
+    fireEvent.click(screen.getByLabelText(`${translations.vi.common.sort.none} ${f.cols.name}`));
+    await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sort_by: 'driver_name', sort_dir: 'asc', offset: 0 })));
+    fireEvent.click(screen.getByRole('button', { name: '2' }));
+    await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25, limit: 25 })));
+    fireEvent.click(screen.getByTitle(`Lọc theo ${f.cols.vehicle}`));
+    fireEvent.click(await screen.findByLabelText(f.kind.temporary));
+    await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kinds: ['temporary'], offset: 0 })));
   });
 });

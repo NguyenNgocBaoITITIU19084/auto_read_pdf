@@ -792,3 +792,8 @@ export interface VehicleStatusResult {
   /** with bringHomeDriver: the home driver brought back from their temporary truck */
   returned_driver: { id: number; name: string; from_plate: string; plate: string } | null;
 }
+
+export interface FleetHistoryPage {
+  items: FleetAssignment[];
+  total: number;
+}

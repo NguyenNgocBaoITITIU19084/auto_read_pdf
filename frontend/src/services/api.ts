@@ -5,7 +5,7 @@ import {
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
-  FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult,
+  FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -877,5 +877,11 @@ export const deleteFleetDriverPhotoApi = async (id: number): Promise<FleetDriver
 
 export const getFleetHistoryApi = async (params: { driver_id?: number; vehicle_id?: number; limit?: number } = {}) =>
   (await apiClient.get<FleetAssignment[]>('/fleet/history', { params })).data;
+/** A page of the assignment history, sorted and filtered on the server (newest first by default). */
+export const getFleetHistoryPageApi = async (params: {
+  driver_id?: number; vehicle_id?: number; kinds?: string[]; states?: string[]; q?: string;
+  sort_by?: string; sort_dir?: 'asc' | 'desc'; limit: number; offset: number;
+}): Promise<FleetHistoryPage> =>
+  (await apiClient.get<FleetHistoryPage>('/fleet/history/page', { params, paramsSerializer: listParams })).data;
 export const getFleetExpiringApi = async (days = 30): Promise<FleetDocument[]> =>
   (await apiClient.get<FleetDocument[]>('/fleet/expiring', { params: { days } })).data;

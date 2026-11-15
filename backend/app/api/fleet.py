@@ -1,7 +1,7 @@
 """Fleet: trucks, drivers and who drives which truck. Errors answer {"detail": "<Vietnamese message>"}."""
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -196,6 +196,14 @@ def get_photo(name: str):
 @router.get("/history")
 def history(driver_id: Optional[int] = None, vehicle_id: Optional[int] = None, limit: int = 200):
     return fleet.list_history(driver_id, vehicle_id, limit)
+
+
+@router.get("/history/page")
+def history_page(driver_id: Optional[int] = None, vehicle_id: Optional[int] = None,
+                 kinds: Optional[List[str]] = Query(None), states: Optional[List[str]] = Query(None), q: str = "",
+                 sort_by: Optional[str] = None, sort_dir: str = "desc", limit: int = 50, offset: int = 0):
+    """A page of the assignment history: {"items", "total"} (see fleet.history_page)."""
+    return fleet.history_page(driver_id, vehicle_id, kinds, states, q, sort_by, sort_dir, limit, offset)
 
 
 @router.get("/expiring")
