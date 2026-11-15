@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
-  FileSpreadsheet, SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Wrench, X,
+  FileSpreadsheet, Info, SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -974,112 +974,120 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden p-4 gap-3 bg-slate-50/50 dark:bg-slate-950/50" data-testid="fleet-tab">
-      <div className="flex flex-wrap items-center gap-3 shrink-0">
-        <div className="p-2 bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 rounded-xl">
-          <Truck className="w-5 h-5" />
+    <div className="flex-1 flex flex-col h-full overflow-hidden p-4 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50" data-testid="fleet-tab">
+      {/* Row 1: what you look at (title + table switch), find, add */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
+        <div className="flex items-center gap-2.5" title={f.subtitle}>
+          <div className="p-1.5 bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 rounded-lg">
+            <Truck className="w-5 h-5" />
+          </div>
+          <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">{f.title}</h1>
         </div>
-        <div className="mr-auto min-w-0">
-          <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">{f.title}</h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{f.subtitle}</p>
-        </div>
-        <button type="button" onClick={() => void openExport()} disabled={exporting || (view === 'vehicles' ? !vs.length : view === 'drivers' ? !ds.length : !history?.total)}
-          title={f.exportHint}
-          className="inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50">
-          {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}{t.common.exportExcel}
-        </button>
-        <button type="button" onClick={() => setColumnsOpen(true)} title={f.columns.tooltip}
-          className="inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
-          <SlidersHorizontal className="w-4 h-4" />{t.common.columnsConfig}
-        </button>
-        {view !== 'history' && (
-          <button type="button" onClick={() => setTrashOpen(true)} title={tf(f.trash.tooltip, { days: TRASH_KEEP_DAYS })}
-            className="relative inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
-            <ArchiveRestore className="w-4 h-4" />{f.trash.button}
-            {trashBadge > 0 && (
-              <span className="min-w-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[10px] leading-4 text-center">
-                {trashBadge > 999 ? '999+' : trashBadge}
-              </span>
-            )}
-          </button>
-        )}
-        <button type="button" onClick={reload} disabled={loading} aria-label={f.refresh} title={f.refresh}
-          className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
-        {view !== 'history' && (
-          <button type="button"
-            onClick={() => (view === 'vehicles' ? setVehicleForm({ open: true, vehicle: null }) : setDriverForm({ open: true, driver: null }))}
-            className="inline-flex items-center gap-1.5 h-9 px-3.5 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm">
-            <Plus className="w-4 h-4" />
-            {view === 'vehicles' ? f.actions.addVehicle : f.actions.addDriver}
-          </button>
-        )}
-      </div>
-
-      {away.map((v) => (
-        <div key={v.id} role="status"
-          className="flex flex-wrap items-center gap-2 px-3.5 py-2.5 rounded-xl border border-sky-200 dark:border-sky-900/60 bg-sky-50 dark:bg-sky-950/30 text-sm text-sky-800 dark:text-sky-200 shrink-0">
-          <Undo2 className="w-4 h-4 shrink-0" />
-          <span className="mr-auto">{tf(f.awayBanner, { plate: v.plate, name: v.home_driver!.name, temp: v.home_driver!.driving_plate })}</span>
-          <button type="button" onClick={() => void returnHome(v.home_driver!.id, v.home_driver!.name)}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white">
-            {f.actions.returnHome}
-          </button>
-        </div>
-      ))}
-
-      <div className="flex flex-wrap items-center gap-2 shrink-0">
         <div role="tablist" className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800">
           {tabs.map((tab) => (
             <button key={tab.id} type="button" role="tab" aria-selected={view === tab.id} onClick={() => changeView(tab.id)}
-              className={`h-8 px-3.5 rounded-lg text-sm font-semibold transition-colors ${view === tab.id
+              className={`h-8 px-3.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors ${view === tab.id
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-sm'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
               {tab.label}{tab.count !== undefined && <span className="ml-1.5 text-xs font-medium text-slate-400">{tab.count}</span>}
             </button>
           ))}
         </div>
-        <div className="relative flex-1 min-w-[12rem] max-w-sm ml-auto">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={f.search} aria-label={f.search}
-            className="w-full h-9 pl-9 pr-8 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40" />
-          {query && (
-            <button type="button" aria-label={f.clearFilter} onClick={() => setQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+        <div className="flex items-center gap-2 ml-auto flex-1 min-w-[16rem] justify-end">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={f.search} aria-label={f.search}
+              className="w-full h-9 pl-9 pr-8 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40" />
+            {query && (
+              <button type="button" aria-label={f.clearFilter} onClick={() => setQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+            )}
+          </div>
+          {view !== 'history' && (
+            <button type="button"
+              onClick={() => (view === 'vehicles' ? setVehicleForm({ open: true, vehicle: null }) : setDriverForm({ open: true, driver: null }))}
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm whitespace-nowrap">
+              <Plus className="w-4 h-4" />
+              {view === 'vehicles' ? f.actions.addVehicle : f.actions.addDriver}
+            </button>
           )}
         </div>
       </div>
 
-      {vehicles && (view !== 'history' || colFilterCount > 0) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 shrink-0">
-        <div role="group" aria-label={f.filters.label} className="flex flex-wrap gap-1.5">
-          {filterChips.filter((c) => c.id === 'all' || c.count > 0 || c.active).map((c) => (
-            <button key={c.id} type="button" aria-pressed={c.active} onClick={c.select}
-              className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold border transition-colors ${c.active
-                ? 'border-primary-500 bg-primary-600 text-white'
-                : `border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 ${c.tone}`}`}>
-              {c.label}
-              <span className={`min-w-[1.25rem] px-1 rounded-full text-[11px] ${c.active ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{c.count}</span>
-            </button>
-          ))}
-        </div>
+      {/* Row 2: narrow it down (left), do something with it (right) */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 shrink-0">
+        {view !== 'history' ? (
+          <div role="group" aria-label={f.filters.label} className="flex flex-wrap items-center gap-1.5">
+            {vehicles && filterChips.filter((c) => c.id === 'all' || c.count > 0 || c.active).map((c) => (
+              <button key={c.id} type="button" aria-pressed={c.active} onClick={c.select}
+                className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold border transition-colors ${c.active
+                  ? 'border-primary-500 bg-primary-600 text-white'
+                  : `border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 ${c.tone}`}`}>
+                {c.label}
+                <span className={`min-w-[1.25rem] px-1 rounded-full text-[11px] ${c.active ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{c.count}</span>
+              </button>
+            ))}
+          </div>
+        ) : historyFilter ? (
+          <div className="inline-flex items-center gap-2 h-8 pl-3 pr-1 rounded-full border border-primary-200 dark:border-primary-900 bg-primary-50 dark:bg-primary-950/30 text-xs font-semibold text-primary-800 dark:text-primary-200">
+            {tf(f.historyFor, { name: historyFilter.label })}
+            <button type="button" onClick={() => setHistoryFilter(null)} aria-label={f.clearFilter} title={f.clearFilter}
+              className="p-1 rounded-full hover:bg-primary-100 dark:hover:bg-primary-900/50"><X className="w-3.5 h-3.5" /></button>
+          </div>
+        ) : null}
         {colFilterCount > 0 && (
           <button type="button" onClick={clearColFilters}
             className="inline-flex items-center gap-1 h-8 px-2.5 rounded-full text-xs font-semibold text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-950/30">
             <X className="w-3.5 h-3.5" />{tf(T.clearFilters, { count: colFilterCount })}
           </button>
         )}
-        <span className="ml-auto text-[11px] text-slate-400 dark:text-slate-500">{f.detail.hint}</span>
-        </div>
-      )}
 
-      {view === 'history' && historyFilter && (
-        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 shrink-0">
-          <span>{tf(f.historyFor, { name: historyFilter.label })}</span>
-          <button type="button" onClick={() => setHistoryFilter(null)} className="font-semibold text-primary-600 hover:underline">{f.clearFilter}</button>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-slate-400 dark:text-slate-500 cursor-help" title={f.detail.hint} aria-label={f.detail.hint}>
+            <Info className="w-4 h-4" />
+          </span>
+          <div role="toolbar" aria-label={f.toolbar}
+            className="inline-flex items-stretch h-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 divide-x divide-slate-200 dark:divide-slate-700 overflow-hidden">
+            <button type="button" onClick={() => void openExport()} disabled={exporting || (view === 'vehicles' ? !vs.length : view === 'drivers' ? !ds.length : !history?.total)}
+              title={f.exportHint}
+              className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50">
+              {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />}{t.common.exportExcel}
+            </button>
+            <button type="button" onClick={() => setColumnsOpen(true)} title={f.columns.tooltip}
+              className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+              <SlidersHorizontal className="w-3.5 h-3.5" />{t.common.columnsConfig}
+            </button>
+            {view !== 'history' && (
+              <button type="button" onClick={() => setTrashOpen(true)} title={tf(f.trash.tooltip, { days: TRASH_KEEP_DAYS })}
+                className="inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+                <ArchiveRestore className="w-3.5 h-3.5" />{f.trash.button}
+                {trashBadge > 0 && (
+                  <span className="min-w-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[10px] leading-4 text-center">
+                    {trashBadge > 999 ? '999+' : trashBadge}
+                  </span>
+                )}
+              </button>
+            )}
+            <button type="button" onClick={reload} disabled={loading} aria-label={f.refresh} title={f.refresh}
+              className="inline-flex items-center justify-center w-8 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
         </div>
-      )}
+      </div>
+
+      {/* Needs a hand: home drivers who can go back to their truck */}
+      {away.map((v) => (
+        <div key={v.id} role="status"
+          className="flex flex-wrap items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-lg border border-sky-200 dark:border-sky-900/60 bg-sky-50 dark:bg-sky-950/30 text-sm text-sky-800 dark:text-sky-200 shrink-0">
+          <Undo2 className="w-4 h-4 shrink-0" />
+          <span className="mr-auto">{tf(f.awayBanner, { plate: v.plate, name: v.home_driver!.name, temp: v.home_driver!.driving_plate })}</span>
+          <button type="button" onClick={() => void returnHome(v.home_driver!.id, v.home_driver!.name)}
+            className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white">
+            {f.actions.returnHome}
+          </button>
+        </div>
+      ))}
 
       {failed ? (
         <div role="alert" className="flex items-center justify-between gap-2 p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 text-sm text-rose-700 dark:text-rose-300">
