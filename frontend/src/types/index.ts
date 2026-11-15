@@ -797,3 +797,12 @@ export interface FleetHistoryPage {
   items: FleetAssignment[];
   total: number;
 }
+
+/** A truck / driver in the trash: its stored row plus when it goes for good. */
+export interface FleetTrashFields { id: number; deleted_at: string; purge_at: string; days_left: number }
+export interface FleetTrashedVehicle extends FleetTrashFields {
+  plate: string; trailer_plate: string; vehicle_type: string; status: VehicleStatus; photo: string; note: string;
+}
+export interface FleetTrashedDriver extends FleetTrashFields {
+  name: string; phone: string; license_no: string; license_class: string; status: DriverStatus; photo: string; note: string;
+}

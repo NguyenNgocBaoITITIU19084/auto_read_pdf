@@ -1258,7 +1258,8 @@ def _purge_trash(conn: sqlite3.Connection, k: _TrashKind) -> int:
 
 
 def purge_expired_trash() -> int:
-    """Permanently delete bookings, vessel schedules and containers in the trash longer than TRASH_KEEP_DAYS."""
+    """Permanently delete bookings, vessel schedules, containers, trucks and drivers in the trash longer than
+    TRASH_KEEP_DAYS."""
     total = 0
     with get_connection() as conn:
         for k in _TRASH_KINDS.values():
@@ -1266,6 +1267,11 @@ def purge_expired_trash() -> int:
             if removed:
                 logger.info(f"Purged {removed} {k.label}(s) from the trash after {TRASH_KEEP_DAYS} days")
             total += removed
+    try:
+        from backend.app.core.fleet import purge_expired_trash as purge_fleet_trash
+        total += purge_fleet_trash()
+    except Exception:
+        logger.exception("Could not purge the fleet trash")
     return total
 
 

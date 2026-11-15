@@ -6,7 +6,7 @@ import type { FleetDriver, FleetVehicle } from '../../types';
 
 const addToast = vi.fn();
 const confirmMock = vi.fn();
-vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi }) }));
+vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
 vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
 vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => confirmMock }));
 
@@ -15,6 +15,9 @@ const api = {
   getFleetDriversApi: vi.fn(),
   getFleetHistoryApi: vi.fn(),
   getFleetHistoryPageApi: vi.fn(),
+  getFleetTrashCountApi: vi.fn(),
+  trashList: vi.fn(),
+  trashRestore: vi.fn(),
   setFleetVehicleStatusApi: vi.fn(),
   returnDriverHomeApi: vi.fn(),
   setDriverHomeVehicleApi: vi.fn(),
@@ -26,6 +29,15 @@ vi.mock('../../services/api', () => ({
   getFleetDriversApi: (...a: unknown[]) => api.getFleetDriversApi(...a),
   getFleetHistoryApi: (...a: unknown[]) => api.getFleetHistoryApi(...a),
   getFleetHistoryPageApi: (...a: unknown[]) => api.getFleetHistoryPageApi(...a),
+  getFleetTrashCountApi: (...a: unknown[]) => api.getFleetTrashCountApi(...a),
+  fleetVehicleTrashApi: {
+    list: (...a: unknown[]) => api.trashList('vehicle', ...a), ids: async () => [],
+    restore: (ids: number[]) => api.trashRestore('vehicle', ids), deleteNow: async () => 0,
+  },
+  fleetDriverTrashApi: {
+    list: (...a: unknown[]) => api.trashList('driver', ...a), ids: async () => [],
+    restore: (ids: number[]) => api.trashRestore('driver', ids), deleteNow: async () => 0,
+  },
   setFleetVehicleStatusApi: (...a: unknown[]) => api.setFleetVehicleStatusApi(...a),
   returnDriverHomeApi: (...a: unknown[]) => api.returnDriverHomeApi(...a),
   setDriverHomeVehicleApi: (...a: unknown[]) => api.setDriverHomeVehicleApi(...a),
@@ -66,6 +78,9 @@ beforeEach(() => {
   localStorage.clear();
   api.getFleetHistoryApi.mockResolvedValue([]);
   api.getFleetHistoryPageApi.mockResolvedValue({ items: [], total: 0 });
+  api.getFleetTrashCountApi.mockResolvedValue({ vehicle: 0, driver: 0 });
+  api.trashList.mockResolvedValue({ items: [], total: 0, keep_days: 30 });
+  Object.keys(localStorage).forEach((k) => localStorage.removeItem(k));
 });
 
 describe('FleetTab', () => {
@@ -388,5 +403,58 @@ describe('FleetTab sort, column filters and pages', () => {
     fireEvent.click(await screen.findByLabelText(f.kind.temporary));
     await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(
       expect.objectContaining({ kinds: ['temporary'], offset: 0 })));
+  });
+});
+
+describe('FleetTab trash and columns', () => {
+  it('opens the trash of the current table, with its count, and restores from it', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetTrashCountApi.mockResolvedValue({ vehicle: 2, driver: 0 });
+    api.trashList.mockResolvedValue({ total: 1, keep_days: 30, items: [{
+      id: 7, plate: '51C-777', trailer_plate: '51R-7', vehicle_type: 'Hino', status: 'active', photo: '', note: '',
+      deleted_at: '2026-11-15 10:00:00', purge_at: '2026-12-15 10:00:00', days_left: 29 }] });
+    api.trashRestore.mockResolvedValue({ restored: 1 });
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    const button = await screen.findByRole('button', { name: /Thùng rác\s*2/ });
+    fireEvent.click(button);
+    expect(await screen.findByText('51C-777')).toBeInTheDocument();
+    expect(api.trashList).toHaveBeenCalledWith('vehicle', 0, expect.any(Number), 0);
+    fireEvent.click(screen.getAllByText(f.trash.vehicle.restore)[0]);
+    await waitFor(() => expect(api.trashRestore).toHaveBeenCalledWith('vehicle', [7]));
+  });
+
+  it('a delete says it goes to the trash', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.deleteFleetVehicleApi.mockResolvedValue(undefined);
+    confirmMock.mockResolvedValue(true);
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByRole('menuitem', { name: f.menu.delete }));
+    await waitFor(() => expect(api.deleteFleetVehicleApi).toHaveBeenCalledWith(1));
+    expect(confirmMock.mock.calls[0][0].message).toContain('thùng rác');
+    expect(confirmMock.mock.calls[0][0].message).toContain('30 ngày');
+    expect(api.getFleetTrashCountApi).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows extra columns turned on in the column settings', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { trailer_plate: '51R-9', registration_expiry: '2031-05-01' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    expect(screen.queryByRole('columnheader', { name: /Hạn đăng kiểm/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(translations.vi.common.columnsConfig));
+    const toggle = (label: string) =>
+      fireEvent.click(screen.getByDisplayValue(label).closest('.justify-between')!.querySelector('button')!);
+    toggle(f.columns.registration);
+    toggle(f.columns.trailer);
+    expect(screen.getByRole('columnheader', { name: /Hạn đăng kiểm/ })).toBeInTheDocument();
+    expect(within(screen.getByTestId('vehicle-1')).getByText('01/05/2031')).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem('fleet_vehicles_table_columns') || '[]')
+      .filter((c: { visible: boolean }) => c.visible).map((c: { key: string }) => c.key))
+      .toEqual(['plate', 'status', 'driver', 'docs', 'trailer', 'registration']);
   });
 });

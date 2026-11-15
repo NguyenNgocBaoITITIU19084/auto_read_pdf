@@ -130,10 +130,14 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL
         );
     """)
-    # databases made before photos existed
+    # databases made before photos / the trash existed
     for table in PHOTO_ENTITIES.values():
-        if "photo" not in {r[1] for r in conn.execute(f"PRAGMA table_info({table});")}:
+        columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table});")}
+        if "photo" not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN photo TEXT NOT NULL DEFAULT '';")
+        if "deleted_at" not in columns:
+            # set = in the trash (see "Trash"): hidden everywhere, restorable for TRASH_KEEP_DAYS days
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT;")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_fleet_drivers_home ON fleet_drivers(home_vehicle_id) "
                  "WHERE home_vehicle_id IS NOT NULL;")
     conn.execute("""
@@ -178,14 +182,16 @@ def _rows(conn, sql: str, params: tuple = ()) -> list[dict]:
 
 
 def _vehicle(conn, vehicle_id: int) -> dict:
-    rows = _rows(conn, "SELECT * FROM fleet_vehicles WHERE id = ?;", (vehicle_id,))
+    """A truck that is not in the trash (404 otherwise)."""
+    rows = _rows(conn, "SELECT * FROM fleet_vehicles WHERE id = ? AND deleted_at IS NULL;", (vehicle_id,))
     if not rows:
         raise FleetError("Không tìm thấy xe", 404)
     return rows[0]
 
 
 def _driver(conn, driver_id: int) -> dict:
-    rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE id = ?;", (driver_id,))
+    """A driver who is not in the trash (404 otherwise)."""
+    rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE id = ? AND deleted_at IS NULL;", (driver_id,))
     if not rows:
         raise FleetError("Không tìm thấy tài xế", 404)
     return rows[0]
@@ -202,16 +208,17 @@ def _open_by_vehicle(conn, vehicle_id: int) -> dict | None:
 
 
 def _home_driver_of(conn, vehicle_id: int) -> dict | None:
-    rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE home_vehicle_id = ?;", (vehicle_id,))
+    rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE home_vehicle_id = ? AND deleted_at IS NULL;", (vehicle_id,))
     return rows[0] if rows else None
 
 
 def list_vehicles() -> list[dict]:
     """Every truck with its home driver and whoever drives it now (kind "primary" or "temporary")."""
     with _conn() as conn:
-        vehicles = _rows(conn, "SELECT * FROM fleet_vehicles;")
+        vehicles = _rows(conn, "SELECT * FROM fleet_vehicles WHERE deleted_at IS NULL;")
         homes = {r["home_vehicle_id"]: r for r in _rows(
-            conn, "SELECT id, name, status, photo, home_vehicle_id FROM fleet_drivers WHERE home_vehicle_id IS NOT NULL;")}
+            conn, "SELECT id, name, status, photo, home_vehicle_id FROM fleet_drivers "
+                  "WHERE home_vehicle_id IS NOT NULL AND deleted_at IS NULL;")}
         current = {r["vehicle_id"]: r for r in _rows(conn, """
             SELECT a.vehicle_id, a.driver_id, a.kind, a.started_at, a.reason, d.name, d.phone, d.photo
             FROM fleet_assignments a JOIN fleet_drivers d ON d.id = a.driver_id
@@ -245,7 +252,8 @@ def list_drivers() -> list[dict]:
     with _conn() as conn:
         drivers = _rows(conn, """
             SELECT d.*, hv.plate AS home_plate, hv.status AS home_status
-            FROM fleet_drivers d LEFT JOIN fleet_vehicles hv ON hv.id = d.home_vehicle_id;""")
+            FROM fleet_drivers d LEFT JOIN fleet_vehicles hv ON hv.id = d.home_vehicle_id
+            WHERE d.deleted_at IS NULL;""")
         current = {r["driver_id"]: r for r in _rows(conn, """
             SELECT a.driver_id, a.vehicle_id, a.kind, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo
             FROM fleet_assignments a JOIN fleet_vehicles v ON v.id = a.vehicle_id
@@ -553,17 +561,22 @@ def _clean_vehicle(data: dict, partial: bool) -> dict:
     return out
 
 
+_IN_TRASH = "đang nằm trong thùng rác: hãy khôi phục xe đó hoặc xóa hẳn"
+
+
 def _check_vehicle_unique(conn, fields: dict, exclude_id: int | None) -> None:
+    """Plates and trailers stay unique across trucks in the trash too, so a restore never clashes."""
     if "plate" in fields:
-        row = conn.execute("SELECT plate FROM fleet_vehicles WHERE plate_key = ? AND id != ?;",
+        row = conn.execute("SELECT plate, deleted_at FROM fleet_vehicles WHERE plate_key = ? AND id != ?;",
                            (plate_key(fields["plate"]), exclude_id or -1)).fetchone()
         if row:
-            raise FleetError(f"Biển số {row[0]} đã có trong danh sách", 409)
+            raise FleetError(f"Biển số {row[0]} {_IN_TRASH}" if row[1] else f"Biển số {row[0]} đã có trong danh sách", 409)
     if fields.get("trailer_plate"):
-        row = conn.execute("SELECT plate FROM fleet_vehicles WHERE trailer_key = ? AND id != ?;",
+        row = conn.execute("SELECT plate, deleted_at FROM fleet_vehicles WHERE trailer_key = ? AND id != ?;",
                            (plate_key(fields["trailer_plate"]), exclude_id or -1)).fetchone()
         if row:
-            raise FleetError(f"Moóc {fields['trailer_plate']} đang gắn với xe {row[0]}", 409)
+            raise FleetError(f"Moóc {fields['trailer_plate']} gắn với xe {row[0]} {_IN_TRASH}" if row[1]
+                             else f"Moóc {fields['trailer_plate']} đang gắn với xe {row[0]}", 409)
 
 
 def create_vehicle(data: dict) -> int:
@@ -603,15 +616,14 @@ def update_vehicle(vehicle_id: int, data: dict) -> None:
 
 
 def delete_vehicle(vehicle_id: int) -> None:
-    """Delete a truck. Its driver gets off it and its home driver loses it; the history keeps its plate."""
+    """Move a truck to the trash. Its driver gets off it and its home driver loses it; the history keeps its plate."""
     stamp = _now()
     with _conn() as conn:
         vehicle = _vehicle(conn, vehicle_id)
         _close(conn, _open_by_vehicle(conn, vehicle_id), f"Xóa xe {vehicle['plate']}", stamp)
         conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE home_vehicle_id = ?;",
                      (stamp, vehicle_id))
-        conn.execute("DELETE FROM fleet_vehicles WHERE id = ?;", (vehicle_id,))
-    _delete_photo_file(vehicle.get("photo"))
+        conn.execute("UPDATE fleet_vehicles SET deleted_at = ? WHERE id = ?;", (stamp, vehicle_id))
 
 
 def _clean_driver(data: dict, partial: bool) -> dict:
@@ -685,12 +697,115 @@ def update_driver(driver_id: int, data: dict) -> None:
 
 
 def delete_driver(driver_id: int) -> None:
+    """Move a driver to the trash: off their truck and without an own truck (it is free for someone else)."""
     stamp = _now()
     with _conn() as conn:
         driver = _driver(conn, driver_id)
         _close(conn, _open_by_driver(conn, driver_id), f"Xóa tài xế {driver['name']}", stamp)
-        conn.execute("DELETE FROM fleet_drivers WHERE id = ?;", (driver_id,))
-    _delete_photo_file(driver.get("photo"))
+        conn.execute("UPDATE fleet_drivers SET deleted_at = ?, home_vehicle_id = NULL WHERE id = ?;", (stamp, driver_id))
+
+
+# ---------------------------------------------------------------------------
+# Trash: deleted trucks / drivers wait TRASH_KEEP_DAYS days (photos kept) before being purged
+# ---------------------------------------------------------------------------
+TRASH_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers"}
+
+
+def _keep_days() -> int:
+    from backend.app.core.database import TRASH_KEEP_DAYS
+    return TRASH_KEEP_DAYS
+
+
+def _trash_table(kind: str) -> str:
+    if kind not in TRASH_ENTITIES:
+        raise FleetError(f"Loại không hợp lệ: {kind}")
+    return TRASH_ENTITIES[kind]
+
+
+def _clean_ids(ids) -> list[int]:
+    out = []
+    for i in ids or []:
+        try:
+            out.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    return sorted(set(out))
+
+
+def trash_page(kind: str, limit: int = 50, offset: int = 0) -> dict:
+    """{"items", "total", "keep_days"}: the kind's rows in the trash, last deleted first, each with "deleted_at",
+    "purge_at" and "days_left" (whole days before it is deleted for good)."""
+    table = _trash_table(kind)
+    keep = _keep_days()
+    limit = max(1, min(int(limit or 50), HISTORY_MAX_LIMIT))
+    offset = max(0, int(offset or 0))
+    now = datetime.now(VN_TZ).replace(tzinfo=None)
+    with _conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL;").fetchone()[0]
+        rows = _rows(conn, f"SELECT * FROM {table} WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC "
+                           "LIMIT ? OFFSET ?;", (limit, offset))
+    for r in rows:
+        purge = datetime.strptime(r["deleted_at"], "%Y-%m-%d %H:%M:%S") + timedelta(days=keep)
+        r["purge_at"] = purge.strftime("%Y-%m-%d %H:%M:%S")
+        r["days_left"] = max(0, (purge - now).days)
+    return {"items": rows, "total": total, "keep_days": keep}
+
+
+def trash_ids(kind: str) -> list[int]:
+    table = _trash_table(kind)
+    with _conn() as conn:
+        return [r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE deleted_at IS NOT NULL ORDER BY id;")]
+
+
+def trash_count() -> dict:
+    with _conn() as conn:
+        return {kind: conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL;").fetchone()[0]
+                for kind, table in TRASH_ENTITIES.items()}
+
+
+def restore_from_trash(kind: str, ids) -> int:
+    """Back out of the trash, as they were but without a truck / driver (those links were let go on delete)."""
+    table = _trash_table(kind)
+    clean = _clean_ids(ids)
+    if not clean:
+        return 0
+    stamp = _now()
+    with _conn() as conn:
+        cur = conn.execute(f"UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE deleted_at IS NOT NULL "
+                           f"AND id IN ({','.join('?' * len(clean))});", (stamp, *clean))
+        return max(cur.rowcount, 0)
+
+
+def _purge(conn, table: str, where: str, params: tuple) -> int:
+    rows = conn.execute(f"SELECT id, photo FROM {table} WHERE deleted_at IS NOT NULL AND {where};", params).fetchall()
+    if not rows:
+        return 0
+    conn.execute(f"DELETE FROM {table} WHERE id IN ({','.join('?' * len(rows))});", tuple(r[0] for r in rows))
+    for _, photo in rows:
+        _delete_photo_file(photo)
+    return len(rows)
+
+
+def delete_from_trash(kind: str, ids) -> int:
+    """Delete for good (photo included). The assignment history keeps their name / plate."""
+    table = _trash_table(kind)
+    clean = _clean_ids(ids)
+    if not clean:
+        return 0
+    with _conn() as conn:
+        return _purge(conn, table, f"id IN ({','.join('?' * len(clean))})", tuple(clean))
+
+
+def purge_expired_trash() -> int:
+    """Delete for good the trucks / drivers in the trash longer than TRASH_KEEP_DAYS days."""
+    cutoff = (datetime.now(VN_TZ) - timedelta(days=_keep_days())).strftime("%Y-%m-%d %H:%M:%S")
+    total = 0
+    with _conn() as conn:
+        for table in TRASH_ENTITIES.values():
+            total += _purge(conn, table, "deleted_at < ?", (cutoff,))
+    if total:
+        logger.info(f"Purged {total} truck(s) / driver(s) from the fleet trash")
+    return total
 
 
 # ---------------------------------------------------------------------------
@@ -752,7 +867,7 @@ def set_photo(entity: str, entity_id: int, data: bytes) -> str:
     table = PHOTO_ENTITIES[entity]
     jpeg = _to_jpeg(data)
     with _conn() as conn:
-        row = conn.execute(f"SELECT photo FROM {table} WHERE id = ?;", (entity_id,)).fetchone()
+        row = conn.execute(f"SELECT photo FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
         if not row:
             raise FleetError("Không tìm thấy xe" if entity == "vehicle" else "Không tìm thấy tài xế", 404)
         old = row[0]
@@ -768,7 +883,7 @@ def set_photo(entity: str, entity_id: int, data: bytes) -> str:
 def remove_photo(entity: str, entity_id: int) -> None:
     table = PHOTO_ENTITIES[entity]
     with _conn() as conn:
-        row = conn.execute(f"SELECT photo FROM {table} WHERE id = ?;", (entity_id,)).fetchone()
+        row = conn.execute(f"SELECT photo FROM {table} WHERE id = ? AND deleted_at IS NULL;", (entity_id,)).fetchone()
         if not row:
             raise FleetError("Không tìm thấy xe" if entity == "vehicle" else "Không tìm thấy tài xế", 404)
         conn.execute(f"UPDATE {table} SET photo = '', updated_at = ? WHERE id = ?;", (_now(), entity_id))
@@ -789,7 +904,8 @@ def expiring_documents(today: date, within_days: int = EXPIRY_REMINDER_DAYS[0]) 
             name_col = "plate" if entity == "vehicle" else "name"
             skip = "inactive" if entity == "vehicle" else "left"
             for row_id, subject, expiry in conn.execute(
-                    f"SELECT id, {name_col}, {column} FROM {table} WHERE {column} != '' AND status != ?;", (skip,)):
+                    f"SELECT id, {name_col}, {column} FROM {table} WHERE {column} != '' AND status != ? "
+                    "AND deleted_at IS NULL;", (skip,)):
                 try:
                     left = (date.fromisoformat(expiry) - today).days
                 except ValueError:

@@ -6,6 +6,7 @@ import {
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
   FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
+  FleetTrashedVehicle, FleetTrashedDriver,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -883,5 +884,22 @@ export const getFleetHistoryPageApi = async (params: {
   sort_by?: string; sort_dir?: 'asc' | 'desc'; limit: number; offset: number;
 }): Promise<FleetHistoryPage> =>
   (await apiClient.get<FleetHistoryPage>('/fleet/history/page', { params, paramsSerializer: listParams })).data;
+/** The fleet trash, shaped like the collections' trash APIs (TrashModal); fleet data has no collection, so the
+ *  collection argument is ignored. */
+const fleetTrashApi = <T,>(kind: 'vehicle' | 'driver') => ({
+  list: async (_collectionId: number, limit: number, offset: number) =>
+    (await apiClient.get<PageResult<T> & { keep_days?: number }>('/fleet/trash', { params: { kind, limit, offset } })).data,
+  ids: async (_collectionId: number) =>
+    (await apiClient.get<{ ids: number[] }>('/fleet/trash/ids', { params: { kind } })).data.ids,
+  restore: async (ids: number[]) =>
+    (await apiClient.post<{ restored: number }>('/fleet/trash/restore', { kind, ids })).data,
+  deleteNow: async (ids: number[]) =>
+    (await apiClient.post<{ deleted: number }>('/fleet/trash/delete', { kind, ids })).data.deleted,
+});
+export const fleetVehicleTrashApi = fleetTrashApi<FleetTrashedVehicle>('vehicle');
+export const fleetDriverTrashApi = fleetTrashApi<FleetTrashedDriver>('driver');
+export const getFleetTrashCountApi = async (): Promise<{ vehicle: number; driver: number }> =>
+  (await apiClient.get<{ vehicle: number; driver: number }>('/fleet/trash/count')).data;
+
 export const getFleetExpiringApi = async (days = 30): Promise<FleetDocument[]> =>
   (await apiClient.get<FleetDocument[]>('/fleet/expiring', { params: { days } })).data;

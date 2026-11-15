@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search, StickyNote,
-  Trash2, Truck, Undo2, Wrench, X,
+  AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
+  SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -9,15 +9,20 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
   deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, returnDriverHomeApi,
-  setFleetVehicleStatusApi,
+  setFleetVehicleStatusApi, getFleetTrashCountApi,
 } from '../../services/api';
+import { useColumnSettings } from '../../hooks/useColumnSettings';
+import { ColumnConfigModal, type ColumnDef } from '../common/ColumnConfigModal';
+import { TRASH_KEEP_DAYS } from '../common/TrashModal';
+import { FleetTrashModal } from './FleetTrashModal';
 import { useTableSort } from '../../hooks/useTableSort';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { ResizableTh } from '../common/ResizableTh';
 import { ColumnValueFilter } from '../common/ColumnValueFilter';
 import { Pagination } from '../common/Pagination';
 import { PAGE_SIZE_OPTIONS, applyColumnFilters, sortRows, usePageRows, usePaging, valueCounts } from './fleetTable';
-import { DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDocumentKind, type FleetDriver, type FleetHistoryPage,
+import { DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetAssignment, type FleetDocumentKind, type FleetDriver,
+  type FleetHistoryPage,
   type FleetVehicle, type VehicleStatus } from '../../types';
 import { daysLeftText } from '../common/ReminderViews';
 import { DriverFormModal, DriverMoveModal, VehicleFormModal, VehicleStatusModal } from './FleetModals';
@@ -131,6 +136,21 @@ const DocsCell: React.FC<{ entries: [FleetDocumentKind, string][]; today: string
         </Chip>
       ))}
     </div>
+  );
+};
+
+/** A single date column: the date, and the days left once inside the reminder window. */
+const DateCell: React.FC<{ iso: string; today: string; muted?: boolean }> = ({ iso, today, muted }) => {
+  const { t } = useApp();
+  const days = daysUntil(iso, today);
+  if (days === null) return <span className="text-slate-300 dark:text-slate-600">{t.fleet.none}</span>;
+  const warn = !muted && days <= EXPIRY_WARN_DAYS;
+  return (
+    <span className="whitespace-nowrap tabular-nums">
+      <span className={warn ? (days < 0 ? 'font-semibold text-rose-600 dark:text-rose-400' : 'font-semibold text-amber-700 dark:text-amber-300')
+        : 'text-slate-700 dark:text-slate-200'}>{formatIsoDate(iso)}</span>
+      {warn && <span className={`block text-[11px] ${days < 0 ? 'text-rose-500' : 'text-amber-600 dark:text-amber-400'}`}>{daysLeftText(days, t)}</span>}
+    </span>
   );
 };
 
@@ -281,17 +301,33 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     status: (v: FleetVehicle) => VEHICLE_STATUSES.indexOf(v.status),
     driver: (v: FleetVehicle) => v.current_driver?.name ?? null,
     docs: (v: FleetVehicle) => soonestDays(vehicleDocs(v), today),
+    trailer: (v: FleetVehicle) => v.trailer_plate,
+    type: (v: FleetVehicle) => v.vehicle_type,
+    home: (v: FleetVehicle) => v.home_driver?.name ?? null,
+    registration: (v: FleetVehicle) => v.registration_expiry,
+    insurance: (v: FleetVehicle) => v.insurance_expiry,
+    note: (v: FleetVehicle) => v.note,
+    created: (v: FleetVehicle) => v.created_at,
   }), [today]);
   const driverValue: Record<string, (d: FleetDriver) => string> = useMemo(() => ({
     status: (d) => d.status,
     truck: (d) => (d.current_vehicle ? d.current_vehicle.kind : 'none'),
     license: (d) => docState(driverDocs(d), today),
+    license_class: (d) => d.license_class,
   }), [today]);
   const driverSortValue = useMemo(() => ({
     name: (d: FleetDriver) => d.name,
     status: (d: FleetDriver) => DRIVER_STATUSES.indexOf(d.status),
     truck: (d: FleetDriver) => d.current_vehicle?.plate ?? null,
     license: (d: FleetDriver) => soonestDays(driverDocs(d), today),
+    phone: (d: FleetDriver) => d.phone,
+    id_number: (d: FleetDriver) => d.id_number,
+    license_no: (d: FleetDriver) => d.license_no,
+    license_class: (d: FleetDriver) => d.license_class,
+    license_expiry: (d: FleetDriver) => d.license_expiry,
+    home: (d: FleetDriver) => d.home_vehicle?.plate ?? null,
+    note: (d: FleetDriver) => d.note,
+    created: (d: FleetDriver) => d.created_at,
   }), [today]);
 
   const sortedVehicles = useMemo(() => sortRows(applyColumnFilters(shownVehicles, vehicleCols, vehicleValue), vehicleSort.sort,
@@ -312,8 +348,10 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     key: string, label: string, sorter: ReturnType<typeof useTableSort>,
     filter?: { options: () => { carrier: string; count: number }[]; value: string[]; onChange: (v: string[]) => void;
       format: (v: string) => string; column?: string },
+    size?: { width?: number; onResize?: (key: string, e: React.MouseEvent) => void },
   ) => (
     <ResizableTh key={key} colKey={key} label={label} className="px-4 py-2.5" sortDir={sorter.sortDirOf(key)} onSort={sorter.toggleSort}
+      width={size?.width} onResize={size?.onResize}
       sortLabels={t.common.sort}
       extra={filter && (
         <ColumnValueFilter column={filter.column || label} loadOptions={async () => filter.options()} value={filter.value}
@@ -323,6 +361,42 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const setCol = (setter: React.Dispatch<React.SetStateAction<Record<string, string[]>>>, key: string) =>
     (values: string[]) => setter((prev) => ({ ...prev, [key]: values }));
   const T = f.table;
+
+  // ---- column settings (Cấu hình cột): order, visibility, labels, widths — one per table ----
+  const C = f.columns;
+  const defaults = (keys: [string, string, boolean][]): ColumnDef[] => keys.map(([key, label, visible]) => ({ key, label, visible }));
+  const vehicleDefaults = useMemo(() => defaults([
+    ['plate', L.vehicle, true], ['status', L.status, true], ['driver', L.driver, true], ['docs', L.docs, true],
+    ['trailer', C.trailer, false], ['type', C.type, false], ['home', C.home, false], ['registration', C.registration, false],
+    ['insurance', C.insurance, false], ['note', C.note, false], ['created', C.created, false],
+  ]), [L, C]);
+  const driverDefaults = useMemo(() => defaults([
+    ['name', L.driver, true], ['status', L.status, true], ['truck', L.truck, true], ['license', L.license, true],
+    ['phone', C.phone, false], ['id_number', C.idNumber, false], ['license_no', C.licenseNo, false],
+    ['license_class', C.licenseClass, false], ['license_expiry', C.licenseExpiry, false], ['home', C.homeVehicle, false],
+    ['note', C.note, false], ['created', C.created, false],
+  ]), [L, C]);
+  const historyDefaults = useMemo(() => defaults([
+    ['started_at', f.cols.started, true], ['ended_at', f.cols.ended, true], ['driver_name', f.cols.name, true],
+    ['vehicle_plate', f.cols.vehicle, true], ['reason', f.cols.reason, true], ['end_reason', f.cols.endReason, true],
+  ]), [f.cols]);
+  const vehicleColumns = useColumnSettings({ storageKey: 'fleet_vehicles_table', defaultColumns: vehicleDefaults });
+  const driverColumns = useColumnSettings({ storageKey: 'fleet_drivers_table', defaultColumns: driverDefaults });
+  const historyColumns = useColumnSettings({ storageKey: 'fleet_history_table', defaultColumns: historyDefaults });
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const activeColumns = view === 'vehicles' ? vehicleColumns : view === 'drivers' ? driverColumns : historyColumns;
+
+  // ---- trash ----
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashCount, setTrashCount] = useState({ vehicle: 0, driver: 0 });
+  const loadTrashCount = useCallback(() => {
+    getFleetTrashCountApi().then(setTrashCount).catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadTrashCount();
+  }, [loadTrashCount]);
+  const trashKind: 'vehicle' | 'driver' = view === 'drivers' ? 'driver' : 'vehicle';
+  const trashBadge = trashCount[trashKind];
 
   const returnHome = async (driverId: number, name: string) => {
     setBusyId(`d${driverId}`);
@@ -356,22 +430,24 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   };
 
   const removeVehicle = async (v: FleetVehicle) => {
-    if (!(await confirm({ message: tf(f.confirmDeleteVehicle, { plate: v.plate }), confirmText: f.actions.delete, danger: true }))) return;
+    if (!(await confirm({ message: tf(f.confirmDeleteVehicle, { plate: v.plate, days: TRASH_KEEP_DAYS }), confirmText: f.actions.delete, danger: true }))) return;
     try {
       await deleteFleetVehicleApi(v.id);
       addToast(f.toast.deleted, 'success');
       reload();
+      loadTrashCount();
     } catch (err) {
       addToast(apiError(err, f.toast.error), 'error');
     }
   };
 
   const removeDriver = async (d: FleetDriver) => {
-    if (!(await confirm({ message: tf(f.confirmDeleteDriver, { name: d.name }), confirmText: f.actions.delete, danger: true }))) return;
+    if (!(await confirm({ message: tf(f.confirmDeleteDriver, { name: d.name, days: TRASH_KEEP_DAYS }), confirmText: f.actions.delete, danger: true }))) return;
     try {
       await deleteFleetDriverApi(d.id);
       addToast(f.toast.deleted, 'success');
       reload();
+      loadTrashCount();
     } catch (err) {
       addToast(apiError(err, f.toast.error), 'error');
     }
@@ -512,73 +588,228 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     </div>
   );
 
+  // ---- tables: each column is a spec (header + cell); which ones show, in what order, under what label and how wide
+  //      is the user's (Cấu hình cột, remembered per table) ----
+  type Spec<R> = {
+    render: (row: R) => React.ReactNode;
+    td?: string;
+    filter?: Parameters<typeof header>[3];
+    sortable?: boolean;
+  };
+  const dateCell = (iso: string, muted: boolean) => (
+    <DateCell iso={iso} today={today} muted={muted} />
+  );
+  const plainCell = (text: string) => text ? <span className="text-slate-700 dark:text-slate-200">{text}</span>
+    : <span className="text-slate-300 dark:text-slate-600">{f.none}</span>;
+
+  const vehicleSpecs: Record<string, Spec<FleetVehicle>> = {
+    plate: {
+      filter: { column: T.type, options: () => valueCounts(shownVehicles, vehicleValue.plate), value: vehicleCols.plate || [],
+        onChange: setCol(setVehicleCols, 'plate'), format: (v) => v || t.common.columnFilter.empty },
+      render: (v) => {
+        const sub = [v.vehicle_type, v.trailer_plate ? tf(L.trailer, { plate: v.trailer_plate }) : ''].filter(Boolean).join(' · ');
+        return (
+          <div className="flex items-center gap-3">
+            <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wide" onClick={openPhoto(v.photo, v.plate)} />
+            <div className="min-w-0">
+              <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{v.plate}<NoteIcon note={v.note} /></div>
+              {sub && <div className={`${MUTED} truncate max-w-[16rem]`}>{sub}</div>}
+            </div>
+          </div>
+        );
+      },
+    },
+    status: {
+      filter: { options: () => valueCounts(shownVehicles, vehicleValue.status, [...VEHICLE_STATUSES]), value: vehicleCols.status || [],
+        onChange: setCol(setVehicleCols, 'status'), format: (v) => f.vehicleStatus[v as VehicleStatus] ?? v },
+      render: (v) => <StatusBadge tone={VEHICLE_TONE[v.status]}>{f.vehicleStatus[v.status]}</StatusBadge>,
+    },
+    driver: {
+      filter: { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'temporary', 'none']), value: vehicleCols.driver || [],
+        onChange: setCol(setVehicleCols, 'driver'), format: (v) => T.driverState[v as keyof typeof T.driverState] ?? v },
+      render: (v) => {
+        const c = v.current_driver;
+        const h = v.home_driver;
+        if (c) {
+          return (
+            <div className="flex items-center gap-2.5">
+              <FleetAvatar photo={c.photo} kind="driver" name={c.name} size="sm" onClick={openPhoto(c.photo, c.name)} />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.name}</span>
+                  {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
+                </div>
+                {c.phone && <div className={MUTED}>{c.phone}</div>}
+              </div>
+            </div>
+          );
+        }
+        if (!h) return <span className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</span>;
+        return (
+          <div className={MUTED}>
+            <div className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</div>
+            {h.driving_vehicle_id && h.driving_vehicle_id !== v.id
+              ? <span className="text-sky-700 dark:text-sky-300">{tf(L.ownerAway, { name: h.name, plate: h.driving_plate })}</span>
+              : h.status !== 'active' ? tf(L.ownerStatus, { name: h.name, status: f.driverStatus[h.status].toLowerCase() })
+                : tf(L.owner, { name: h.name })}
+          </div>
+        );
+      },
+    },
+    docs: {
+      filter: { options: () => valueCounts(shownVehicles, vehicleValue.docs, DOC_STATES), value: vehicleCols.docs || [],
+        onChange: setCol(setVehicleCols, 'docs'), format: (v) => T.docState[v as DocState] ?? v },
+      render: (v) => <DocsCell entries={vehicleDocs(v)} today={today} muted={v.status === 'inactive'} />,
+    },
+    trailer: { td: 'whitespace-nowrap font-mono text-xs', render: (v) => plainCell(v.trailer_plate) },
+    type: { render: (v) => plainCell(v.vehicle_type) },
+    home: { render: (v) => plainCell(v.home_driver?.name || '') },
+    registration: { render: (v) => dateCell(v.registration_expiry, v.status === 'inactive') },
+    insurance: { render: (v) => dateCell(v.insurance_expiry, v.status === 'inactive') },
+    note: { td: 'max-w-[18rem]', render: (v) => <span className="line-clamp-2 text-slate-600 dark:text-slate-300">{v.note || f.none}</span> },
+    created: { td: 'whitespace-nowrap tabular-nums', render: (v) => plainCell(formatStampShort(v.created_at)) },
+  };
+
+  const driverSpecs: Record<string, Spec<FleetDriver>> = {
+    name: {
+      render: (d) => (
+        <div className="flex items-center gap-3">
+          <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="md" onClick={openPhoto(d.photo, d.name)} />
+          <div className="min-w-0">
+            <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{d.name}<NoteIcon note={d.note} /></div>
+            {d.phone && <div className={MUTED}>{d.phone}</div>}
+          </div>
+        </div>
+      ),
+    },
+    status: {
+      filter: { options: () => valueCounts(shownDrivers, driverValue.status, [...DRIVER_STATUSES]), value: driverCols.status || [],
+        onChange: setCol(setDriverCols, 'status'), format: (v) => f.driverStatus[v as DriverStatus] ?? v },
+      render: (d) => <StatusBadge tone={DRIVER_TONE[d.status]}>{f.driverStatus[d.status]}</StatusBadge>,
+    },
+    truck: {
+      filter: { options: () => valueCounts(shownDrivers, driverValue.truck, ['primary', 'temporary', 'none']), value: driverCols.truck || [],
+        onChange: setCol(setDriverCols, 'truck'), format: (v) => T.truckState[v as keyof typeof T.truckState] ?? v },
+      render: (d) => {
+        const c = d.current_vehicle;
+        const home = d.home_vehicle;
+        const homeLine = home ? (home.status !== 'active'
+          ? tf(L.homeWithStatus, { plate: home.plate, status: f.vehicleStatus[home.status].toLowerCase() })
+          : tf(L.tempHome, { plate: home.plate })) : '';
+        if (!c) {
+          return (
+            <div className={MUTED}>
+              <div className="text-sm text-slate-400 dark:text-slate-500">{f.noVehicle}</div>
+              {homeLine}
+            </div>
+          );
+        }
+        return (
+          <div className="flex items-center gap-2.5">
+            <FleetAvatar photo={c.photo} kind="vehicle" name={c.plate} size="wideSm" onClick={openPhoto(c.photo, c.plate)} />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.plate}</span>
+                {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
+              </div>
+              <div className={MUTED}>{c.kind === 'temporary' ? homeLine : c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
+            </div>
+          </div>
+        );
+      },
+    },
+    license: {
+      filter: { options: () => valueCounts(shownDrivers, driverValue.license, DOC_STATES), value: driverCols.license || [],
+        onChange: setCol(setDriverCols, 'license'), format: (v) => T.docState[v as DocState] ?? v },
+      render: (d) => {
+        const licence = [d.license_class, d.license_no].filter(Boolean).join(' · ');
+        return (
+          <div className="space-y-1">
+            {licence && <div className="text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">{licence}</div>}
+            <DocsCell entries={driverDocs(d)} today={today} muted={d.status === 'left'} />
+          </div>
+        );
+      },
+    },
+    phone: { td: 'whitespace-nowrap', render: (d) => plainCell(d.phone) },
+    id_number: { td: 'whitespace-nowrap tabular-nums', render: (d) => plainCell(d.id_number) },
+    license_no: { td: 'whitespace-nowrap tabular-nums', render: (d) => plainCell(d.license_no) },
+    license_class: {
+      filter: { options: () => valueCounts(shownDrivers, driverValue.license_class), value: driverCols.license_class || [],
+        onChange: setCol(setDriverCols, 'license_class'), format: (v) => v || t.common.columnFilter.empty },
+      render: (d) => plainCell(d.license_class),
+    },
+    license_expiry: { render: (d) => dateCell(d.license_expiry, d.status === 'left') },
+    home: { td: 'whitespace-nowrap', render: (d) => plainCell(d.home_vehicle?.plate || '') },
+    note: { td: 'max-w-[18rem]', render: (d) => <span className="line-clamp-2 text-slate-600 dark:text-slate-300">{d.note || f.none}</span> },
+    created: { td: 'whitespace-nowrap tabular-nums', render: (d) => plainCell(formatStampShort(d.created_at)) },
+  };
+
+  // filtered on the server: the choices are fixed and their counts unknown (-1: not shown)
+  const fixed = (values: string[]) => () => values.map((v) => ({ carrier: v, count: -1 }));
+  const historySpecs: Record<string, Spec<FleetAssignment>> = {
+    started_at: { td: 'whitespace-nowrap tabular-nums text-slate-700 dark:text-slate-200', render: (h) => formatStampShort(h.started_at) },
+    ended_at: {
+      td: 'whitespace-nowrap tabular-nums',
+      filter: { options: fixed(['open', 'closed']), value: historyCols.ended_at || [], onChange: setCol(setHistoryCols, 'ended_at'),
+        format: (v) => T.historyState[v as 'open' | 'closed'] ?? v },
+      render: (h) => (h.ended_at ? <span className="text-slate-700 dark:text-slate-200">{formatStampShort(h.ended_at)}</span>
+        : <StatusBadge tone={VEHICLE_TONE.active}>{f.stillOpen}</StatusBadge>),
+    },
+    driver_name: { td: 'font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap', render: (h) => h.driver_name },
+    vehicle_plate: {
+      td: 'whitespace-nowrap',
+      filter: { options: fixed(['primary', 'temporary']), value: historyCols.vehicle_plate || [],
+        onChange: setCol(setHistoryCols, 'vehicle_plate'), format: (v) => f.kind[v as 'primary' | 'temporary'] ?? v },
+      render: (h) => (
+        <>
+          <span className="font-semibold text-slate-800 dark:text-slate-100">{h.vehicle_plate}</span>
+          {h.kind === 'temporary' && <span className="ml-1.5"><Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip></span>}
+          {h.kind === 'temporary' && h.home_vehicle_plate && <div className={MUTED}>{tf(f.tempOf, { plate: h.home_vehicle_plate })}</div>}
+        </>
+      ),
+    },
+    reason: { td: 'text-slate-600 dark:text-slate-300', render: (h) => h.reason || f.none },
+    end_reason: { td: 'text-slate-600 dark:text-slate-300', render: (h) => h.end_reason || (h.ended_at ? f.none : '') },
+  };
+
+  type Settings = ReturnType<typeof useColumnSettings>;
+  /** The header row of a table, from its column settings (visible columns, their order, labels and widths). */
+  const headerRow = <R,>(settings: Settings, specs: Record<string, Spec<R>>, sorter: ReturnType<typeof useTableSort>, actions: boolean) => (
+    <tr>
+      {settings.columns.filter((c) => c.visible && specs[c.key]).map((c) =>
+        header(c.key, c.label, sorter, specs[c.key].filter, { width: settings.columnWidths[c.key], onResize: settings.startResize }))}
+      {actions && <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>}
+    </tr>
+  );
+  const cells = <R,>(settings: Settings, specs: Record<string, Spec<R>>, row: R) =>
+    settings.columns.filter((c) => c.visible && specs[c.key]).map((c) => (
+      <td key={c.key} className={`${TD} ${specs[c.key].td || ''}`}
+        style={settings.columnWidths[c.key] ? { maxWidth: settings.columnWidths[c.key] } : undefined}>
+        {specs[c.key].render(row)}
+      </td>
+    ));
+  const visibleCount = (settings: Settings, specs: Record<string, unknown>) =>
+    settings.columns.filter((c) => c.visible && specs[c.key]).length;
+  const THEAD = 'sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800';
+  const emptyRow = (span: number, text: string) => (
+    <tbody><tr><td colSpan={span} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">{text}</td></tr></tbody>
+  );
+
   const vehicleTable = () => {
     if (vs.length === 0) return empty(f.empty.vehicles);
     return (
       <table className="min-w-full text-sm">
-        <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
-          <tr>
-            {header('plate', L.vehicle, vehicleSort, { column: T.type, options: () => valueCounts(shownVehicles, vehicleValue.plate),
-              value: vehicleCols.plate || [], onChange: setCol(setVehicleCols, 'plate'), format: (v) => v || t.common.columnFilter.empty })}
-            {header('status', L.status, vehicleSort, { options: () => valueCounts(shownVehicles, vehicleValue.status, [...VEHICLE_STATUSES]),
-              value: vehicleCols.status || [], onChange: setCol(setVehicleCols, 'status'), format: (v) => f.vehicleStatus[v as VehicleStatus] ?? v })}
-            {header('driver', L.driver, vehicleSort, { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'temporary', 'none']),
-              value: vehicleCols.driver || [], onChange: setCol(setVehicleCols, 'driver'),
-              format: (v) => T.driverState[v as keyof typeof T.driverState] ?? v })}
-            {header('docs', L.docs, vehicleSort, { options: () => valueCounts(shownVehicles, vehicleValue.docs, DOC_STATES),
-              value: vehicleCols.docs || [], onChange: setCol(setVehicleCols, 'docs'), format: (v) => T.docState[v as DocState] ?? v })}
-            <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>
-          </tr>
-        </thead>
-        {pageVehicles.length === 0 && (
-          <tbody><tr><td colSpan={5} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
-            {vehicleFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search}
-          </td></tr></tbody>
-        )}
+        <thead className={THEAD}>{headerRow(vehicleColumns, vehicleSpecs, vehicleSort, true)}</thead>
+        {pageVehicles.length === 0 && emptyRow(visibleCount(vehicleColumns, vehicleSpecs) + 1,
+          vehicleFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageVehicles.map((v) => {
-            const c = v.current_driver;
-            const h = v.home_driver;
             const down = v.status === 'broken' || v.status === 'maintenance';
-            const sub = [v.vehicle_type, v.trailer_plate ? tf(L.trailer, { plate: v.trailer_plate }) : ''].filter(Boolean).join(' · ');
             return (
               <tr key={v.id} data-testid={`vehicle-${v.id}`} {...rowEvents({ kind: 'vehicle', id: v.id })}
                 className={`${ROW} ${menu.state?.row.kind === 'vehicle' && menu.state.row.id === v.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${v.status === 'inactive' ? 'opacity-60' : ''}`}>
-                <td className={TD}>
-                  <div className="flex items-center gap-3">
-                    <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wide" onClick={openPhoto(v.photo, v.plate)} />
-                    <div className="min-w-0">
-                      <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                        {v.plate}<NoteIcon note={v.note} />
-                      </div>
-                      {sub && <div className={`${MUTED} truncate max-w-[16rem]`}>{sub}</div>}
-                    </div>
-                  </div>
-                </td>
-                <td className={TD}><StatusBadge tone={VEHICLE_TONE[v.status]}>{f.vehicleStatus[v.status]}</StatusBadge></td>
-                <td className={TD}>
-                  {c ? (
-                    <div className="flex items-center gap-2.5">
-                      <FleetAvatar photo={c.photo} kind="driver" name={c.name} size="sm" onClick={openPhoto(c.photo, c.name)} />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.name}</span>
-                          {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
-                        </div>
-                        {c.phone && <div className={MUTED}>{c.phone}</div>}
-                      </div>
-                    </div>
-                  ) : h ? (
-                    <div className={MUTED}>
-                      <div className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</div>
-                      {h.driving_vehicle_id && h.driving_vehicle_id !== v.id
-                        ? <span className="text-sky-700 dark:text-sky-300">{tf(L.ownerAway, { name: h.name, plate: h.driving_plate })}</span>
-                        : h.status !== 'active' ? tf(L.ownerStatus, { name: h.name, status: f.driverStatus[h.status].toLowerCase() })
-                          : tf(L.owner, { name: h.name })}
-                    </div>
-                  ) : <span className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</span>}
-                </td>
-                <td className={TD}><DocsCell entries={vehicleDocs(v)} today={today} muted={v.status === 'inactive'} /></td>
+                {cells(vehicleColumns, vehicleSpecs, v)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
                     {v.status === 'active' && (
@@ -609,75 +840,16 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     if (ds.length === 0) return empty(f.empty.drivers);
     return (
       <table className="min-w-full text-sm">
-        <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
-          <tr>
-            {header('name', L.driver, driverSort)}
-            {header('status', L.status, driverSort, { options: () => valueCounts(shownDrivers, driverValue.status, [...DRIVER_STATUSES]),
-              value: driverCols.status || [], onChange: setCol(setDriverCols, 'status'), format: (v) => f.driverStatus[v as DriverStatus] ?? v })}
-            {header('truck', L.truck, driverSort, { options: () => valueCounts(shownDrivers, driverValue.truck, ['primary', 'temporary', 'none']),
-              value: driverCols.truck || [], onChange: setCol(setDriverCols, 'truck'),
-              format: (v) => T.truckState[v as keyof typeof T.truckState] ?? v })}
-            {header('license', L.license, driverSort, { options: () => valueCounts(shownDrivers, driverValue.license, DOC_STATES),
-              value: driverCols.license || [], onChange: setCol(setDriverCols, 'license'), format: (v) => T.docState[v as DocState] ?? v })}
-            <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>
-          </tr>
-        </thead>
-        {pageDrivers.length === 0 && (
-          <tbody><tr><td colSpan={5} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
-            {driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search}
-          </td></tr></tbody>
-        )}
+        <thead className={THEAD}>{headerRow(driverColumns, driverSpecs, driverSort, true)}</thead>
+        {pageDrivers.length === 0 && emptyRow(visibleCount(driverColumns, driverSpecs) + 1,
+          driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageDrivers.map((d) => {
-            const c = d.current_vehicle;
-            const home = d.home_vehicle;
             const back = canReturnHome(d, vs);
-            const homeLine = home ? (home.status !== 'active'
-              ? tf(L.homeWithStatus, { plate: home.plate, status: f.vehicleStatus[home.status].toLowerCase() })
-              : tf(L.tempHome, { plate: home.plate })) : '';
-            const licence = [d.license_class, d.license_no].filter(Boolean).join(' · ');
             return (
               <tr key={d.id} data-testid={`driver-${d.id}`} {...rowEvents({ kind: 'driver', id: d.id })}
                 className={`${ROW} ${menu.state?.row.kind === 'driver' && menu.state.row.id === d.id ? 'bg-primary-50/60 dark:bg-primary-950/30' : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'} ${d.status === 'left' ? 'opacity-60' : ''}`}>
-                <td className={TD}>
-                  <div className="flex items-center gap-3">
-                    <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="md" onClick={openPhoto(d.photo, d.name)} />
-                    <div className="min-w-0">
-                      <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                        {d.name}<NoteIcon note={d.note} />
-                      </div>
-                      {d.phone && <div className={MUTED}>{d.phone}</div>}
-                    </div>
-                  </div>
-                </td>
-                <td className={TD}><StatusBadge tone={DRIVER_TONE[d.status]}>{f.driverStatus[d.status]}</StatusBadge></td>
-                <td className={TD}>
-                  {c ? (
-                    <div className="flex items-center gap-2.5">
-                      <FleetAvatar photo={c.photo} kind="vehicle" name={c.plate} size="wideSm" onClick={openPhoto(c.photo, c.plate)} />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.plate}</span>
-                          {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
-                        </div>
-                        <div className={MUTED}>
-                          {c.kind === 'temporary' ? homeLine : c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className={MUTED}>
-                      <div className="text-sm text-slate-400 dark:text-slate-500">{f.noVehicle}</div>
-                      {homeLine}
-                    </div>
-                  )}
-                </td>
-                <td className={TD}>
-                  <div className="space-y-1">
-                    {licence && <div className="text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">{licence}</div>}
-                    <DocsCell entries={driverDocs(d)} today={today} muted={d.status === 'left'} />
-                  </div>
-                </td>
+                {cells(driverColumns, driverSpecs, d)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
                     {back ? (
@@ -704,47 +876,14 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
 
   const historyTable = () => {
     if (!history) return <div className="flex-1 flex justify-center items-center py-16 text-slate-400"><Loader2 className="w-6 h-6 animate-spin" /></div>;
-    // filtered on the server: the choices are fixed and their counts unknown (-1: not shown)
-    const fixed = (values: string[]) => () => values.map((v) => ({ carrier: v, count: -1 }));
     return (
       <table className="min-w-full text-sm">
-        <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur border-b border-slate-200 dark:border-slate-800">
-          <tr>
-            {header('started_at', f.cols.started, historySort)}
-            {header('ended_at', f.cols.ended, historySort, { options: fixed(['open', 'closed']), value: historyCols.ended_at || [],
-              onChange: setCol(setHistoryCols, 'ended_at'), format: (v) => T.historyState[v as 'open' | 'closed'] ?? v })}
-            {header('driver_name', f.cols.name, historySort)}
-            {header('vehicle_plate', f.cols.vehicle, historySort, { options: fixed(['primary', 'temporary']),
-              value: historyCols.vehicle_plate || [], onChange: setCol(setHistoryCols, 'vehicle_plate'),
-              format: (v) => f.kind[v as 'primary' | 'temporary'] ?? v })}
-            {header('reason', f.cols.reason, historySort)}
-            {header('end_reason', f.cols.endReason, historySort)}
-          </tr>
-        </thead>
-        {history.items.length === 0 && (
-          <tbody><tr><td colSpan={6} className="py-16 text-center text-sm text-slate-500 dark:text-slate-400">
-            {historyQuery || colFilterCount ? f.filters.empty : f.empty.history}
-          </td></tr></tbody>
-        )}
+        <thead className={THEAD}>{headerRow(historyColumns, historySpecs, historySort, false)}</thead>
+        {history.items.length === 0 && emptyRow(visibleCount(historyColumns, historySpecs),
+          historyQuery || colFilterCount ? f.filters.empty : f.empty.history)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {history.items.map((h) => (
-            <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
-              <td className={`${TD} whitespace-nowrap tabular-nums text-slate-700 dark:text-slate-200`}>{formatStampShort(h.started_at)}</td>
-              <td className={`${TD} whitespace-nowrap tabular-nums`}>
-                {h.ended_at ? <span className="text-slate-700 dark:text-slate-200">{formatStampShort(h.ended_at)}</span>
-                  : <StatusBadge tone={VEHICLE_TONE.active}>{f.stillOpen}</StatusBadge>}
-              </td>
-              <td className={`${TD} font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap`}>{h.driver_name}</td>
-              <td className={`${TD} whitespace-nowrap`}>
-                <span className="font-semibold text-slate-800 dark:text-slate-100">{h.vehicle_plate}</span>
-                {h.kind === 'temporary' && <span className="ml-1.5"><Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip></span>}
-                {h.kind === 'temporary' && h.home_vehicle_plate && (
-                  <div className={MUTED}>{tf(f.tempOf, { plate: h.home_vehicle_plate })}</div>
-                )}
-              </td>
-              <td className={`${TD} text-slate-600 dark:text-slate-300`}>{h.reason || f.none}</td>
-              <td className={`${TD} text-slate-600 dark:text-slate-300`}>{h.end_reason || (h.ended_at ? f.none : '')}</td>
-            </tr>
+            <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">{cells(historyColumns, historySpecs, h)}</tr>
           ))}
         </tbody>
       </table>
@@ -761,6 +900,21 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
           <h1 className="text-base font-bold text-slate-900 dark:text-slate-100">{f.title}</h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">{f.subtitle}</p>
         </div>
+        <button type="button" onClick={() => setColumnsOpen(true)} title={f.columns.tooltip}
+          className="inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+          <SlidersHorizontal className="w-4 h-4" />{t.common.columnsConfig}
+        </button>
+        {view !== 'history' && (
+          <button type="button" onClick={() => setTrashOpen(true)} title={tf(f.trash.tooltip, { days: TRASH_KEEP_DAYS })}
+            className="relative inline-flex items-center gap-1.5 h-9 px-3 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+            <ArchiveRestore className="w-4 h-4" />{f.trash.button}
+            {trashBadge > 0 && (
+              <span className="min-w-[1.1rem] px-1 rounded-full bg-rose-500 text-white text-[10px] leading-4 text-center">
+                {trashBadge > 999 ? '999+' : trashBadge}
+              </span>
+            )}
+          </button>
+        )}
         <button type="button" onClick={reload} disabled={loading} aria-label={f.refresh} title={f.refresh}
           className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -874,6 +1028,10 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
       <DriverFormModal isOpen={driverForm.open} driver={driverForm.driver} vehicles={vs}
         onClose={() => setDriverForm({ open: false, driver: null })} onSaved={reload} />
       <VehicleStatusModal vehicle={statusFor} vehicles={vs} onClose={() => setStatusFor(null)} onSaved={reload} />
+      <ColumnConfigModal isOpen={columnsOpen} onClose={() => setColumnsOpen(false)} columns={activeColumns.columns}
+        onChange={activeColumns.setColumns} onReset={activeColumns.resetColumns} />
+      <FleetTrashModal kind={trashKind} isOpen={trashOpen} onClose={() => setTrashOpen(false)}
+        onChanged={() => { reload(); loadTrashCount(); }} />
       <RowContextMenu position={menu.state && menuGroups.length ? { x: menu.state.x, y: menu.state.y } : null}
         groups={menuGroups} onClose={menu.close} />
       <FleetDetailModal target={detailTarget} onClose={() => setDetail(null)} actions={detailActions}

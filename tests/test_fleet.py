@@ -1,6 +1,6 @@
 """Fleet: trucks, drivers, home trucks, temporary moves when a truck breaks down, and document expiry reminders."""
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -312,10 +312,12 @@ def test_bad_photos_are_refused():
     assert e.value.status == 404
 
 
-def test_deleting_removes_the_photo_file():
+def test_photo_is_kept_in_the_trash_and_removed_when_deleted_for_good():
     a = _driver("An")
     name = fleet.set_photo("driver", a, _png(size=(50, 50)))
     fleet.delete_driver(a)
+    assert fleet.photo_path(name) is not None
+    assert fleet.delete_from_trash("driver", [a]) == 1
     assert fleet.photo_path(name) is None
 
 
@@ -419,3 +421,74 @@ def test_history_sorts_vietnamese_names_like_people_expect():
     assert names == ["Bùi Thị Giang", "Đặng Văn Em", "Dương Văn Bé", "Ngô Văn Khoa", "Nguyễn Văn An"]
     desc = [r["driver_name"] for r in fleet.history_page(sort_by="driver_name", sort_dir="desc")["items"]]
     assert desc == list(reversed(names))
+
+
+# --- trash -------------------------------------------------------------------------------
+def test_deleted_truck_goes_to_trash_and_comes_back():
+    t = _truck("51C-1", trailer_plate="51R-1")
+    a = _driver("An", home_vehicle_id=t)
+    fleet.delete_vehicle(t)
+    assert "51C-1" not in _trucks()
+    assert _drivers()["An"]["home_vehicle"] is None and _drivers()["An"]["current_vehicle"] is None
+    page = fleet.trash_page("vehicle")
+    assert page["total"] == 1 and page["keep_days"] == 30
+    item = page["items"][0]
+    assert item["plate"] == "51C-1" and item["days_left"] in (29, 30) and item["purge_at"] > item["deleted_at"]
+    assert fleet.trash_count() == {"vehicle": 1, "driver": 0}
+
+    # its plate and trailer stay taken, with a message that says where it is
+    with pytest.raises(fleet.FleetError) as e:
+        _truck("51C 1")
+    assert "thùng rác" in e.value.message
+    with pytest.raises(fleet.FleetError) as e:
+        _truck("51C-2", trailer_plate="51R-1")
+    assert "thùng rác" in e.value.message
+    # a truck in the trash can't be used
+    with pytest.raises(fleet.FleetError) as e:
+        fleet.set_home_vehicle(a, t)
+    assert e.value.status == 404
+
+    assert fleet.restore_from_trash("vehicle", [t, 999]) == 1
+    assert _trucks()["51C-1"]["trailer_plate"] == "51R-1"
+    assert fleet.trash_page("vehicle")["total"] == 0
+
+
+def test_deleted_driver_frees_their_truck_and_is_left_out_of_reminders():
+    t = _truck("51C-1")
+    a = _driver("An", home_vehicle_id=t, license_expiry="2026-11-20")
+    fleet.delete_driver(a)
+    assert _trucks()["51C-1"]["home_driver"] is None and _trucks()["51C-1"]["current_driver"] is None
+    assert fleet.expiring_documents(date(2026, 11, 15)) == []
+    b = _driver("Bình")
+    fleet.set_home_vehicle(b, t)                       # the truck is free for someone else
+    fleet.restore_from_trash("driver", [a])
+    d = _drivers()["An"]
+    assert d["home_vehicle"] is None and d["current_vehicle"] is None
+    assert len(fleet.list_history(driver_id=a)) == 1  # their history is still there
+
+
+def test_trash_is_purged_after_keep_days(monkeypatch):
+    from datetime import timedelta
+    t = _truck("51C-1")
+    name = fleet.set_photo("vehicle", t, _png(size=(20, 20)))
+    fleet.delete_vehicle(t)
+    with db.get_connection() as conn:
+        conn.execute("UPDATE fleet_vehicles SET deleted_at = '2000-01-01 00:00:00' WHERE id = ?;", (t,))
+    assert db.purge_expired_trash() >= 1
+    assert fleet.trash_page("vehicle")["total"] == 0 and fleet.photo_path(name) is None
+    _truck("51C-1")                                     # the plate is free again
+
+
+def test_trash_api():
+    t = client.post("/api/v1/fleet/vehicles", json={"plate": "51C-1"}).json()
+    d = client.post("/api/v1/fleet/drivers", json={"name": "An"}).json()
+    client.delete(f"/api/v1/fleet/vehicles/{t['id']}")
+    client.delete(f"/api/v1/fleet/drivers/{d['id']}")
+    assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 1, "driver": 1}
+    assert client.get("/api/v1/fleet/trash", params={"kind": "driver"}).json()["items"][0]["name"] == "An"
+    assert client.get("/api/v1/fleet/trash/ids", params={"kind": "vehicle"}).json() == {"ids": [t["id"]]}
+    assert client.get("/api/v1/fleet/trash", params={"kind": "boat"}).status_code == 400
+    assert client.post("/api/v1/fleet/trash/restore", json={"kind": "vehicle", "ids": [t["id"]]}).json()["restored"] == 1
+    assert client.post("/api/v1/fleet/trash/delete", json={"kind": "driver", "ids": [d["id"]]}).json()["deleted"] == 1
+    assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 0, "driver": 0}
+    assert client.put(f"/api/v1/fleet/drivers/{d['id']}", json={"name": "X"}).status_code == 404

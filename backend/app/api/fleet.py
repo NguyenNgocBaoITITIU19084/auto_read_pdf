@@ -192,6 +192,39 @@ def get_photo(name: str):
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+# --- trash -----------------------------------------------------------------------
+class TrashIdsIn(BaseModel):
+    kind: str
+    ids: List[int] = []
+
+
+@router.get("/trash")
+def list_trash(kind: str, limit: int = 50, offset: int = 0):
+    """Trucks (kind=vehicle) or drivers (kind=driver) in the trash, last deleted first."""
+    return _run(fleet.trash_page, kind, limit, offset)
+
+
+@router.get("/trash/ids")
+def list_trash_ids(kind: str):
+    return {"ids": _run(fleet.trash_ids, kind)}
+
+
+@router.get("/trash/count")
+def trash_count():
+    """{"vehicle": n, "driver": n}"""
+    return fleet.trash_count()
+
+
+@router.post("/trash/restore")
+def restore_trash(payload: TrashIdsIn):
+    return {"status": "success", "restored": _run(fleet.restore_from_trash, payload.kind, payload.ids)}
+
+
+@router.post("/trash/delete")
+def delete_trash(payload: TrashIdsIn):
+    return {"status": "success", "deleted": _run(fleet.delete_from_trash, payload.kind, payload.ids)}
+
+
 # --- history / documents --------------------------------------------------
 @router.get("/history")
 def history(driver_id: Optional[int] = None, vehicle_id: Optional[int] = None, limit: int = 200):
