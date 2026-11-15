@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Eye, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
-  FileSpreadsheet, Info, SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Wrench, X,
+  FileSpreadsheet, Info, SlidersHorizontal, StickyNote, Trash2, Truck, Undo2, Users, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -41,7 +41,9 @@ type VehicleFilter = 'all' | 'running' | 'down' | 'free' | 'expiring';
 type DriverFilter = 'all' | 'idle' | 'temporary' | 'expiring';
 type RowRef = { kind: 'vehicle' | 'driver'; id: number };
 
-const VIEW_KEY = 'fleet.view';
+/** Which app tab this is: the tractor units, or the drivers. Each also shows the assignment history. */
+export type FleetScreen = 'vehicles' | 'drivers';
+const VIEW_KEY: Record<FleetScreen, string> = { vehicles: 'fleet.view', drivers: 'fleet.drivers.view' };
 
 const VEHICLE_TONE: Record<VehicleStatus, { badge: string; dot: string }> = {
   active: { badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300', dot: 'bg-emerald-500' },
@@ -69,12 +71,11 @@ const Chip: React.FC<{ tone: string; children: React.ReactNode; title?: string }
   </span>
 );
 
-const readView = (): View => {
+const readView = (screen: FleetScreen): View => {
   try {
-    const v = localStorage.getItem(VIEW_KEY);
-    return v === 'drivers' || v === 'history' ? v : 'vehicles';
+    return localStorage.getItem(VIEW_KEY[screen]) === 'history' ? 'history' : screen;
   } catch {
-    return 'vehicles';
+    return screen;
   }
 };
 
@@ -165,17 +166,19 @@ const NoteIcon: React.FC<{ note: string }> = ({ note }) => {
 
 interface Props {
   initialSearchQuery?: string;
+  /** 'vehicles': the "Đầu kéo" tab; 'drivers': the "Tài xế" tab */
+  screen?: FleetScreen;
 }
 
 /** Trucks, drivers and who drives what, as compact tables: one obvious action per row ("Báo hư" / "Đã sửa xong" /
  *  "Trả về xe gốc" / "Đổi xe") and the rest in a "⋯" menu. Fleet data is company-wide (no collection). */
-export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
+export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicles' }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
   const confirm = useConfirm();
   const f = t.fleet;
   const L = f.list;
-  const [view, setView] = useState<View>(readView);
+  const [view, setView] = useState<View>(() => readView(screen));
   const [vehicles, setVehicles] = useState<FleetVehicle[] | null>(null);
   const [drivers, setDrivers] = useState<FleetDriver[] | null>(null);
   const [history, setHistory] = useState<FleetHistoryPage | null>(null);
@@ -253,7 +256,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     setView(next);
     if (next !== 'history') setHistoryFilter(null);
     try {
-      localStorage.setItem(VIEW_KEY, next);
+      localStorage.setItem(VIEW_KEY[screen], next);
     } catch {
       /* only a convenience */
     }
@@ -635,10 +638,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
   );
 
   const tabs: { id: View; label: string; count?: number }[] = [
-    { id: 'vehicles', label: f.views.vehicles, count: vehicles?.length },
-    { id: 'drivers', label: f.views.drivers, count: drivers?.length },
+    screen === 'vehicles'
+      ? { id: 'vehicles', label: f.views.vehicles, count: vehicles?.length }
+      : { id: 'drivers', label: f.views.drivers, count: drivers?.length },
     { id: 'history', label: f.views.history },
   ];
+  const head = f.screens[screen];
 
   const filterTone = {
     neutral: 'text-slate-600 dark:text-slate-300',
@@ -977,11 +982,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
     <div className="flex-1 flex flex-col h-full overflow-hidden p-4 gap-2.5 bg-slate-50/50 dark:bg-slate-950/50" data-testid="fleet-tab">
       {/* Row 1: what you look at (title + table switch), find, add */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
-        <div className="flex items-center gap-2.5" title={f.subtitle}>
+        <div className="flex items-center gap-2.5" title={head.subtitle}>
           <div className="p-1.5 bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300 rounded-lg">
-            <Truck className="w-5 h-5" />
+            {screen === 'vehicles' ? <Truck className="w-5 h-5" /> : <Users className="w-5 h-5" />}
           </div>
-          <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">{f.title}</h1>
+          <h1 className="text-base font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">{head.title}</h1>
         </div>
         <div role="tablist" className="inline-flex p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800">
           {tabs.map((tab) => (
@@ -996,7 +1001,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery }) => {
         <div className="flex items-center gap-2 ml-auto flex-1 min-w-[16rem] justify-end">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={f.search} aria-label={f.search}
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={head.search} aria-label={head.search}
               className="w-full h-9 pl-9 pr-8 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40" />
             {query && (
               <button type="button" aria-label={f.clearFilter} onClick={() => setQuery('')}

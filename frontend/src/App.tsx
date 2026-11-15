@@ -26,6 +26,7 @@ export const App: React.FC = () => {
     vessel?: string;
     container?: string;
     fleet?: string;
+    drivers?: string;
   }>({});
   const [pasteRequest, setPasteRequest] = useState<BookingPasteRequest | null>(null);
   const pasteSeqRef = useRef(0);
@@ -40,7 +41,7 @@ export const App: React.FC = () => {
     if (tab === 'vessel') void import('./components/vessel/VesselTab');
     if (tab === 'container') void import('./components/container/ContainerTab');
     if (tab === 'tasks') void import('./components/tasks/TasksTab');
-    if (tab === 'fleet') void import('./components/fleet/FleetTab');
+    if (tab === 'fleet' || tab === 'drivers') void import('./components/fleet/FleetTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -155,7 +156,8 @@ export const App: React.FC = () => {
             <ContainerTab initialSearchQuery={drilldownKeywords.container} />
           )}
           {activeTab === 'tasks' && <TasksTab onNavigateTab={handleNavigateTab} />}
-          {activeTab === 'fleet' && <FleetTab initialSearchQuery={drilldownKeywords.fleet} />}
+          {activeTab === 'fleet' && <FleetTab screen="vehicles" initialSearchQuery={drilldownKeywords.fleet} />}
+          {activeTab === 'drivers' && <FleetTab screen="drivers" initialSearchQuery={drilldownKeywords.drivers} />}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

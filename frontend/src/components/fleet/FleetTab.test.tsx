@@ -1,6 +1,6 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { translations } from '../../i18n/translations';
 import type { FleetDriver, FleetVehicle } from '../../types';
 
@@ -106,7 +106,7 @@ describe('FleetTab', () => {
     expect(within(filters).getByRole('button', { name: /Đang chạy\s*1/ })).toBeInTheDocument();
     expect(within(filters).getByRole('button', { name: /Hư \/ bảo dưỡng\s*1/ })).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText(f.search), { target: { value: 'nguyen van an' } });
+    fireEvent.change(screen.getByLabelText(f.screens.vehicles.search), { target: { value: 'nguyen van an' } });
     expect(screen.queryByTestId('vehicle-2')).not.toBeInTheDocument();
     expect(screen.getByTestId('vehicle-1')).toBeInTheDocument();
   });
@@ -160,7 +160,6 @@ describe('FleetTab', () => {
   });
 
   it('asks before taking a truck that is someone else\'s own truck', async () => {
-    localStorage.setItem('fleet.view', 'drivers');
     api.getFleetVehiclesApi.mockResolvedValue([
       vehicle(1, '51C-1', { home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
     ]);
@@ -169,7 +168,7 @@ describe('FleetTab', () => {
       .mockRejectedValueOnce({ response: { status: 409, data: { detail: 'Xe 51C-1 đang là xe cố định của Bình' } } })
       .mockResolvedValueOnce(driver(1, an.name));
     confirmMock.mockResolvedValue(true);
-    render(<FleetTab />);
+    render(<FleetTab screen="drivers" />);
     const row = await screen.findByTestId('driver-1');
     fireEvent.click(within(row).getByText(f.actions.move));
     fireEvent.change(screen.getByLabelText(f.cols.vehicle), { target: { value: '1' } });
@@ -196,15 +195,33 @@ describe('FleetTab', () => {
   });
 });
 
+describe('FleetTab screens', () => {
+  it('the tractor screen lists trucks only, the driver screen drivers only; both have the history', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    expect(screen.getByRole('heading', { name: 'Đầu kéo' })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual(['Đầu kéo1', f.views.history]);
+
+    cleanup();
+    render(<FleetTab screen="drivers" />);
+    await screen.findByTestId('driver-1');
+    expect(screen.getByRole('heading', { name: 'Tài xế' })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual(['Tài xế1', f.views.history]);
+    expect(screen.getByText(f.actions.addDriver)).toBeInTheDocument();
+    expect(screen.queryByText(f.actions.addVehicle)).not.toBeInTheDocument();
+  });
+});
+
 describe('FleetTab photos', () => {
   it('shows photos and initials, and opens a photo large', async () => {
-    localStorage.setItem('fleet.view', 'drivers');
     api.getFleetVehiclesApi.mockResolvedValue([]);
     api.getFleetDriversApi.mockResolvedValue([
       driver(1, an.name, { photo: 'driver_1_0a1b2c3d.jpg' }),
       driver(2, 'Trần Minh Bảo'),
     ]);
-    render(<FleetTab />);
+    render(<FleetTab screen="drivers" />);
     const withPhoto = await screen.findByTestId('driver-1');
     const img = within(withPhoto).getByRole('img', { name: an.name }) as HTMLImageElement;
     expect(img.src).toContain('/fleet/photos/driver_1_0a1b2c3d.jpg');
@@ -329,7 +346,8 @@ describe('FleetTab row interactions', () => {
     fireEvent.doubleClick(within(row).getByText(f.quick.report));
     expect(screen.queryByTestId('fleet-detail')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('tab', { name: /Tài xế/ }));
+    cleanup();
+    render(<FleetTab screen="drivers" />);
     const driverRow = await screen.findByTestId('driver-1');
     fireEvent.keyDown(driverRow, { key: 'Enter' });
     expect(screen.getByText(`Chi tiết tài xế ${an.name}`)).toBeInTheDocument();
@@ -385,7 +403,7 @@ describe('FleetTab sort, column filters and pages', () => {
     expect(screen.getAllByTestId(/^vehicle-/)).toHaveLength(25);
     fireEvent.click(screen.getByRole('button', { name: '2' }));
     expect(plates()).toEqual(['51C-026', '51C-027', '51C-028', '51C-029', '51C-030']);
-    fireEvent.change(screen.getByLabelText(f.search), { target: { value: '51C-00' } });
+    fireEvent.change(screen.getByLabelText(f.screens.vehicles.search), { target: { value: '51C-00' } });
     expect(plates()).toEqual(['51C-001', '51C-002', '51C-003', '51C-004', '51C-005', '51C-006', '51C-007', '51C-008', '51C-009']);
   });
 
@@ -473,7 +491,7 @@ describe('FleetTab Excel export', () => {
     api.getFleetDriversApi.mockResolvedValue([]);
     render(<FleetTab />);
     await screen.findByTestId('vehicle-1');
-    fireEvent.change(screen.getByLabelText(f.search), { target: { value: '51D' } });
+    fireEvent.change(screen.getByLabelText(f.screens.vehicles.search), { target: { value: '51D' } });
     fireEvent.click(screen.getByText(translations.vi.common.exportExcel));
     await screen.findByTestId('export-modal');
     const props = exportProps.mock.lastCall![0];

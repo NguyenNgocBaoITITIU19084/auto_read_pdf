@@ -9,7 +9,8 @@ export const translations = {
       vessel: "ePort SNP (Lịch tàu)",
       container: "ePort SNP (Tra cứu Cont)",
       tasks: "Việc hôm nay",
-      fleet: "Đội xe",
+      fleet: "Đầu kéo",
+      drivers: "Tài xế",
       logs: "Nhật ký"
     },
     settingsCenter: {
@@ -167,7 +168,7 @@ export const translations = {
         time: "Thời gian",
         openVessel: "Xem trong tab Tàu",
         openContainer: "Xem trong tab Container",
-        openFleet: "Mở tab Đội xe",
+        openFleet: "Mở tab Đầu kéo",
         openBooking: "Xem trong tab Booking",
         close: "Đóng",
       },
@@ -1356,13 +1357,14 @@ export const translations = {
       }
     },
     fleet: {
-      title: "Đội xe",
-      subtitle: "Xe đầu kéo, tài xế và ai đang lái xe nào",
       refresh: "Tải lại",
       loadFailed: "Không tải được dữ liệu đội xe",
       retry: "Thử lại",
-      search: "Tìm biển số, moóc, tên tài xế, SĐT…",
-      views: { vehicles: "Xe", drivers: "Tài xế", history: "Lịch sử phân công" },
+      views: { vehicles: "Đầu kéo", drivers: "Tài xế", history: "Lịch sử phân công" },
+      screens: {
+        vehicles: { title: "Đầu kéo", subtitle: "Xe đầu kéo, moóc, giấy tờ và tài xế đang lái", search: "Tìm biển số, moóc, loại xe, tài xế…" },
+        drivers: { title: "Tài xế", subtitle: "Tài xế, bằng lái và xe đang lái", search: "Tìm tên, SĐT, CCCD, bằng lái, biển số…" },
+      },
       summary: {
         running: "{count} xe đang chạy",
         down: "{count} xe hư / bảo dưỡng",
@@ -1625,7 +1627,8 @@ export const translations = {
       vessel: "ePort SNP (Vessel Schedule)",
       container: "ePort SNP (Container Tracking)",
       tasks: "Today's work",
-      fleet: "Fleet",
+      fleet: "Tractors",
+      drivers: "Drivers",
       logs: "Logs"
     },
     settingsCenter: {
@@ -1783,7 +1786,7 @@ export const translations = {
         time: "Time",
         openVessel: "View in the Vessel tab",
         openContainer: "View in the Container tab",
-        openFleet: "Open Fleet tab",
+        openFleet: "Open Tractors tab",
         openBooking: "View in the Booking tab",
         close: "Close",
       },
@@ -2972,13 +2975,14 @@ export const translations = {
       }
     },
     fleet: {
-      title: "Fleet",
-      subtitle: "Tractor units, drivers and who drives which truck",
       refresh: "Refresh",
       loadFailed: "Could not load fleet data",
       retry: "Retry",
-      search: "Search plate, trailer, driver name, phone…",
-      views: { vehicles: "Trucks", drivers: "Drivers", history: "Assignment history" },
+      views: { vehicles: "Tractors", drivers: "Drivers", history: "Assignment history" },
+      screens: {
+        vehicles: { title: "Tractors", subtitle: "Tractor units, trailers, documents and who drives them", search: "Search plate, trailer, type, driver…" },
+        drivers: { title: "Drivers", subtitle: "Drivers, licences and the truck each one drives", search: "Search name, phone, ID, licence, plate…" },
+      },
       summary: {
         running: "{count} truck(s) running",
         down: "{count} broken / in maintenance",
