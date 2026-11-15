@@ -193,16 +193,15 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
         ) : (
           <Section title={D.papers}>
             <div className="space-y-3">
-              <DriverPaperCard driver={target.item} kind="license" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} facts={
-                <>
-                  <div>{D.licenseClass} <b className="font-semibold text-slate-700 dark:text-slate-200">{target.item.license_class || f.none}</b></div>
-                  <div>{D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.license_no || f.none}</b></div>
-                  <div>{D.expiry} <b className="font-semibold text-slate-700 dark:text-slate-200"><DateValue iso={target.item.license_expiry} /></b></div>
-                </>
-              } />
-              <DriverPaperCard driver={target.item} kind="id" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} facts={
-                <div>{D.number} <b className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{target.item.id_number || f.none}</b></div>
-              } />
+              <DriverPaperCard driver={target.item} kind="license" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} fields={[
+                { key: 'license_class', label: f.driverForm.licenseClass, value: target.item.license_class },
+                { key: 'license_no', label: f.driverForm.licenseNo, value: target.item.license_no },
+                { key: 'license_expiry', label: f.driverForm.licenseExpiry, value: formatIsoDate(target.item.license_expiry),
+                  display: <DateValue iso={target.item.license_expiry} /> },
+              ]} />
+              <DriverPaperCard driver={target.item} kind="id" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} fields={[
+                { key: 'id_number', label: f.driverForm.idNumber, value: target.item.id_number },
+              ]} />
             </div>
           </Section>
         )}

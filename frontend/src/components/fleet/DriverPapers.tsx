@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { CreditCard, IdCard, ImagePlus, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Copy, CreditCard, IdCard, ImagePlus, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -7,6 +7,7 @@ import { deleteFleetDriverDocumentApi, fleetPhotoUrl, uploadFleetDriverDocumentA
 import { tf } from '../../services/i18nFormat';
 import type { DriverDocument, FleetDriver } from '../../types';
 import { photoProblem } from './FleetPhoto';
+import { copyTextToClipboard } from '../../utils/formatters';
 import { apiError } from './fleetUtils';
 
 interface TileProps {
@@ -111,34 +112,79 @@ const DocumentTile: React.FC<TileProps> = ({ driver, which, doc, side, onOpen, o
   );
 };
 
+/** One fact of a paper (class, number, expiry): a box with its label and a copy button, like the booking details. */
+export interface PaperField {
+  key: string;
+  label: string;
+  /** what the copy button copies ('' = nothing to copy, shown as "—") */
+  value: string;
+  /** what the box shows, when not just `value` (a date with its days-left badge) */
+  display?: React.ReactNode;
+}
+
+const FieldBox: React.FC<{ field: PaperField }> = ({ field }) => {
+  const { t } = useApp();
+  const { addToast } = useToastActions();
+  const [copied, setCopied] = useState(false);
+  const empty = !field.value.trim();
+  const copy = async () => {
+    const ok = await copyTextToClipboard(field.value);
+    addToast(ok ? t.common.copySuccess : t.fleet.toast.error, ok ? 'success' : 'error');
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+  return (
+    <div data-testid={`paper-field-${field.key}`} className={`px-2.5 py-1.5 rounded-xl border ${empty
+      ? 'bg-slate-50/40 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
+      : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{field.label}</span>
+        {!empty && (
+          <button type="button" onClick={() => void copy()} title={t.common.copy} aria-label={`${t.common.copy} ${field.label}`}
+            className="p-0.5 rounded text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        )}
+      </div>
+      <div className={`text-sm font-semibold tabular-nums ${empty ? 'text-slate-400 font-normal' : 'text-slate-800 dark:text-slate-100'}`}>
+        {empty ? t.fleet.none : field.display ?? field.value}
+      </div>
+    </div>
+  );
+};
+
 interface CardProps {
   driver: FleetDriver;
   kind: 'license' | 'id';
-  /** the card's facts (number, class, expiry), one per line, left of its two sides */
-  facts: React.ReactNode;
+  /** the paper's facts, each in its own copyable box, left of its two sides */
+  fields: PaperField[];
   onOpen: (photo: string, name: string) => void;
   onChanged: () => void;
 }
 
-/** A licence or CCCD on one row: its facts, then both sides. Rows share the same columns, so the sides line up. */
-export const DriverPaperCard: React.FC<CardProps> = ({ driver, kind, facts, onOpen, onChanged }) => {
+/** A licence or CCCD on one row: its title, then its facts and both sides. Rows share their columns, so the sides
+ *  line up. */
+export const DriverPaperCard: React.FC<CardProps> = ({ driver, kind, fields, onOpen, onChanged }) => {
   const { t } = useApp();
   const D = t.fleet.detail;
   const doc = kind === 'license' ? D.license : D.idCard;
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-[13rem,1fr,1fr] items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3"
-      data-testid={`paper-${kind}`}>
-      <div className="col-span-2 sm:col-span-1 flex items-start gap-2.5 min-w-0">
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5" data-testid={`paper-${kind}`}>
+      <div className="flex items-center gap-2">
         <span className="p-1.5 rounded-lg bg-primary-50 dark:bg-primary-950/40 text-primary-600 dark:text-primary-300">
           {kind === 'license' ? <CreditCard className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
         </span>
-        <div className="min-w-0 space-y-1">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{doc}</div>
-          <div className="space-y-0.5 text-xs text-slate-500 dark:text-slate-400">{facts}</div>
-        </div>
+        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{doc}</span>
       </div>
-      <DocumentTile driver={driver} which={`${kind}_front`} doc={doc} side={D.front} onOpen={onOpen} onChanged={onChanged} />
-      <DocumentTile driver={driver} which={`${kind}_back`} doc={doc} side={D.back} onOpen={onOpen} onChanged={onChanged} />
+      <div className="grid grid-cols-2 sm:grid-cols-[14rem,1fr,1fr] items-start gap-3">
+        <div className="col-span-2 sm:col-span-1 space-y-2">
+          {fields.map((field) => <FieldBox key={field.key} field={field} />)}
+        </div>
+        <DocumentTile driver={driver} which={`${kind}_front`} doc={doc} side={D.front} onOpen={onOpen} onChanged={onChanged} />
+        <DocumentTile driver={driver} which={`${kind}_back`} doc={doc} side={D.back} onOpen={onOpen} onChanged={onChanged} />
+      </div>
     </div>
   );
 };

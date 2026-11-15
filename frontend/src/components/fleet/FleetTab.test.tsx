@@ -549,7 +549,16 @@ describe('FleetTab driver details', () => {
     expect(within(detail).queryByText(D.homeVehicle)).not.toBeInTheDocument();
     expect(within(screen.getByTestId('driver-current-vehicle')).getByText('51C-1')).toBeInTheDocument();
     expect(within(detail).getByText(D.license)).toBeInTheDocument();
-    expect(within(detail).getByText('079091006789')).toBeInTheDocument();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const idBox = screen.getByTestId('paper-field-id_number');
+    expect(within(idBox).getByText('079091006789')).toBeInTheDocument();
+    fireEvent.click(within(idBox).getByLabelText(`${translations.vi.common.copy} ${f.driverForm.idNumber}`));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('079091006789'));
+    expect(addToast).toHaveBeenCalledWith(translations.vi.common.copySuccess, 'success');
+    expect(within(screen.getByTestId('paper-field-license_no')).getByText('790123')).toBeInTheDocument();
+    // nothing typed: a dash and no copy button
+    expect(within(screen.getByTestId('paper-field-license_expiry')).queryByRole('button')).not.toBeInTheDocument();
     expect(within(screen.getByTestId('doc-license_front')).getByRole('img')).toHaveAttribute(
       'src', 'http://api/fleet/photos/driver_1_license_front_0a1b2c3d.jpg');
 
