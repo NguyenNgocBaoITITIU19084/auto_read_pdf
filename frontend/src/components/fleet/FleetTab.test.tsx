@@ -2,6 +2,7 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { translations } from '../../i18n/translations';
+import { tf } from '../../services/i18nFormat';
 import type { FleetDriver, FleetVehicle } from '../../types';
 
 const addToast = vi.fn();
@@ -29,6 +30,7 @@ const api = {
   deleteFleetVehicleApi: vi.fn(),
   uploadFleetDriverDocumentApi: vi.fn(),
   deleteFleetDriverDocumentApi: vi.fn(),
+  updateFleetDriverApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -53,7 +55,7 @@ vi.mock('../../services/api', () => ({
   createFleetVehicleApi: vi.fn(),
   updateFleetVehicleApi: vi.fn(),
   createFleetDriverApi: vi.fn(),
-  updateFleetDriverApi: vi.fn(),
+  updateFleetDriverApi: (...a: unknown[]) => api.updateFleetDriverApi(...a),
   unassignDriverApi: vi.fn(),
   uploadFleetVehiclePhotoApi: vi.fn(),
   deleteFleetVehiclePhotoApi: vi.fn(),
@@ -355,7 +357,7 @@ describe('FleetTab row interactions', () => {
     const driverRow = await screen.findByTestId('driver-1');
     fireEvent.keyDown(driverRow, { key: 'Enter' });
     expect(screen.getByText(`Chi tiết tài xế ${an.name}`)).toBeInTheDocument();
-    expect(within(screen.getByTestId('fleet-detail')).getByText('FC')).toBeInTheDocument();
+    expect(within(screen.getByTestId('fleet-detail')).getByDisplayValue('FC')).toBeInTheDocument();
     expect(api.getFleetHistoryApi).toHaveBeenLastCalledWith({ driver_id: 1, limit: 5 });
   });
 });
@@ -531,43 +533,93 @@ describe('FleetTab Excel export', () => {
 });
 
 describe('FleetTab driver details', () => {
-  it('shows the licence and CCCD with both sides, uploads and removes a scan, and no own-truck box', async () => {
+  const D = f.detail;
+  const F = f.driverForm;
+  const open = async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', {
-      license_class: 'FC', license_no: '790123', id_number: '079091006789', license_front: 'driver_1_license_front_0a1b2c3d.jpg',
+      phone: '0909', license_class: 'FC', license_no: '790123', id_number: '079091006789',
+      license_front: 'driver_1_license_front_0a1b2c3d.jpg',
       home_vehicle: { id: 1, plate: '51C-1', status: 'active' },
       current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' },
     })]);
     api.getFleetHistoryApi.mockResolvedValue([]);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.keyDown(await screen.findByTestId('driver-1'), { key: 'Enter' });
+    return screen.getByTestId('fleet-detail');
+  };
+
+  it('edits in place and saves only what changed, with no own-truck box', async () => {
+    const detail = await open();
+    expect(within(detail).queryByText(D.homeVehicle)).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('driver-current-vehicle')).getByText('51C-1')).toBeInTheDocument();
+    const save = within(detail).getByText(D.save).closest('button')!;
+    expect(save).toBeDisabled();
+
+    fireEvent.change(within(detail).getByLabelText(F.licenseNo), { target: { value: '790999' } });
+    fireEvent.change(within(detail).getByLabelText(F.idNumber), { target: { value: '079000000001' } });
+    expect(within(detail).getByText(D.unsaved)).toBeInTheDocument();
+    expect(within(detail).getByText(f.actions.move).closest('button')).toBeDisabled();   // save first
+    api.updateFleetDriverApi.mockResolvedValue({});
+    fireEvent.click(save);
+    await waitFor(() => expect(api.updateFleetDriverApi).toHaveBeenCalledWith(1, { license_no: '790999', id_number: '079000000001' }));
+    expect(addToast).toHaveBeenCalledWith(f.toast.saved, 'success');
+  });
+
+  it('asks before closing with unsaved changes, and "Hủy thay đổi" puts the values back', async () => {
+    const detail = await open();
+    fireEvent.change(within(detail).getByLabelText(F.phone), { target: { value: '0911' } });
+    confirmMock.mockResolvedValue(false);
+    fireEvent.click(screen.getAllByRole('button').find((b) => b.getAttribute('aria-label') === translations.vi.common.close
+      || b.querySelector('svg.lucide-x'))!);
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({ message: tf(D.discardConfirm, { name: 'An' }) })));
+    expect(screen.getByTestId('fleet-detail')).toBeInTheDocument();
+    fireEvent.click(within(detail).getByText(D.discard));
+    expect(within(detail).getByLabelText(F.phone)).toHaveValue('0909');
+  });
+
+  it('picks boxes and copies them together like the booking details, or one at once', async () => {
+    const detail = await open();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    fireEvent.click(screen.getByTestId('driver-field-name'));
+    fireEvent.click(screen.getByTestId('driver-field-id_number'));
+    fireEvent.click(screen.getByTestId('driver-current-vehicle'));
+    fireEvent.click(within(detail).getByText(translations.vi.common.fieldCopy.copyLabeled));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${F.name}: An\n${D.currentVehicle}: 51C-1\n${F.idNumber}: 079091006789`));
+    // a click in the text edits it, it does not pick the box
+    fireEvent.click(within(detail).getByLabelText(F.licenseClass));
+    expect(screen.getByTestId('driver-field-license_class')).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(within(screen.getByTestId('driver-field-license_no')).getByLabelText(`${translations.vi.common.copy} ${F.licenseNo}`));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('790123'));
+  });
+
+  it('shows, uploads and removes the licence / CCCD scans', async () => {
+    await open();
     api.uploadFleetDriverDocumentApi.mockResolvedValue({});
     api.deleteFleetDriverDocumentApi.mockResolvedValue({});
     confirmMock.mockResolvedValue(true);
-    render(<FleetTab screen="drivers" />);
-    fireEvent.keyDown(await screen.findByTestId('driver-1'), { key: 'Enter' });
-    const detail = screen.getByTestId('fleet-detail');
-    const D = f.detail;
-    expect(within(detail).queryByText(D.homeVehicle)).not.toBeInTheDocument();
-    expect(within(screen.getByTestId('driver-current-vehicle')).getByText('51C-1')).toBeInTheDocument();
-    expect(within(detail).getByText(D.license)).toBeInTheDocument();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    const idBox = screen.getByTestId('paper-field-id_number');
-    expect(within(idBox).getByText('079091006789')).toBeInTheDocument();
-    fireEvent.click(within(idBox).getByLabelText(`${translations.vi.common.copy} ${f.driverForm.idNumber}`));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('079091006789'));
-    expect(addToast).toHaveBeenCalledWith(translations.vi.common.copySuccess, 'success');
-    expect(within(screen.getByTestId('paper-field-license_no')).getByText('790123')).toBeInTheDocument();
-    // nothing typed: a dash and no copy button
-    expect(within(screen.getByTestId('paper-field-license_expiry')).queryByRole('button')).not.toBeInTheDocument();
     expect(within(screen.getByTestId('doc-license_front')).getByRole('img')).toHaveAttribute(
       'src', 'http://api/fleet/photos/driver_1_license_front_0a1b2c3d.jpg');
-
     const file = new File(['x'], 'cccd.jpg', { type: 'image/jpeg' });
     fireEvent.change(screen.getByTestId('doc-id_front-input'), { target: { files: [file] } });
     await waitFor(() => expect(api.uploadFleetDriverDocumentApi).toHaveBeenCalledWith(1, 'id_front', file));
     expect(addToast).toHaveBeenCalledWith(`Đã lưu ảnh ${D.idCard} – ${D.front}`, 'success');
-
     fireEvent.click(within(screen.getByTestId('doc-license_front')).getByLabelText(`${D.removeImage} · ${D.license} – ${D.front}`));
     await waitFor(() => expect(api.deleteFleetDriverDocumentApi).toHaveBeenCalledWith(1, 'license_front'));
+  });
+});
+
+describe('FleetTab truck details', () => {
+  it('"Sửa thông tin" opens the edit form over the details, not hidden under them', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetHistoryApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    fireEvent.keyDown(await screen.findByTestId('vehicle-1'), { key: 'Enter' });
+    const detail = screen.getByTestId('fleet-detail');
+    fireEvent.click(within(detail).getByText(f.menu.edit));
+    const form = screen.getByText('Sửa xe 51C-1');
+    expect(detail.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -11,7 +11,7 @@ import {
   setDriverHomeVehicleApi, setFleetVehicleStatusApi, unassignDriverApi, updateFleetDriverApi, updateFleetVehicleApi,
   uploadFleetDriverPhotoApi, uploadFleetVehiclePhotoApi, uploadFleetDriverDocumentApi, deleteFleetDriverDocumentApi,
 } from '../../services/api';
-import { NO_PAPER_CHANGES, PaperPicker, type PaperChoices } from './DriverPapers';
+import { DriverSection, FieldInputBox, NO_PAPER_CHANGES, PaperPicker, PaperRow, type PaperChoices } from './DriverPapers';
 import { PhotoPicker, type PhotoChoice } from './FleetPhoto';
 import {
   DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleStatus,
@@ -268,71 +268,80 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={driver ? tf(f.editTitle, { name: driver.name }) : f.addTitle} maxWidth="max-w-2xl">
-      <form onSubmit={submit} className="space-y-3" noValidate>
-        <PhotoPicker kind="driver" name={form.name} current={driver?.photo || ''} value={photo} onChange={setPhoto} onError={setError} />
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={f.name} required className="col-span-2">
-            <input autoFocus className={INPUT} value={form.name} onChange={set('name')} />
-          </Field>
-          <Field label={f.phone}>
-            <input className={INPUT} value={form.phone} onChange={set('phone')} inputMode="tel" />
-          </Field>
-          <Field label={f.status}>
-            <select className={INPUT} value={form.status} onChange={set('status')}>
-              {DRIVER_STATUSES.map((s) => <option key={s} value={s}>{t.fleet.driverStatus[s]}</option>)}
-            </select>
-          </Field>
-          {!driver && (
-            <Field label={f.homeVehicle} className="col-span-2">
-              <select className={INPUT} value={homeId} onChange={(e) => setHomeId(e.target.value)}>
-                <option value="">{f.noHome}</option>
-                {unassigned.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v, t)}</option>)}
+    <Modal isOpen={isOpen} onClose={onClose} title={driver ? tf(f.editTitle, { name: driver.name }) : f.addTitle} maxWidth="max-w-3xl">
+      {/* laid out like the driver details: photo + who they are, then the papers, then the rest */}
+      <form onSubmit={submit} className="space-y-5" noValidate>
+        <div className="flex items-start gap-4">
+          <PhotoPicker kind="driver" name={form.name} current={driver?.photo || ''} value={photo} onChange={setPhoto} onError={setError} stacked />
+          <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+            <div className="col-span-2">
+              <FieldInputBox label={f.name} required>
+                <input autoFocus value={form.name} onChange={set('name')} />
+              </FieldInputBox>
+            </div>
+            <FieldInputBox label={f.phone}>
+              <input value={form.phone} onChange={set('phone')} inputMode="tel" />
+            </FieldInputBox>
+            <FieldInputBox label={f.status}>
+              <select value={form.status} onChange={set('status')}>
+                {DRIVER_STATUSES.map((s) => <option key={s} value={s}>{t.fleet.driverStatus[s]}</option>)}
               </select>
-            </Field>
-          )}
-        </div>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>
-        {([
-          ['license', D.license, (
-            <>
-              <Field label={f.licenseNo}>
-                <input className={INPUT} value={form.license_no} onChange={set('license_no')} />
-              </Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label={f.licenseClass}>
-                  <input className={INPUT} value={form.license_class} onChange={set('license_class')} placeholder={f.licenseClassPh} />
-                </Field>
-                <Field label={f.licenseExpiry}>
-                  <input type="date" className={INPUT} value={form.license_expiry} onChange={set('license_expiry')} />
-                </Field>
+            </FieldInputBox>
+            {!driver && (
+              <div className="col-span-2">
+                <FieldInputBox label={f.homeVehicle}>
+                  <select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
+                    <option value="">{f.noHome}</option>
+                    {unassigned.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v, t)}</option>)}
+                  </select>
+                </FieldInputBox>
               </div>
-            </>
-          )],
-          ['id', D.idCard, (
-            <Field label={f.idNumber}>
-              <input className={INPUT} value={form.id_number} onChange={set('id_number')} />
-            </Field>
-          )],
-        ] as ['license' | 'id', string, React.ReactNode][]).map(([kind, doc, fields]) => (
-          <fieldset key={kind} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3" data-testid={`driver-form-${kind}`}>
-            <legend className="px-1 text-xs font-bold text-slate-700 dark:text-slate-200">{doc}</legend>
-            <div className="grid grid-cols-2 sm:grid-cols-[1fr,9.5rem,9.5rem] items-start gap-3">
-              <div className="col-span-2 sm:col-span-1 space-y-2">{fields}</div>
-              {(['front', 'back'] as const).map((side) => {
+            )}
+            <p className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>
+          </div>
+        </div>
+
+        <DriverSection title={D.papers}>
+          <div className="space-y-3">
+            {(['license', 'id'] as const).map((kind) => {
+              const doc = kind === 'license' ? D.license : D.idCard;
+              const picker = (side: 'front' | 'back') => {
                 const which = `${kind}_${side}` as const;
                 return (
-                  <PaperPicker key={which} which={which} doc={doc} side={side === 'front' ? D.front : D.back}
+                  <PaperPicker which={which} doc={doc} side={side === 'front' ? D.front : D.back}
                     current={driver?.[which] || ''} value={papers[which]}
                     onChange={(next) => setPapers((prev) => ({ ...prev, [which]: next }))} onError={setError} />
                 );
-              })}
-            </div>
-          </fieldset>
-        ))}
-        <Field label={f.note}>
-          <textarea className={`${INPUT} h-16 py-1.5`} value={form.note} onChange={set('note')} />
-        </Field>
+              };
+              return (
+                <PaperRow key={kind} kind={kind} front={picker('front')} back={picker('back')} facts={kind === 'license' ? (
+                  <>
+                    <FieldInputBox label={f.licenseClass}>
+                      <input value={form.license_class} onChange={set('license_class')} placeholder={f.licenseClassPh} />
+                    </FieldInputBox>
+                    <FieldInputBox label={f.licenseNo}>
+                      <input value={form.license_no} onChange={set('license_no')} />
+                    </FieldInputBox>
+                    <FieldInputBox label={f.licenseExpiry}>
+                      <input type="date" value={form.license_expiry} onChange={set('license_expiry')} />
+                    </FieldInputBox>
+                  </>
+                ) : (
+                  <FieldInputBox label={f.idNumber}>
+                    <input value={form.id_number} onChange={set('id_number')} />
+                  </FieldInputBox>
+                )} />
+              );
+            })}
+          </div>
+        </DriverSection>
+
+        <DriverSection title={D.other}>
+          <FieldInputBox label={f.note}>
+            <textarea rows={2} value={form.note} onChange={set('note')} />
+          </FieldInputBox>
+        </DriverSection>
+
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
         <Footer onCancel={onClose} saving={saving} />
       </form>

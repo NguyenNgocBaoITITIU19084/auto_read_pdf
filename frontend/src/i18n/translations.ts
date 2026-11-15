@@ -1473,6 +1473,10 @@ export const translations = {
         imageName: "{doc} – {side} · {name}", saved: "Đã lưu ảnh {doc} – {side}", removed: "Đã xóa ảnh {doc} – {side}",
         removeConfirm: "Xóa ảnh {doc} – {side} của {name}?",
         number: "Số", licenseClass: "Hạng", expiry: "Hết hạn",
+        save: "Lưu thay đổi", discard: "Hủy thay đổi", unsaved: "Có thay đổi chưa lưu",
+        discardConfirm: "Bỏ các thay đổi chưa lưu của {name}?", discardKeep: "Tiếp tục sửa", discardYes: "Bỏ thay đổi",
+        photoSaved: "Đã lưu ảnh đại diện", photoRemoved: "Đã xóa ảnh đại diện", removePhotoConfirm: "Xóa ảnh đại diện của {name}?",
+        editHint: "Bấm vào chữ trong ô để sửa · bấm vào nền ô để chọn và sao chép",
       },
       table: {
         type: "Loại xe",
@@ -3160,6 +3164,10 @@ export const translations = {
         imageName: "{doc} – {side} · {name}", saved: "Saved {doc} – {side}", removed: "Removed {doc} – {side}",
         removeConfirm: "Remove the {doc} – {side} image of {name}?",
         number: "No.", licenseClass: "Class", expiry: "Expires",
+        save: "Save changes", discard: "Discard changes", unsaved: "Unsaved changes",
+        discardConfirm: "Discard the unsaved changes to {name}?", discardKeep: "Keep editing", discardYes: "Discard",
+        photoSaved: "Photo saved", photoRemoved: "Photo removed", removePhotoConfirm: "Remove the photo of {name}?",
+        editHint: "Click a box's text to edit it · click its background to select it for copying",
       },
       table: {
         type: "Truck type",

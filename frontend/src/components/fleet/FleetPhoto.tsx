@@ -45,12 +45,12 @@ interface AvatarProps {
   kind: 'vehicle' | 'driver' | 'trailer';
   name: string;
   /** xs/sm/md are square (people); wide/wideSm are landscape (trucks) */
-  size?: 'xs' | 'sm' | 'md' | 'wide' | 'wideSm';
+  size?: 'xs' | 'sm' | 'md' | 'xl' | 'wide' | 'wideSm';
   onClick?: () => void;
 }
 
 const SIZES = {
-  xs: 'w-6 h-6 text-[9px]', sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', wide: 'w-[4.5rem] h-12 text-xs', wideSm: 'w-12 h-8 text-[10px]',
+  xs: 'w-6 h-6 text-[9px]', sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', xl: 'w-28 h-28 text-3xl', wide: 'w-[4.5rem] h-12 text-xs', wideSm: 'w-12 h-8 text-[10px]',
 };
 
 /** A truck's / driver's photo in a table, or a placeholder; with onClick it opens the photo. */
@@ -124,11 +124,13 @@ interface PickerProps {
   value: PhotoChoice;
   onChange: (next: PhotoChoice) => void;
   onError: (message: string) => void;
+  /** the photo large with its buttons below (the driver form, sized like the driver details); hints as a tooltip */
+  stacked?: boolean;
 }
 
 /** Photo field of the truck / driver forms: preview, pick (click or drop), change, remove. Nothing is sent until the
  *  form is saved. */
-export const PhotoPicker: React.FC<PickerProps> = ({ kind, name, current, value, onChange, onError }) => {
+export const PhotoPicker: React.FC<PickerProps> = ({ kind, name, current, value, onChange, onError, stacked }) => {
   const { t } = useApp();
   const p = t.fleet.photo;
   const input = useRef<HTMLInputElement>(null);
@@ -149,21 +151,21 @@ export const PhotoPicker: React.FC<PickerProps> = ({ kind, name, current, value,
 
   const round = kind === 'driver' ? 'rounded-full' : 'rounded-xl';
   return (
-    <div className="flex items-center gap-3">
+    <div className={stacked ? 'flex flex-col items-center gap-2 shrink-0' : 'flex items-center gap-3'}>
       <button type="button" onClick={() => input.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); }}
-        aria-label={shown ? p.change : p.choose} title={p.drop}
-        className={`relative w-24 h-24 shrink-0 overflow-hidden ${round} border-2 border-dashed flex items-center justify-center transition-colors ${
+        aria-label={shown ? p.change : p.choose} title={stacked ? `${p.drop}\n${p.hint}` : p.drop}
+        className={`relative ${stacked ? 'w-28 h-28' : 'w-24 h-24'} shrink-0 overflow-hidden ${round} border-2 border-dashed flex items-center justify-center transition-colors ${
           over ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30'
             : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:border-primary-300'}`}>
         {shown ? <img src={shown} alt={name || p.label} className="w-full h-full object-cover" />
           : kind !== 'driver' ? React.createElement(kind === 'trailer' ? Container : Truck, { className: 'w-8 h-8 text-slate-300 dark:text-slate-600' })
             : <span className="text-2xl font-bold text-slate-300 dark:text-slate-600">{name.trim() ? initials(name) : <ImagePlus className="w-8 h-8" />}</span>}
       </button>
-      <div className="min-w-0 space-y-1.5">
-        <div className="flex flex-wrap gap-1.5">
+      <div className={stacked ? 'min-w-0' : 'min-w-0 space-y-1.5'}>
+        <div className={`flex flex-wrap gap-1.5 ${stacked ? 'justify-center' : ''}`}>
           <button type="button" onClick={() => input.current?.click()}
             className="inline-flex items-center gap-1 h-8 px-2.5 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
             <ImagePlus className="w-3.5 h-3.5" />{shown ? p.change : p.choose}
@@ -175,7 +177,7 @@ export const PhotoPicker: React.FC<PickerProps> = ({ kind, name, current, value,
             </button>
           )}
         </div>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">{p.drop}<br />{p.hint}</p>
+        {!stacked && <p className="text-[11px] text-slate-500 dark:text-slate-400">{p.drop}<br />{p.hint}</p>}
       </div>
       <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
         data-testid={`${kind}-photo-input`}

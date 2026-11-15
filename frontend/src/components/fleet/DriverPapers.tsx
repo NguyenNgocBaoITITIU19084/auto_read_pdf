@@ -3,117 +3,62 @@ import { Check, Copy, CreditCard, IdCard, ImagePlus, Loader2, RefreshCw, Trash2 
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
+import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { deleteFleetDriverDocumentApi, fleetPhotoUrl, uploadFleetDriverDocumentApi } from '../../services/api';
 import { tf } from '../../services/i18nFormat';
 import type { DriverDocument, FleetDriver } from '../../types';
-import { photoProblem, type PhotoChoice } from './FleetPhoto';
-import { useObjectUrl } from '../../hooks/useObjectUrl';
 import { copyTextToClipboard } from '../../utils/formatters';
+import { photoProblem, type PhotoChoice } from './FleetPhoto';
 import { apiError } from './fleetUtils';
 
-interface TileProps {
-  driver: FleetDriver;
-  which: DriverDocument;
-  doc: string;
-  side: string;
-  onOpen: (photo: string, name: string) => void;
-  onChanged: () => void;
-}
+/** The pieces the driver popups share (details, add, edit), so the three look the same: sections, the licence /
+ *  CCCD rows, their fact boxes and their front / back image slots. */
 
-/** One side of a card (licence / CCCD): the scan, or a drop zone. Uploads and removes at once. */
-const DocumentTile: React.FC<TileProps> = ({ driver, which, doc, side, onOpen, onChanged }) => {
+// ---------------------------------------------------------------------------
+// Section: an uppercase title (with an optional link at its right), then its content
+// ---------------------------------------------------------------------------
+export const DriverSection: React.FC<{ title: string; children: React.ReactNode; extra?: React.ReactNode }> = ({ title, children, extra }) => (
+  <section className="space-y-2">
+    <div className="flex items-center justify-between gap-2">
+      <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{title}</h4>
+      {extra}
+    </div>
+    {children}
+  </section>
+);
+
+// ---------------------------------------------------------------------------
+// A paper's row: icon + title, then [its facts | front | back]. Every row uses the same columns, so the sides line up.
+// ---------------------------------------------------------------------------
+export const PaperRow: React.FC<{ kind: 'license' | 'id'; facts: React.ReactNode; front: React.ReactNode; back: React.ReactNode }> = ({
+  kind, facts, front, back,
+}) => {
   const { t } = useApp();
-  const { addToast } = useToastActions();
-  const confirm = useConfirm();
   const D = t.fleet.detail;
-  const input = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [over, setOver] = useState(false);
-  const image = driver[which];
-  const label = tf(D.imageName, { doc, side, name: driver.name });
-
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
-    const problem = photoProblem(file);
-    if (problem) {
-      addToast(t.fleet.photo[problem], 'error');
-      return;
-    }
-    setBusy(true);
-    try {
-      await uploadFleetDriverDocumentApi(driver.id, which, file);
-      addToast(tf(D.saved, { doc, side }), 'success');
-      onChanged();
-    } catch (err) {
-      addToast(apiError(err, t.fleet.toast.error), 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!(await confirm({ message: tf(D.removeConfirm, { doc, side, name: driver.name }), confirmText: D.removeImage, danger: true }))) return;
-    setBusy(true);
-    try {
-      await deleteFleetDriverDocumentApi(driver.id, which);
-      addToast(tf(D.removed, { doc, side }), 'success');
-      onChanged();
-    } catch (err) {
-      addToast(apiError(err, t.fleet.toast.error), 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const drop = {
-    onDragOver: (e: React.DragEvent) => { e.preventDefault(); setOver(true); },
-    onDragLeave: () => setOver(false),
-    onDrop: (e: React.DragEvent) => { e.preventDefault(); setOver(false); void upload(e.dataTransfer.files?.[0]); },
-  };
-  const sideTag = (
-    <span className="absolute top-2 left-2 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">{side}</span>
-  );
-
   return (
-    <div className="relative" data-testid={`doc-${which}`}>
-      {image ? (
-        <div className={`group relative aspect-[1.586] overflow-hidden rounded-xl ring-1 bg-slate-100 dark:bg-slate-800 ${over
-          ? 'ring-2 ring-primary-500' : 'ring-slate-200 dark:ring-slate-700'}`} {...drop}>
-          <button type="button" onClick={() => onOpen(image, label)} aria-label={tf(t.fleet.photo.view, { name: label })}
-            className="block w-full h-full cursor-zoom-in">
-            <img src={fleetPhotoUrl(image)} alt={label} className="w-full h-full object-cover" />
-          </button>
-          {sideTag}
-          <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 p-1.5 bg-gradient-to-t from-slate-900/70 to-transparent opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-            <button type="button" onClick={() => input.current?.click()} title={D.changeImage} aria-label={`${D.changeImage} · ${doc} – ${side}`}
-              className="p-1.5 rounded-md bg-white/90 text-slate-700 hover:bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
-            <button type="button" onClick={() => void remove()} title={D.removeImage} aria-label={`${D.removeImage} · ${doc} – ${side}`}
-              className="p-1.5 rounded-md bg-white/90 text-rose-600 hover:bg-white"><Trash2 className="w-3.5 h-3.5" /></button>
-          </div>
-        </div>
-      ) : (
-        <button type="button" onClick={() => input.current?.click()} {...drop} aria-label={`${D.addImage} · ${doc} – ${side}`}
-          className={`relative flex w-full aspect-[1.586] flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed text-xs transition-colors ${over
-            ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300'
-            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-slate-400 hover:border-primary-300 hover:text-primary-600'}`}>
-          {sideTag}
-          <ImagePlus className="w-6 h-6" />
-          <span className="font-semibold">{D.addImage}</span>
-          <span className="text-[10px] opacity-80">{D.dropHint}</span>
-        </button>
-      )}
-      {busy && (
-        <div className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl bg-white/70 dark:bg-slate-900/70 text-xs font-semibold text-slate-600 dark:text-slate-300">
-          <Loader2 className="w-4 h-4 animate-spin" />{D.uploading}
-        </div>
-      )}
-      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
-        data-testid={`doc-${which}-input`} onChange={(e) => { void upload(e.target.files?.[0]); e.target.value = ''; }} />
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5" data-testid={`paper-${kind}`}>
+      <div className="flex items-center gap-2">
+        <span className="p-1.5 rounded-lg bg-primary-50 dark:bg-primary-950/40 text-primary-600 dark:text-primary-300">
+          {kind === 'license' ? <CreditCard className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
+        </span>
+        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{kind === 'license' ? D.license : D.idCard}</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-[14rem,1fr,1fr] items-start gap-3">
+        <div className="col-span-2 sm:col-span-1 space-y-2">{facts}</div>
+        {front}
+        {back}
+      </div>
     </div>
   );
 };
 
-/** One fact of a paper (class, number, expiry): a box with its label and a copy button, like the booking details. */
+// ---------------------------------------------------------------------------
+// Fact boxes: the same box shows a value (details, with a copy button) or takes one (forms)
+// ---------------------------------------------------------------------------
+const BOX = 'block px-2.5 py-1.5 rounded-xl border';
+const BOX_LABEL = 'text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400';
+
+/** One fact of a paper (class, number, expiry). */
 export interface PaperField {
   key: string;
   label: string;
@@ -123,7 +68,8 @@ export interface PaperField {
   display?: React.ReactNode;
 }
 
-const FieldBox: React.FC<{ field: PaperField }> = ({ field }) => {
+/** A fact to read, with a copy button, like the booking details. */
+export const FieldBox: React.FC<{ field: PaperField }> = ({ field }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
   const [copied, setCopied] = useState(false);
@@ -137,11 +83,11 @@ const FieldBox: React.FC<{ field: PaperField }> = ({ field }) => {
     }
   };
   return (
-    <div data-testid={`paper-field-${field.key}`} className={`px-2.5 py-1.5 rounded-xl border ${empty
+    <div data-testid={`paper-field-${field.key}`} className={`${BOX} ${empty
       ? 'bg-slate-50/40 dark:bg-slate-800/20 border-slate-200/50 dark:border-slate-800/50'
       : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700'}`}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{field.label}</span>
+        <span className={BOX_LABEL}>{field.label}</span>
         {!empty && (
           <button type="button" onClick={() => void copy()} title={t.common.copy} aria-label={`${t.common.copy} ${field.label}`}
             className="p-0.5 rounded text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
@@ -156,42 +102,142 @@ const FieldBox: React.FC<{ field: PaperField }> = ({ field }) => {
   );
 };
 
-interface CardProps {
-  driver: FleetDriver;
-  kind: 'license' | 'id';
-  /** the paper's facts, each in its own copyable box, left of its two sides */
-  fields: PaperField[];
-  onOpen: (photo: string, name: string) => void;
-  onChanged: () => void;
+/** The same box, to type the fact in (the add / edit form). */
+export const FieldInputBox: React.FC<{ label: string; required?: boolean; children: React.ReactElement }> = ({ label, required, children }) => (
+  <label className={`${BOX} bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/30`}>
+    <span className={BOX_LABEL}>{label}{required && <span className="text-rose-500"> *</span>}</span>
+    {React.cloneElement(children, {
+      className: 'block w-full bg-transparent p-0 border-0 text-sm font-semibold text-slate-800 dark:text-slate-100 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-0',
+    })}
+  </label>
+);
+
+// ---------------------------------------------------------------------------
+// Image slot: one side of a paper. The details save at once; the form keeps the choice until it is saved.
+// ---------------------------------------------------------------------------
+interface SlotProps {
+  testId: string;
+  /** what is shown now ('' = nothing: a drop zone) */
+  image: string;
+  alt: string;
+  doc: string;
+  side: string;
+  busy?: boolean;
+  onPick: (file: File | undefined) => void;
+  onRemove: () => void;
+  /** a click on the image opens it large (the details); without it a click picks another one (the form) */
+  onView?: () => void;
 }
 
-/** A licence or CCCD on one row: its title, then its facts and both sides. Rows share their columns, so the sides
- *  line up. */
-export const DriverPaperCard: React.FC<CardProps> = ({ driver, kind, fields, onOpen, onChanged }) => {
+const PaperSlot: React.FC<SlotProps> = ({ testId, image, alt, doc, side, busy, onPick, onRemove, onView }) => {
   const { t } = useApp();
   const D = t.fleet.detail;
-  const doc = kind === 'license' ? D.license : D.idCard;
+  const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const pick = () => input.current?.click();
+  const drop = {
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); setOver(true); },
+    onDragLeave: () => setOver(false),
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); setOver(false); onPick(e.dataTransfer.files?.[0]); },
+  };
+  const sideTag = (
+    <span className="absolute top-2 left-2 rounded-md bg-slate-900/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">{side}</span>
+  );
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5" data-testid={`paper-${kind}`}>
-      <div className="flex items-center gap-2">
-        <span className="p-1.5 rounded-lg bg-primary-50 dark:bg-primary-950/40 text-primary-600 dark:text-primary-300">
-          {kind === 'license' ? <CreditCard className="w-4 h-4" /> : <IdCard className="w-4 h-4" />}
-        </span>
-        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{doc}</span>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-[14rem,1fr,1fr] items-start gap-3">
-        <div className="col-span-2 sm:col-span-1 space-y-2">
-          {fields.map((field) => <FieldBox key={field.key} field={field} />)}
+    <div className="relative" data-testid={testId}>
+      {image ? (
+        <div className={`group relative aspect-[1.586] overflow-hidden rounded-xl ring-1 bg-slate-100 dark:bg-slate-800 ${over
+          ? 'ring-2 ring-primary-500' : 'ring-slate-200 dark:ring-slate-700'}`} {...drop}>
+          <button type="button" onClick={onView || pick}
+            aria-label={onView ? tf(t.fleet.photo.view, { name: alt }) : `${D.changeImage} · ${doc} – ${side}`}
+            className={`block w-full h-full ${onView ? 'cursor-zoom-in' : ''}`}>
+            <img src={image} alt={alt} className="w-full h-full object-cover" />
+          </button>
+          {sideTag}
+          <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1 p-1.5 bg-gradient-to-t from-slate-900/70 to-transparent opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            <button type="button" onClick={pick} title={D.changeImage} aria-label={`${D.changeImage} · ${doc} – ${side}`}
+              className="p-1.5 rounded-md bg-white/90 text-slate-700 hover:bg-white"><RefreshCw className="w-3.5 h-3.5" /></button>
+            <button type="button" onClick={onRemove} title={D.removeImage} aria-label={`${D.removeImage} · ${doc} – ${side}`}
+              className="p-1.5 rounded-md bg-white/90 text-rose-600 hover:bg-white"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
         </div>
-        <DocumentTile driver={driver} which={`${kind}_front`} doc={doc} side={D.front} onOpen={onOpen} onChanged={onChanged} />
-        <DocumentTile driver={driver} which={`${kind}_back`} doc={doc} side={D.back} onOpen={onOpen} onChanged={onChanged} />
-      </div>
+      ) : (
+        <button type="button" onClick={pick} {...drop} aria-label={`${D.addImage} · ${doc} – ${side}`}
+          className={`relative flex w-full aspect-[1.586] flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed text-xs transition-colors ${over
+            ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-950/30 dark:text-primary-300'
+            : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-slate-400 hover:border-primary-300 hover:text-primary-600'}`}>
+          {sideTag}
+          <ImagePlus className="w-6 h-6" />
+          <span className="font-semibold">{D.addImage}</span>
+          <span className="text-[10px] opacity-80 px-2 text-center">{D.dropHint}</span>
+        </button>
+      )}
+      {busy && (
+        <div className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl bg-white/70 dark:bg-slate-900/70 text-xs font-semibold text-slate-600 dark:text-slate-300">
+          <Loader2 className="w-4 h-4 animate-spin" />{D.uploading}
+        </div>
+      )}
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
+        data-testid={`${testId}-input`} onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ''; }} />
     </div>
   );
 };
 
 // ---------------------------------------------------------------------------
-// The driver form's scans: picked now, uploaded when the form is saved
+// Details: a side saved and removed at once
+// ---------------------------------------------------------------------------
+interface TileProps {
+  driver: FleetDriver;
+  which: DriverDocument;
+  doc: string;
+  side: string;
+  onOpen: (photo: string, name: string) => void;
+  onChanged: () => void;
+}
+
+export const DocumentTile: React.FC<TileProps> = ({ driver, which, doc, side, onOpen, onChanged }) => {
+  const { t } = useApp();
+  const { addToast } = useToastActions();
+  const confirm = useConfirm();
+  const D = t.fleet.detail;
+  const [busy, setBusy] = useState(false);
+  const image = driver[which];
+  const label = tf(D.imageName, { doc, side, name: driver.name });
+
+  const run = async (work: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    try {
+      await work();
+      addToast(done, 'success');
+      onChanged();
+    } catch (err) {
+      addToast(apiError(err, t.fleet.toast.error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const upload = (file: File | undefined) => {
+    if (!file) return;
+    const problem = photoProblem(file);
+    if (problem) {
+      addToast(t.fleet.photo[problem], 'error');
+      return;
+    }
+    void run(() => uploadFleetDriverDocumentApi(driver.id, which, file), tf(D.saved, { doc, side }));
+  };
+  const remove = async () => {
+    if (!(await confirm({ message: tf(D.removeConfirm, { doc, side, name: driver.name }), confirmText: D.removeImage, danger: true }))) return;
+    void run(() => deleteFleetDriverDocumentApi(driver.id, which), tf(D.removed, { doc, side }));
+  };
+
+  return (
+    <PaperSlot testId={`doc-${which}`} image={image ? fleetPhotoUrl(image) : ''} alt={label} doc={doc} side={side} busy={busy}
+      onPick={upload} onRemove={() => void remove()} onView={() => onOpen(image, label)} />
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Form: a side picked now, uploaded when the form is saved
 // ---------------------------------------------------------------------------
 export type PaperChoices = Record<DriverDocument, PhotoChoice>;
 export const NO_PAPER_CHANGES: PaperChoices = {
@@ -210,15 +256,10 @@ interface PaperPickerProps {
   onError: (message: string) => void;
 }
 
-/** One side of a licence / CCCD in the driver form: preview, pick (click or drop), change, remove. */
 export const PaperPicker: React.FC<PaperPickerProps> = ({ which, doc, side, current, value, onChange, onError }) => {
   const { t } = useApp();
-  const D = t.fleet.detail;
-  const input = useRef<HTMLInputElement>(null);
-  const [over, setOver] = useState(false);
   const preview = useObjectUrl(value.file);
   const shown = preview || (!value.remove && current ? fleetPhotoUrl(current) : '');
-
   const take = (file: File | undefined) => {
     if (!file) return;
     const problem = photoProblem(file);
@@ -229,29 +270,8 @@ export const PaperPicker: React.FC<PaperPickerProps> = ({ which, doc, side, curr
     onError('');
     onChange({ file, remove: false });
   };
-
   return (
-    <div className="relative" data-testid={`paper-picker-${which}`}>
-      <button type="button" onClick={() => input.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); }}
-        aria-label={`${shown ? D.changeImage : D.addImage} · ${doc} – ${side}`} title={D.dropHint}
-        className={`relative flex w-full aspect-[1.586] items-center justify-center overflow-hidden rounded-lg border-2 transition-colors ${
-          shown ? 'border-transparent ring-1 ring-slate-200 dark:ring-slate-700' : 'border-dashed'} ${over
-          ? 'border-primary-500 bg-primary-50 dark:bg-primary-950/30'
-          : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 hover:border-primary-300'}`}>
-        {shown ? <img src={shown} alt={`${doc} – ${side}`} className="w-full h-full object-cover" />
-          : <span className="flex flex-col items-center gap-1 text-[11px] font-semibold text-slate-400"><ImagePlus className="w-5 h-5" />{D.addImage}</span>}
-        <span className="absolute top-1.5 left-1.5 rounded bg-slate-900/70 px-1 py-px text-[10px] font-semibold text-white">{side}</span>
-      </button>
-      {shown && (
-        <button type="button" onClick={() => onChange({ file: null, remove: !!current })} title={D.removeImage}
-          aria-label={`${D.removeImage} · ${doc} – ${side}`}
-          className="absolute top-1.5 right-1.5 p-1 rounded-md bg-white/90 text-rose-600 hover:bg-white shadow-sm"><Trash2 className="w-3 h-3" /></button>
-      )}
-      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/bmp" className="hidden"
-        data-testid={`paper-picker-${which}-input`} onChange={(e) => { take(e.target.files?.[0]); e.target.value = ''; }} />
-    </div>
+    <PaperSlot testId={`paper-picker-${which}`} image={shown} alt={`${doc} – ${side}`} doc={doc} side={side}
+      onPick={take} onRemove={() => onChange({ file: null, remove: !!current })} />
   );
 };

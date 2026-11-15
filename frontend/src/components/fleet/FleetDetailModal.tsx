@@ -9,7 +9,8 @@ import type { FleetAssignment, FleetDriver, FleetVehicle } from '../../types';
 import { Modal } from '../common/Modal';
 import { daysLeftText } from '../common/ReminderViews';
 import { FleetAvatar } from './FleetPhoto';
-import { DriverPaperCard } from './DriverPapers';
+import { DriverSection } from './DriverPapers';
+import { DriverDetailModal } from './DriverDetail';
 import { EXPIRY_WARN_DAYS, daysUntil, formatIsoDate, formatStampShort, todayVnIso } from './fleetUtils';
 
 export type FleetDetailTarget = { kind: 'vehicle'; item: FleetVehicle } | { kind: 'driver'; item: FleetDriver };
@@ -50,15 +51,6 @@ const DateValue: React.FC<{ iso: string }> = ({ iso }) => {
   );
 };
 
-const Section: React.FC<{ title: string; children: React.ReactNode; extra?: React.ReactNode }> = ({ title, children, extra }) => (
-  <section className="space-y-2">
-    <div className="flex items-center justify-between gap-2">
-      <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{title}</h4>
-      {extra}
-    </div>
-    {children}
-  </section>
-);
 
 const Person: React.FC<{ photo: string; name: string; lines: React.ReactNode[] }> = ({ photo, name, lines }) => (
   <div className="flex items-center gap-2.5">
@@ -81,7 +73,8 @@ interface Props {
   onChanged?: () => void;
 }
 
-/** Everything about one truck or driver, opened by double-clicking its row. Its actions are the row's own. */
+/** Everything about one truck or driver, opened by double-clicking its row. Its actions are the row's own. A driver's
+ *  details are DriverDetailModal (edited in place). */
 export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto, onShowHistory, onEdit, actions, onChanged }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
@@ -91,12 +84,10 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
   const key = target ? `${target.kind}-${target.item.id}-${target.item.updated_at}` : '';
 
   useEffect(() => {
-    if (!target) return;
+    if (!target || target.kind === 'driver') return; // a driver's details load their own (DriverDetailModal)
     let alive = true;
     setHistory(null);
-    getFleetHistoryApi(target.kind === 'vehicle'
-      ? { vehicle_id: target.item.id, limit: HISTORY_SHOWN }
-      : { driver_id: target.item.id, limit: HISTORY_SHOWN })
+    getFleetHistoryApi({ vehicle_id: target.item.id, limit: HISTORY_SHOWN })
       .then((rows) => alive && setHistory(rows))
       .catch(() => alive && setHistory([]));
     return () => { alive = false; };
@@ -104,7 +95,15 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
   }, [key]);
 
   if (!target) return null;
+  // a driver's details are edited in place, with their own save and copy bar
+  if (target.kind === 'driver') {
+    return (
+      <DriverDetailModal driver={target.item} onClose={onClose} onOpenPhoto={onOpenPhoto} onShowHistory={onShowHistory}
+        actions={actions} onChanged={() => onChanged?.()} />
+    );
+  }
 
+  const v = target.item;
   const copyPhone = async (phone: string) => {
     const ok = await copyTextToClipboard(phone);
     addToast(ok ? tf(D.phoneCopied, { phone }) : f.toast.error, ok ? 'success' : 'error');
@@ -115,112 +114,66 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
       {phone}<Copy className="w-3 h-3" />
     </button>
   ) : null;
-
-  const isVehicle = target.kind === 'vehicle';
-  const title = isVehicle ? tf(D.vehicleTitle, { plate: target.item.plate }) : tf(D.driverTitle, { name: target.item.name });
-  const name = isVehicle ? target.item.plate : target.item.name;
-  const status = isVehicle ? f.vehicleStatus[target.item.status] : f.driverStatus[target.item.status];
-  const statusTone = target.item.status === 'active' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-    : target.item.status === 'broken' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-      : target.item.status === 'maintenance' || target.item.status === 'leave'
-        ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+  const statusTone = v.status === 'active' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+    : v.status === 'broken' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+      : v.status === 'maintenance' ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
         : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400';
 
   return (
-    <Modal isOpen onClose={onClose} title={title} maxWidth={isVehicle ? 'max-w-2xl' : 'max-w-3xl'}>
+    <Modal isOpen onClose={onClose} title={tf(D.vehicleTitle, { plate: v.plate })} maxWidth="max-w-2xl">
       <div className="space-y-5" data-testid="fleet-detail">
         <div className="flex items-center gap-4">
-          {target.item.photo ? (
-            <button type="button" onClick={() => onOpenPhoto(target.item.photo, name)} aria-label={tf(f.photo.view, { name })}
-              className={`shrink-0 overflow-hidden cursor-zoom-in ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-primary-400 ${
-                isVehicle ? 'w-48 h-32 rounded-xl' : 'w-28 h-28 rounded-full'}`}>
-              <img src={fleetPhotoUrl(target.item.photo)} alt={name} className="w-full h-full object-cover" />
+          {v.photo ? (
+            <button type="button" onClick={() => onOpenPhoto(v.photo, v.plate)} aria-label={tf(f.photo.view, { name: v.plate })}
+              className="shrink-0 overflow-hidden cursor-zoom-in ring-1 ring-slate-200 dark:ring-slate-700 hover:ring-2 hover:ring-primary-400 w-48 h-32 rounded-xl">
+              <img src={fleetPhotoUrl(v.photo)} alt={v.plate} className="w-full h-full object-cover" />
             </button>
           ) : (
-            <FleetAvatar photo="" kind={target.kind} name={name} size={isVehicle ? 'wide' : 'md'} />
+            <FleetAvatar photo="" kind="vehicle" name={v.plate} size="wide" />
           )}
           <div className="min-w-0 space-y-1.5">
-            <div className="text-xl font-bold text-slate-900 dark:text-slate-100">{name}</div>
-            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>{status}</span>
-            {isVehicle && target.item.vehicle_type && <div className="text-sm text-slate-500 dark:text-slate-400">{target.item.vehicle_type}</div>}
-            {!isVehicle && target.item.phone && <div className="text-sm text-slate-500 dark:text-slate-400">{phoneLine(target.item.phone)}</div>}
+            <div className="text-xl font-bold text-slate-900 dark:text-slate-100">{v.plate}</div>
+            <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>{f.vehicleStatus[v.status]}</span>
+            {v.vehicle_type && <div className="text-sm text-slate-500 dark:text-slate-400">{v.vehicle_type}</div>}
           </div>
-          {!isVehicle && (
-            <div className="ml-auto self-start min-w-[13rem] rounded-xl border border-slate-200 dark:border-slate-700 p-3" data-testid="driver-current-vehicle">
-              <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">{D.currentVehicle}</div>
-              {target.item.current_vehicle ? (
-                <div className="flex items-center gap-2.5">
-                  <FleetAvatar photo={target.item.current_vehicle.photo} kind="vehicle" name={target.item.current_vehicle.plate} size="wideSm" />
-                  <div>
-                    <div className="font-semibold text-slate-800 dark:text-slate-100">{target.item.current_vehicle.plate}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">
-                      {[target.item.current_vehicle.kind === 'temporary' ? f.kind.temporary : '',
-                        target.item.current_vehicle.since ? tf(D.since, { time: formatStampShort(target.item.current_vehicle.since) }) : '']
-                        .filter(Boolean).join(' · ')}
-                    </div>
-                  </div>
-                </div>
-              ) : <span className="text-sm text-slate-400">{f.noVehicle}</span>}
-            </div>
-          )}
         </div>
 
-        {isVehicle ? (
-          <Section title={D.driving}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
-              <div>
-                <div className="mb-1.5 text-[11px] text-slate-400">{D.driving}</div>
-                {target.item.current_driver ? (
-                  <Person photo={target.item.current_driver.photo} name={target.item.current_driver.name} lines={[
-                    phoneLine(target.item.current_driver.phone),
-                    target.item.current_driver.kind === 'temporary' ? f.kind.temporary : null,
-                    target.item.current_driver.since ? tf(D.since, { time: formatStampShort(target.item.current_driver.since) }) : null,
-                  ]} />
-                ) : <span className="text-sm text-slate-400">{f.noDriver}</span>}
-              </div>
-              <div>
-                <div className="mb-1.5 text-[11px] text-slate-400">{D.owner}</div>
-                {target.item.home_driver ? (
-                  <Person photo={target.item.home_driver.photo} name={target.item.home_driver.name} lines={[
-                    target.item.home_driver.status !== 'active' ? f.driverStatus[target.item.home_driver.status] : null,
-                    target.item.home_driver.driving_vehicle_id && target.item.home_driver.driving_vehicle_id !== target.item.id
-                      ? tf(f.homeAway, { plate: target.item.home_driver.driving_plate }) : null,
-                  ]} />
-                ) : <span className="text-sm text-slate-400">{f.none}</span>}
-              </div>
+        <DriverSection title={D.driving}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+            <div>
+              <div className="mb-1.5 text-[11px] text-slate-400">{D.driving}</div>
+              {v.current_driver ? (
+                <Person photo={v.current_driver.photo} name={v.current_driver.name} lines={[
+                  phoneLine(v.current_driver.phone),
+                  v.current_driver.kind === 'temporary' ? f.kind.temporary : null,
+                  v.current_driver.since ? tf(D.since, { time: formatStampShort(v.current_driver.since) }) : null,
+                ]} />
+              ) : <span className="text-sm text-slate-400">{f.noDriver}</span>}
             </div>
-          </Section>
-        ) : (
-          <Section title={D.papers}>
-            <div className="space-y-3">
-              <DriverPaperCard driver={target.item} kind="license" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} fields={[
-                { key: 'license_class', label: f.driverForm.licenseClass, value: target.item.license_class },
-                { key: 'license_no', label: f.driverForm.licenseNo, value: target.item.license_no },
-                { key: 'license_expiry', label: f.driverForm.licenseExpiry, value: formatIsoDate(target.item.license_expiry),
-                  display: <DateValue iso={target.item.license_expiry} /> },
-              ]} />
-              <DriverPaperCard driver={target.item} kind="id" onOpen={onOpenPhoto} onChanged={() => onChanged?.()} fields={[
-                { key: 'id_number', label: f.driverForm.idNumber, value: target.item.id_number },
-              ]} />
+            <div>
+              <div className="mb-1.5 text-[11px] text-slate-400">{D.owner}</div>
+              {v.home_driver ? (
+                <Person photo={v.home_driver.photo} name={v.home_driver.name} lines={[
+                  v.home_driver.status !== 'active' ? f.driverStatus[v.home_driver.status] : null,
+                  v.home_driver.driving_vehicle_id && v.home_driver.driving_vehicle_id !== v.id
+                    ? tf(f.homeAway, { plate: v.home_driver.driving_plate }) : null,
+                ]} />
+              ) : <span className="text-sm text-slate-400">{f.none}</span>}
             </div>
-          </Section>
-        )}
+          </div>
+        </DriverSection>
 
-        <Section title={isVehicle ? D.info : D.other}>
+        <DriverSection title={D.info}>
           <dl className="grid grid-cols-[auto,1fr] gap-x-6 gap-y-2 text-sm">
-            {isVehicle ? (
-              <>
-                <Row label={f.vehicleForm.trailer}>{target.item.trailer_plate || f.none}</Row>
-                <Row label={f.vehicleForm.registration}><DateValue iso={target.item.registration_expiry} /></Row>
-                <Row label={f.vehicleForm.insurance}><DateValue iso={target.item.insurance_expiry} /></Row>
-              </>
-            ) : null}
-            <Row label={f.vehicleForm.note}><span className="whitespace-pre-wrap">{target.item.note || f.none}</span></Row>
-            <Row label={D.added}>{formatStampShort(target.item.created_at)}</Row>
+            <Row label={f.vehicleForm.trailer}>{v.trailer_plate || f.none}</Row>
+            <Row label={f.vehicleForm.registration}><DateValue iso={v.registration_expiry} /></Row>
+            <Row label={f.vehicleForm.insurance}><DateValue iso={v.insurance_expiry} /></Row>
+            <Row label={f.vehicleForm.note}><span className="whitespace-pre-wrap">{v.note || f.none}</span></Row>
+            <Row label={D.added}>{formatStampShort(v.created_at)}</Row>
           </dl>
-        </Section>
+        </DriverSection>
 
-        <Section title={D.history} extra={
+        <DriverSection title={D.history} extra={
           <button type="button" onClick={onShowHistory} className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:underline">
             <History className="w-3.5 h-3.5" />{D.allHistory}
           </button>
@@ -235,7 +188,7 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
                 <li key={h.id} className="flex items-start gap-2.5 text-sm">
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${h.ended_at ? 'bg-slate-300 dark:bg-slate-600' : 'bg-emerald-500'}`} />
                   <span className="min-w-0">
-                    <span className="font-semibold text-slate-800 dark:text-slate-100">{isVehicle ? h.driver_name : h.vehicle_plate}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">{h.driver_name}</span>
                     {h.kind === 'temporary' && <span className="ml-1.5 text-xs text-sky-700 dark:text-sky-300">{f.kind.temporary}</span>}
                     <span className="block text-xs text-slate-500 dark:text-slate-400 tabular-nums">
                       {formatStampShort(h.started_at)} → {h.ended_at ? formatStampShort(h.ended_at) : f.stillOpen}
@@ -246,7 +199,7 @@ export const FleetDetailModal: React.FC<Props> = ({ target, onClose, onOpenPhoto
               ))}
             </ol>
           )}
-        </Section>
+        </DriverSection>
 
         <div className="flex flex-wrap items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
           <button type="button" onClick={onEdit}

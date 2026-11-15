@@ -93,7 +93,7 @@ export function useFieldSelection(resetKey: unknown) {
   }, []);
 
   /**
-   * Spread on a field card to make the whole card click-to-select. Clicks on inner buttons / links, drags
+   * Spread on a field card to make the whole card click-to-select. Clicks on inner buttons / links / inputs, drags
    * that select text and double / triple clicks are ignored, so copy buttons and text selection keep working.
    */
   const cardProps = useCallback(
@@ -107,7 +107,8 @@ export function useFieldSelection(resetKey: unknown) {
         [FIELD_ATTR]: key,
         ...(part !== undefined ? { 'data-part': `${t.common.fieldCopy.partOnly} ${part}` } : {}),
         onClick: (e: React.MouseEvent) => {
-          if ((e.target as HTMLElement).closest('button, a')) return;
+          // its own controls (copy buttons, links, and the inputs of an editable card) keep their clicks
+          if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return;
           if (e.detail > 1) {
             // 2nd / 3rd click of a word / line selection: take back the first click's tick
             const undo = undoRef.current;

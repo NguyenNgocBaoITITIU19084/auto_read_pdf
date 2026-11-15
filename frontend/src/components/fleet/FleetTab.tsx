@@ -1003,6 +1003,18 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         </div>
       )}
 
+      {/* first: whatever it opens (edit, status, move) stacks on top of it */}
+      <FleetDetailModal target={detailTarget} onClose={() => setDetail(null)} actions={detailActions} onChanged={reload}
+        onOpenPhoto={(photo, name) => setViewing({ photo, name })}
+        onShowHistory={() => {
+          const row = detailTarget;
+          setDetail(null);
+          if (row) showHistory(row.kind === 'vehicle' ? { vehicle_id: row.item.id, label: row.item.plate } : { driver_id: row.item.id, label: row.item.name });
+        }}
+        onEdit={() => {
+          if (detailVehicle) setVehicleForm({ open: true, vehicle: detailVehicle });
+          if (detailDriver) setDriverForm({ open: true, driver: detailDriver });
+        }} />
       <VehicleFormModal isOpen={vehicleForm.open} vehicle={vehicleForm.vehicle}
         onClose={() => setVehicleForm({ open: false, vehicle: null })} onSaved={reload} />
       <DriverFormModal isOpen={driverForm.open} driver={driverForm.driver} vehicles={vs}
@@ -1016,17 +1028,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         onChanged={() => { reload(); loadTrashCount(); }} />
       <RowContextMenu position={menu.state && menuGroups.length ? { x: menu.state.x, y: menu.state.y } : null}
         groups={menuGroups} onClose={menu.close} />
-      <FleetDetailModal target={detailTarget} onClose={() => setDetail(null)} actions={detailActions} onChanged={reload}
-        onOpenPhoto={(photo, name) => setViewing({ photo, name })}
-        onShowHistory={() => {
-          const row = detailTarget;
-          setDetail(null);
-          if (row) showHistory(row.kind === 'vehicle' ? { vehicle_id: row.item.id, label: row.item.plate } : { driver_id: row.item.id, label: row.item.name });
-        }}
-        onEdit={() => {
-          if (detailVehicle) setVehicleForm({ open: true, vehicle: detailVehicle });
-          if (detailDriver) setDriverForm({ open: true, driver: detailDriver });
-        }} />
       <PhotoLightbox photo={viewing?.photo || null} name={viewing?.name || ''} onClose={closeViewer} />
       <DriverMoveModal driver={moveFor} vehicles={vs} onClose={() => setMoveFor(null)} onSaved={reload} />
     </div>
