@@ -121,6 +121,6 @@ describe('TrailerTab', () => {
     fireEvent.change(within(dialog).getByLabelText(new RegExp(R.form.plate)), { target: { value: '51R-5' } });
     fireEvent.change(within(dialog).getByLabelText(R.form.vehicle), { target: { value: '1' } });
     fireEvent.click(within(dialog).getByText(translations.vi.common.save));
-    await waitFor(() => expect(api.createFleetTrailerApi).toHaveBeenCalledWith(expect.objectContaining({ plate: '51R-5', vehicle_id: 1 })));
+    await waitFor(() => expect(api.createFleetTrailerApi).toHaveBeenCalledWith(expect.objectContaining({ plate: '51R-5', trailer_type: "Sàn 40'", vehicle_id: 1 })));
   });
 });

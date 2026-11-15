@@ -11,6 +11,9 @@ import { Field, Footer, INPUT, NO_PHOTO_CHANGE, savePhoto } from './FleetModals'
 import { VEHICLE_STATUSES, type FleetTrailer, type FleetVehicle, type TrailerStatus } from '../../types';
 import { apiError } from './fleetUtils';
 
+/** The company runs one kind of trailer: a new one starts as that (still editable). */
+const DEFAULT_TRAILER_TYPE = "Sàn 40'";
+
 /** Tractors a trailer can go on: not out of service, with the trailer each one pulls now. */
 const tractorLabel = (v: FleetVehicle, pulling: string, status: string) => {
   const extra = [v.trailer_plate ? tf(pulling, { plate: v.trailer_plate }) : '', v.status !== 'active' ? status : '']
@@ -34,7 +37,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
   const { addToast } = useToastActions();
   const f = t.fleet.trailer.form;
   const empty = {
-    plate: '', trailer_type: '', chassis_no: '', payload: '', year: '', registration_expiry: '', insurance_expiry: '',
+    plate: '', trailer_type: DEFAULT_TRAILER_TYPE, chassis_no: '', payload: '', year: '', registration_expiry: '', insurance_expiry: '',
     status: 'active' as TrailerStatus, note: '',
   };
   const [form, setForm] = useState(empty);
