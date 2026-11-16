@@ -146,7 +146,7 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           {item.nav_tab && (
             <button type="button" onClick={goToTab} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary-600 hover:bg-primary-700 text-white">
               {item.nav_tab === 'vessel' ? d.openVessel : item.nav_tab === 'booking' ? d.openBooking
-                : item.nav_tab === 'fleet' ? d.openFleet : item.nav_tab === 'drivers' ? d.openDrivers
+                : item.nav_tab === 'fleet' ? d.openFleet : item.nav_tab === 'trucks' ? d.openTrucks : item.nav_tab === 'drivers' ? d.openDrivers
                   : item.nav_tab === 'trailers' ? d.openTrailers : d.openContainer}
             </button>
           )}

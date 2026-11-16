@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
 import { TrashColumn, TrashModal } from '../common/TrashModal';
 import { useApp } from '../../context/AppContext';
-import { fleetDriverTrashApi, fleetTrailerTrashApi, fleetVehicleTrashApi } from '../../services/api';
+import { fleetDriverTrashApi, fleetTrailerTrashApi, fleetTruckTrashApi, fleetVehicleTrashApi } from '../../services/api';
 import type { FleetTrashedDriver, FleetTrashedTrailer, FleetTrashedVehicle } from '../../types';
 import { FleetAvatar } from './FleetPhoto';
 
 interface Props {
-  kind: 'vehicle' | 'driver' | 'trailer';
+  /** vehicle: the tractors; truck: the trucks */
+  kind: 'vehicle' | 'truck' | 'driver' | 'trailer';
   isOpen: boolean;
   onClose: () => void;
   /** after a restore / delete for good: reload the tables and the trash badge */
@@ -27,6 +28,12 @@ export const FleetTrashModal: React.FC<Props> = ({ kind, ...props }) => {
     { key: 'trailer', label: f.vehicleForm.trailer, className: 'whitespace-nowrap', render: (v) => v.trailer_plate || f.none },
     { key: 'type', label: f.vehicleForm.type, render: (v) => v.vehicle_type || f.none },
   ], [f]);
+  const truckColumns = useMemo<TrashColumn<FleetTrashedVehicle>[]>(() => [
+    vehicleColumns[0],
+    { key: 'type', label: f.vehicleForm.type, render: (v) => v.vehicle_type || f.none },
+    { key: 'body', label: f.truckForm.body, className: 'whitespace-nowrap',
+      render: (v) => [v.body_type, v.payload].filter(Boolean).join(' · ') || f.none },
+  ], [f, vehicleColumns]);
   const driverColumns = useMemo<TrashColumn<FleetTrashedDriver>[]>(() => [
     { key: 'name', label: f.list.driver, className: 'font-semibold', render: (d) => (
       <span className="flex items-center gap-2">
@@ -48,6 +55,9 @@ export const FleetTrashModal: React.FC<Props> = ({ kind, ...props }) => {
   ], [f]);
   if (kind === 'trailer') {
     return <TrashModal {...props} collectionId={0} api={fleetTrailerTrashApi} texts={f.trash.trailer} columns={trailerColumns} />;
+  }
+  if (kind === 'truck') {
+    return <TrashModal {...props} collectionId={0} api={fleetTruckTrashApi} texts={f.trash.truck} columns={truckColumns} />;
   }
   return kind === 'vehicle'
     ? <TrashModal {...props} collectionId={0} api={fleetVehicleTrashApi} texts={f.trash.vehicle} columns={vehicleColumns} />

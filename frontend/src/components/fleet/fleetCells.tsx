@@ -20,6 +20,8 @@ export const DRIVER_TONE: Record<DriverStatus, { badge: string; dot: string }> =
   left: { badge: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400', dot: 'bg-slate-400' },
 };
 export const TEMP_CHIP = 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300';
+/** marks a truck (xe tải) where tractors and trucks are listed together */
+export const TRUCK_CHIP = 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300';
 
 export const StatusBadge: React.FC<{ tone: { badge: string; dot: string }; children: React.ReactNode }> = ({ tone, children }) => (
   <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full pl-2 pr-2.5 py-1 text-xs font-semibold ${tone.badge}`}>

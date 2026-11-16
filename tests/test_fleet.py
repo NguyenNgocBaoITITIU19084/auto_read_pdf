@@ -434,7 +434,7 @@ def test_deleted_truck_goes_to_trash_and_comes_back():
     assert page["total"] == 1 and page["keep_days"] == 30
     item = page["items"][0]
     assert item["plate"] == "51C-1" and item["days_left"] in (29, 30) and item["purge_at"] > item["deleted_at"]
-    assert fleet.trash_count() == {"vehicle": 1, "driver": 0, "trailer": 0}
+    assert fleet.trash_count() == {"vehicle": 1, "truck": 0, "driver": 0, "trailer": 0}
 
     # its plate stays taken, with a message that says where it is
     with pytest.raises(fleet.FleetError) as e:
@@ -483,13 +483,13 @@ def test_trash_api():
     d = client.post("/api/v1/fleet/drivers", json={"name": "An"}).json()
     client.delete(f"/api/v1/fleet/vehicles/{t['id']}")
     client.delete(f"/api/v1/fleet/drivers/{d['id']}")
-    assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 1, "driver": 1, "trailer": 0}
+    assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 1, "truck": 0, "driver": 1, "trailer": 0}
     assert client.get("/api/v1/fleet/trash", params={"kind": "driver"}).json()["items"][0]["name"] == "An"
     assert client.get("/api/v1/fleet/trash/ids", params={"kind": "vehicle"}).json() == {"ids": [t["id"]]}
     assert client.get("/api/v1/fleet/trash", params={"kind": "boat"}).status_code == 400
     assert client.post("/api/v1/fleet/trash/restore", json={"kind": "vehicle", "ids": [t["id"]]}).json()["restored"] == 1
     assert client.post("/api/v1/fleet/trash/delete", json={"kind": "driver", "ids": [d["id"]]}).json()["deleted"] == 1
-    assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 0, "driver": 0, "trailer": 0}
+    assert client.get("/api/v1/fleet/trash/count").json() == {"vehicle": 0, "truck": 0, "driver": 0, "trailer": 0}
     assert client.put(f"/api/v1/fleet/drivers/{d['id']}", json={"name": "X"}).status_code == 404
 
 

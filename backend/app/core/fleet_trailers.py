@@ -216,6 +216,8 @@ def _open(conn, trailer: dict, vehicle: dict, reason: str, stamp: str) -> None:
 def _hitch(conn, trailer: dict, vehicle: dict, reason: str, stamp: str) -> dict:
     """`trailer` onto `vehicle`, off whatever it was on, and the tractor's old trailer off it.
     Returns {"replaced": plate of the trailer taken off the tractor, "from_plate": tractor the trailer came off}."""
+    if vehicle.get("category") == "truck":
+        raise FleetError(f"Xe {vehicle['plate']} là xe tải, không kéo moóc")
     mine = _open_by_trailer(conn, trailer["id"])
     if mine and mine["vehicle_id"] == vehicle["id"]:
         return {"replaced": "", "from_plate": ""}

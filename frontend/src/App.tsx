@@ -27,6 +27,7 @@ export const App: React.FC = () => {
     vessel?: string;
     container?: string;
     fleet?: string;
+    trucks?: string;
     drivers?: string;
     trailers?: string;
   }>({});
@@ -43,7 +44,7 @@ export const App: React.FC = () => {
     if (tab === 'vessel') void import('./components/vessel/VesselTab');
     if (tab === 'container') void import('./components/container/ContainerTab');
     if (tab === 'tasks') void import('./components/tasks/TasksTab');
-    if (tab === 'fleet' || tab === 'drivers') void import('./components/fleet/FleetTab');
+    if (tab === 'fleet' || tab === 'trucks' || tab === 'drivers') void import('./components/fleet/FleetTab');
     if (tab === 'trailers') void import('./components/fleet/TrailerTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
@@ -160,6 +161,7 @@ export const App: React.FC = () => {
           )}
           {activeTab === 'tasks' && <TasksTab onNavigateTab={handleNavigateTab} />}
           {activeTab === 'fleet' && <FleetTab screen="vehicles" initialSearchQuery={drilldownKeywords.fleet} />}
+          {activeTab === 'trucks' && <FleetTab screen="trucks" initialSearchQuery={drilldownKeywords.trucks} />}
           {activeTab === 'drivers' && <FleetTab screen="drivers" initialSearchQuery={drilldownKeywords.drivers} />}
           {activeTab === 'trailers' && <TrailerTab initialSearchQuery={drilldownKeywords.trailers} />}
           {activeTab === 'logs' && <LogsTab />}

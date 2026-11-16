@@ -94,7 +94,9 @@ const VehicleDetailModal: React.FC<{
   const { t } = useApp();
   const f = t.fleet;
   const D = f.detail;
-  const VF = f.vehicleForm;
+  // a truck (xe tải) carries its own load where a tractor has its trailer
+  const isTruck = v.category === 'truck';
+  const VF = isTruck ? { ...f.vehicleForm, ...f.truckForm } : f.vehicleForm;
   const [history, setHistory] = useState<FleetAssignment[] | null>(null);
   // the trailer it pulls, for its type / photo / since (the truck row carries only the plate)
   const [trailer, setTrailer] = useState<FleetTrailer | null>(null);
@@ -102,7 +104,7 @@ const VehicleDetailModal: React.FC<{
 
   useEffect(() => {
     let alive = true;
-    if (!v.trailer_plate) {
+    if (!v.trailer_plate || isTruck) {
       setTrailer(null);
       return;
     }
@@ -110,7 +112,7 @@ const VehicleDetailModal: React.FC<{
       .then((list) => alive && setTrailer(list.find((r) => r.vehicle?.id === v.id) || null))
       .catch(() => alive && setTrailer(null));
     return () => { alive = false; };
-  }, [v.id, v.trailer_plate]);
+  }, [v.id, v.trailer_plate, isTruck]);
 
   useEffect(() => {
     let alive = true;
@@ -134,7 +136,12 @@ const VehicleDetailModal: React.FC<{
     { key: 'status', label: VF.status, value: f.vehicleStatus[v.status] },
     { key: 'type', label: VF.type, value: v.vehicle_type },
     { key: 'driver', label: D.driving, value: c ? [c.name, c.phone].filter(Boolean).join(' – ') : '' },
-    { key: 'trailer', label: t.tabs.trailers, value: [v.trailer_plate, trailerFacts].filter(Boolean).join(' – ') },
+    ...(isTruck ? [
+      { key: 'body', label: f.truckForm.body, value: v.body_type },
+      { key: 'payload', label: f.truckForm.payload, value: v.payload },
+    ] : [
+      { key: 'trailer', label: t.tabs.trailers, value: [v.trailer_plate, trailerFacts].filter(Boolean).join(' – ') },
+    ]),
     { key: 'registration', label: VF.registration, value: formatIsoDate(v.registration_expiry) },
     { key: 'insurance', label: VF.insurance, value: formatIsoDate(v.insurance_expiry) },
     { key: 'note', label: VF.note, value: v.note },
@@ -149,7 +156,7 @@ const VehicleDetailModal: React.FC<{
   );
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(D.vehicleTitle, { plate: v.plate })} maxWidth="max-w-3xl">
+    <Modal isOpen onClose={onClose} title={tf(isTruck ? D.truckTitle : D.vehicleTitle, { plate: v.plate })} maxWidth="max-w-3xl">
       <div className="space-y-5" data-testid="fleet-detail">
         {/* the truck: photo, then plate / status / type */}
         <div className="flex items-start gap-4">
@@ -173,7 +180,7 @@ const VehicleDetailModal: React.FC<{
           <p className="text-[11px] text-slate-400">{D.pickHint}</p>
         </div>
 
-        <DriverSection title={D.crew}>
+        <DriverSection title={isTruck ? D.crewTruck : D.crew}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {box('driver', c ? (
               <Person photo={c.photo} name={c.name} lines={[
@@ -181,8 +188,10 @@ const VehicleDetailModal: React.FC<{
                 c.kind === 'temporary' ? f.kind.temporary : null,
                 c.since ? tf(D.since, { time: formatStampShort(c.since) }) : null,
               ]} />
-            ) : <div className="text-sm text-slate-400">{f.noDriver}</div>)}
-            {box('trailer', v.trailer_plate ? (
+            ) : <div className="text-sm text-slate-400">{f.noDriver}</div>, isTruck ? 'sm:col-span-2' : '')}
+            {isTruck && box('body')}
+            {isTruck && box('payload')}
+            {!isTruck && box('trailer', v.trailer_plate ? (
               <div className="flex items-center gap-2.5 mt-1">
                 <FleetAvatar photo={trailer?.photo || ''} kind="trailer" name={v.trailer_plate} size="wideSm" />
                 <div className="min-w-0">

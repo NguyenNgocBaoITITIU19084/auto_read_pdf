@@ -34,6 +34,7 @@ const api = {
   updateFleetDriverApi: vi.fn(),
   deleteFleetDriverApi: vi.fn(),
   uploadFleetVehicleDocumentApi: vi.fn(),
+  createFleetVehicleApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -45,6 +46,10 @@ vi.mock('../../services/api', () => ({
     list: (...a: unknown[]) => api.trashList('vehicle', ...a), ids: async () => [],
     restore: (ids: number[]) => api.trashRestore('vehicle', ids), deleteNow: async () => 0,
   },
+  fleetTruckTrashApi: {
+    list: (...a: unknown[]) => api.trashList('truck', ...a), ids: async () => [],
+    restore: (ids: number[]) => api.trashRestore('truck', ids), deleteNow: async () => 0,
+  },
   fleetDriverTrashApi: {
     list: (...a: unknown[]) => api.trashList('driver', ...a), ids: async () => [],
     restore: (ids: number[]) => api.trashRestore('driver', ids), deleteNow: async () => 0,
@@ -55,7 +60,7 @@ vi.mock('../../services/api', () => ({
   moveDriverTemporaryApi: (...a: unknown[]) => api.moveDriverTemporaryApi(...a),
   deleteFleetVehicleApi: (...a: unknown[]) => api.deleteFleetVehicleApi(...a),
   deleteFleetDriverApi: (...a: unknown[]) => api.deleteFleetDriverApi(...a),
-  createFleetVehicleApi: vi.fn(),
+  createFleetVehicleApi: (...a: unknown[]) => api.createFleetVehicleApi(...a),
   updateFleetVehicleApi: vi.fn(),
   createFleetDriverApi: vi.fn(),
   updateFleetDriverApi: (...a: unknown[]) => api.updateFleetDriverApi(...a),
@@ -78,7 +83,7 @@ import { FleetTab } from './FleetTab';
 const f = translations.vi.fleet;
 
 const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
-  id, plate, trailer_plate: '', vehicle_type: '', registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
+  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
   created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null, ...extra,
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
@@ -159,11 +164,11 @@ describe('FleetTab', () => {
       vehicle(2, '51C-2', { current_driver: { ...an, kind: 'temporary' } }),
     ]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, {
-      home_vehicle: { id: 1, plate: '51C-1', status: 'active' },
-      current_vehicle: { id: 2, plate: '51C-2', trailer_plate: '', photo: '', kind: 'temporary', since: '', reason: '' },
+      home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
+      current_vehicle: { id: 2, plate: '51C-2', trailer_plate: '', photo: '', category: 'tractor', kind: 'temporary', since: '', reason: '' },
     })]);
     api.returnDriverHomeApi.mockResolvedValue(driver(1, an.name, {
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', kind: 'primary', since: '', reason: '' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '', reason: '' },
     }));
     render(<FleetTab />);
     const banner = await screen.findByRole('status');
@@ -317,8 +322,8 @@ describe('FleetTab row interactions', () => {
         current_driver: an, home_driver: { id: 1, name: an.name, status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
     ]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { phone: '0909', license_class: 'FC',
-      home_vehicle: { id: 1, plate: '51C-1', status: 'active' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '51R-1', photo: '', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' } })]);
+      home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '51R-1', photo: '', category: 'tractor', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' } })]);
     api.getFleetHistoryApi.mockResolvedValue([{
       id: 3, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary', home_vehicle_plate: '',
       reason: 'Gán xe cố định', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '',
@@ -546,8 +551,8 @@ describe('FleetTab driver details', () => {
     api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', {
       phone: '0909', license_class: 'FC', license_no: '790123', id_number: '079091006789',
       license_front: 'driver_1_license_front_0a1b2c3d.jpg',
-      home_vehicle: { id: 1, plate: '51C-1', status: 'active' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' },
+      home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' },
     })]);
     api.getFleetHistoryApi.mockResolvedValue([]);
     render(<FleetTab screen="drivers" />);
@@ -765,5 +770,86 @@ describe('FleetTab quick status from the row menu', () => {
     await waitFor(() => expect(api.updateFleetDriverApi).toHaveBeenCalledTimes(2));
     expect(api.updateFleetDriverApi).toHaveBeenCalledWith(1, { status: 'leave' });
     expect(api.updateFleetDriverApi).toHaveBeenCalledWith(2, { status: 'leave' });
+  });
+});
+
+describe('FleetTab trucks (xe tải)', () => {
+  const tractor = vehicle(1, '51C-1', { trailer_plate: '51R-1' });
+  const lorry = vehicle(2, '51D-2', { category: 'truck', vehicle_type: 'Hino', body_type: 'Thùng kín', payload: '8 tấn' });
+  const T = f.truckForm;
+
+  it('lists only the trucks, with their body and payload, and its own history', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([tractor, lorry]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab screen="trucks" />);
+    const row = await screen.findByTestId('vehicle-2');
+    expect(within(row).getByText('Hino · Thùng kín · 8 tấn')).toBeInTheDocument();
+    expect(screen.queryByTestId('vehicle-1')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual(['Xe tải1', f.views.history]);
+    expect(screen.getByText(f.actions.addTruck)).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: new RegExp(f.columns.body) })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: f.views.history }));
+    await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(expect.objectContaining({ category: 'truck' })));
+
+    cleanup();
+    localStorage.clear();
+    render(<FleetTab />);
+    await screen.findByTestId('vehicle-1');
+    expect(screen.queryByTestId('vehicle-2')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((b) => b.textContent)).toEqual(['Đầu kéo1', f.views.history]);
+  });
+
+  it('adds a truck with its body and payload, never a trailer', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.createFleetVehicleApi.mockResolvedValue({ ...lorry, id: 3 });
+    render(<FleetTab screen="trucks" />);
+    fireEvent.click(await screen.findByText(f.actions.addTruck));
+    expect(await screen.findByPlaceholderText(T.bodyPh)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: T.addTitle })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(f.vehicleForm.trailerPh)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(T.platePh), { target: { value: '51D-3' } });
+    fireEvent.change(screen.getByPlaceholderText(T.bodyPh), { target: { value: 'Thùng bạt' } });
+    fireEvent.change(screen.getByPlaceholderText(T.payloadPh), { target: { value: '5 tấn' } });
+    fireEvent.submit(screen.getByPlaceholderText(T.platePh).closest('form')!);
+    await waitFor(() => expect(api.createFleetVehicleApi).toHaveBeenCalled());
+    const sent = api.createFleetVehicleApi.mock.calls[0][0];
+    expect(sent).toMatchObject({ plate: '51D-3', category: 'truck', body_type: 'Thùng bạt', payload: '5 tấn' });
+    expect(sent).not.toHaveProperty('trailer_plate');
+  });
+
+  it('opens the trucks\' own trash, with their own count', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([lorry]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetTrashCountApi.mockResolvedValue({ vehicle: 5, truck: 1, driver: 0, trailer: 0 });
+    render(<FleetTab screen="trucks" />);
+    await screen.findByTestId('vehicle-2');
+    fireEvent.click(await screen.findByRole('button', { name: /Thùng rác\s*1/ }));
+    expect(await screen.findByText(f.trash.truck.title)).toBeInTheDocument();
+    expect(api.trashList).toHaveBeenCalledWith('truck', 0, expect.any(Number), 0);
+  });
+
+  it('shows the truck details with its body and payload instead of a trailer', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([lorry]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab screen="trucks" />);
+    fireEvent.doubleClick(await screen.findByTestId('vehicle-2'));
+    const detail = await screen.findByTestId('fleet-detail');
+    expect(screen.getByText(tf(f.detail.truckTitle, { plate: '51D-2' }))).toBeInTheDocument();
+    expect(within(detail).getByText(f.detail.crewTruck)).toBeInTheDocument();
+    expect(within(detail).getByText('Thùng kín')).toBeInTheDocument();
+    expect(within(detail).getByText('8 tấn')).toBeInTheDocument();
+    expect(within(detail).queryByText(f.detail.noTrailer)).not.toBeInTheDocument();
+  });
+
+  it('marks a driver on a truck in the drivers tab', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([tractor, lorry]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, {
+      current_vehicle: { id: 2, plate: '51D-2', trailer_plate: '', photo: '', category: 'truck', kind: 'primary', since: '', reason: '' },
+    })]);
+    render(<FleetTab screen="drivers" />);
+    const row = await screen.findByTestId('driver-1');
+    expect(within(row).getByText(f.truckChip)).toBeInTheDocument();
   });
 });

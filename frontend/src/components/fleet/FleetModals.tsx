@@ -14,7 +14,8 @@ import {
 import { DriverSection, FieldInputBox, NO_PAPER_CHANGES, PaperPicker, PaperRow, type PaperChoices } from './DriverPapers';
 import { PhotoPicker, type PhotoChoice } from './FleetPhoto';
 import {
-  DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleStatus,
+  DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleCategory,
+  type VehicleStatus,
 } from '../../types';
 import { apiError, freeVehicles, isConflict } from './fleetUtils';
 
@@ -71,7 +72,9 @@ export async function savePhoto(
 }
 
 const vehicleOptionLabel = (v: FleetVehicle, t: ReturnType<typeof useApp>['t']) => {
-  const extra = [v.trailer_plate, v.home_driver ? tf(t.fleet.statusModal.homeOf, { name: v.home_driver.name }) : '']
+  // a truck (xe tải) says so, since tractors and trucks share these pickers
+  const extra = [v.category === 'truck' ? t.fleet.truckChip : v.trailer_plate,
+    v.home_driver ? tf(t.fleet.statusModal.homeOf, { name: v.home_driver.name }) : '']
     .filter(Boolean).join(' · ');
   return extra ? `${v.plate} (${extra})` : v.plate;
 };
@@ -82,16 +85,20 @@ const vehicleOptionLabel = (v: FleetVehicle, t: ReturnType<typeof useApp>['t']) 
 interface VehicleFormProps {
   isOpen: boolean;
   vehicle: FleetVehicle | null;
+  /** what a new one is (an edited one keeps its own): a tractor gets a trailer, a truck its body and payload */
+  category?: VehicleCategory;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, onClose, onSaved }) => {
+export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, category = 'tractor', onClose, onSaved }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
-  const f = t.fleet.vehicleForm;
+  const isTruck = (vehicle?.category || category) === 'truck';
+  const f = isTruck ? { ...t.fleet.vehicleForm, ...t.fleet.truckForm } : t.fleet.vehicleForm;
   const [form, setForm] = useState({
-    plate: '', trailer_plate: '', vehicle_type: '', registration_expiry: '', insurance_expiry: '', status: 'active' as VehicleStatus, note: '',
+    plate: '', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', registration_expiry: '', insurance_expiry: '',
+    status: 'active' as VehicleStatus, note: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -100,7 +107,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const [freeTrailers, setFreeTrailers] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || isTruck) return;
     let live = true;
     getFleetTrailersApi()
       .then((list) => live && setFreeTrailers(list
@@ -109,7 +116,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     return () => {
       live = false;
     };
-  }, [isOpen, vehicle]);
+  }, [isOpen, vehicle, isTruck]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -117,6 +124,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     setPhoto(NO_PHOTO_CHANGE);
     setForm({
       plate: vehicle?.plate || '', trailer_plate: vehicle?.trailer_plate || '', vehicle_type: vehicle?.vehicle_type || '',
+      body_type: vehicle?.body_type || '', payload: vehicle?.payload || '',
       registration_expiry: vehicle?.registration_expiry || '', insurance_expiry: vehicle?.insurance_expiry || '',
       status: vehicle?.status || 'active', note: vehicle?.note || '',
     });
@@ -135,11 +143,14 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     setError('');
     try {
       let id: number;
+      // a tractor has no body / payload, a truck no trailer
+      const { body_type, payload, trailer_plate, ...common } = form;
+      const data = isTruck ? { ...common, body_type, payload } : { ...common, trailer_plate };
       if (vehicle) {
-        const { status: _ignored, ...rest } = form;
+        const { status: _ignored, ...rest } = data;
         id = (await updateFleetVehicleApi(vehicle.id, rest)).id;
       } else {
-        id = (await createFleetVehicleApi(form)).id;
+        id = (await createFleetVehicleApi({ ...data, category: isTruck ? 'truck' : 'tractor' })).id;
       }
       const photoError = await savePhoto(photo, id, uploadFleetVehiclePhotoApi, deleteFleetVehiclePhotoApi, t.fleet.toast.error, t.fleet.photo.outdatedBackend);
       if (photoError !== null) addToast(tf(t.fleet.photo.uploadFailed, { error: photoError }), 'error');
@@ -161,16 +172,37 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
           <Field label={f.plate} required>
             <input autoFocus className={INPUT} value={form.plate} onChange={set('plate')} placeholder={f.platePh} />
           </Field>
-          <Field label={f.trailer}>
-            <input className={INPUT} value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
-              list="fleet-free-trailers" title={t.fleet.trailer.formHint} />
-            <datalist id="fleet-free-trailers">
-              {freeTrailers.map((plate) => <option key={plate} value={plate} />)}
-            </datalist>
-          </Field>
-          <Field label={f.type}>
-            <input className={INPUT} value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
-          </Field>
+          {isTruck ? (
+            <Field label={f.type}>
+              <input className={INPUT} value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
+            </Field>
+          ) : (
+            <Field label={f.trailer}>
+              <input className={INPUT} value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
+                list="fleet-free-trailers" title={t.fleet.trailer.formHint} />
+              <datalist id="fleet-free-trailers">
+                {freeTrailers.map((plate) => <option key={plate} value={plate} />)}
+              </datalist>
+            </Field>
+          )}
+          {isTruck ? (
+            <>
+              <Field label={t.fleet.truckForm.body}>
+                <input className={INPUT} value={form.body_type} onChange={set('body_type')} placeholder={t.fleet.truckForm.bodyPh}
+                  list="fleet-truck-bodies" />
+                <datalist id="fleet-truck-bodies">
+                  {t.fleet.truckForm.bodies.map((b) => <option key={b} value={b} />)}
+                </datalist>
+              </Field>
+              <Field label={t.fleet.truckForm.payload}>
+                <input className={INPUT} value={form.payload} onChange={set('payload')} placeholder={t.fleet.truckForm.payloadPh} />
+              </Field>
+            </>
+          ) : (
+            <Field label={f.type}>
+              <input className={INPUT} value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
+            </Field>
+          )}
           <Field label={f.status}>
             <select className={INPUT} value={form.status} onChange={set('status')} disabled={!!vehicle}>
               {VEHICLE_STATUSES.map((s) => <option key={s} value={s}>{t.fleet.vehicleStatus[s]}</option>)}

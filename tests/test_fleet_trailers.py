@@ -110,7 +110,7 @@ def test_trash_unhitches_both_ways_and_restores_free():
     t = _trailers()["51R-1"]["id"]
     tr.delete_trailer(t)
     assert _trucks()["51C-1"]["trailer_plate"] == "" and "51R-1" not in _trailers()
-    assert fleet.trash_count() == {"vehicle": 0, "driver": 0, "trailer": 1}
+    assert fleet.trash_count() == {"vehicle": 0, "truck": 0, "driver": 0, "trailer": 1}
     with pytest.raises(fleet.FleetError) as e:
         fleet.update_vehicle(a, {"trailer_plate": "51R-1"})
     assert "thùng rác" in e.value.message

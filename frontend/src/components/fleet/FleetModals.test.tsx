@@ -30,7 +30,7 @@ import { DriverFormModal, VehicleFormModal } from './FleetModals';
 
 const p = translations.vi.fleet.photo;
 const truck: FleetVehicle = {
-  id: 9, plate: '51C-1', trailer_plate: '', vehicle_type: '', registration_expiry: '', insurance_expiry: '', status: 'active',
+  id: 9, plate: '51C-1', category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', registration_expiry: '', insurance_expiry: '', status: 'active',
   note: '', photo: '', created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null,
 };
 

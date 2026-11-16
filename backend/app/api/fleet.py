@@ -13,8 +13,11 @@ router = APIRouter(prefix="/fleet", tags=["Fleet"])
 
 class VehicleIn(BaseModel):
     plate: Optional[str] = None
-    trailer_plate: Optional[str] = None
+    category: Optional[str] = None        # on create only: tractor (đầu kéo, the default) / truck (xe tải)
+    trailer_plate: Optional[str] = None   # tractors only
     vehicle_type: Optional[str] = None
+    body_type: Optional[str] = None       # trucks: loại thùng
+    payload: Optional[str] = None         # trucks: tải trọng
     registration_expiry: Optional[str] = None
     insurance_expiry: Optional[str] = None
     status: Optional[str] = None
@@ -305,7 +308,8 @@ class TrashIdsIn(BaseModel):
 
 @router.get("/trash")
 def list_trash(kind: str, limit: int = 50, offset: int = 0):
-    """Trucks (kind=vehicle), drivers (kind=driver) or trailers (kind=trailer) in the trash, last deleted first."""
+    """Tractors (kind=vehicle), trucks (kind=truck), drivers (kind=driver) or trailers (kind=trailer) in the trash,
+    last deleted first."""
     return _run(fleet.trash_page, kind, limit, offset)
 
 
@@ -339,9 +343,11 @@ def history(driver_id: Optional[int] = None, vehicle_id: Optional[int] = None, l
 @router.get("/history/page")
 def history_page(driver_id: Optional[int] = None, vehicle_id: Optional[int] = None,
                  kinds: Optional[List[str]] = Query(None), states: Optional[List[str]] = Query(None), q: str = "",
-                 sort_by: Optional[str] = None, sort_dir: str = "desc", limit: int = 50, offset: int = 0):
-    """A page of the assignment history: {"items", "total"} (see fleet.history_page)."""
-    return fleet.history_page(driver_id, vehicle_id, kinds, states, q, sort_by, sort_dir, limit, offset)
+                 sort_by: Optional[str] = None, sort_dir: str = "desc", limit: int = 50, offset: int = 0,
+                 category: Optional[str] = None):
+    """A page of the assignment history: {"items", "total"} (see fleet.history_page); `category` (tractor / truck)
+    keeps that kind of truck only."""
+    return fleet.history_page(driver_id, vehicle_id, kinds, states, q, sort_by, sort_dir, limit, offset, category)
 
 
 @router.get("/expiring")

@@ -1,5 +1,9 @@
-"""Fleet: trucks (đầu kéo), drivers, and who drives which truck. Trailers (rơ moóc) and which tractor pulls which
+"""Fleet: trucks, drivers, and who drives which truck. Trailers (rơ moóc) and which tractor pulls which
 are in fleet_trailers.py.
+
+A truck (`fleet_vehicles` row) is a tractor (đầu kéo, `category` 'tractor', pulls a trailer) or a rigid truck (xe tải,
+'truck', carries its own load: `body_type`, `payload`, never a trailer). Both have drivers, papers, trash and reminders
+alike; the category is set when the truck is made and does not change.
 
 Fleet data is the company's, not a collection's: nothing here is scoped by collection.
 
@@ -30,6 +34,9 @@ VEHICLE_STATUS_LABELS = {"active": "Đang chạy", "broken": "Hư hỏng", "main
 DRIVER_STATUSES = ("active", "leave", "left")
 DRIVER_STATUS_LABELS = {"active": "Đang làm", "leave": "Nghỉ phép", "left": "Đã nghỉ việc"}
 ASSIGNMENT_KINDS = ("primary", "temporary")
+VEHICLE_CATEGORIES = ("tractor", "truck")
+# the app tab listing each category
+CATEGORY_TABS = {"tractor": "fleet", "truck": "trucks"}
 
 # Days before a document expires when it is reminded of (0 = it has expired); only the tightest one crossed is sent
 EXPIRY_REMINDER_DAYS = (30, 7, 0)
@@ -161,6 +168,11 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
         if "deleted_at" not in columns:
             # set = in the trash (see "Trash"): hidden everywhere, restorable for TRASH_KEEP_DAYS days
             conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT;")
+    # databases made before trucks (xe tải): every truck there is a tractor
+    have = {r[1] for r in conn.execute("PRAGMA table_info(fleet_vehicles);")}
+    for column, default in (("category", "tractor"), ("body_type", ""), ("payload", "")):
+        if column not in have:
+            conn.execute(f"ALTER TABLE fleet_vehicles ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}';")
     for table, documents in (("fleet_drivers", DRIVER_DOCUMENTS), ("fleet_vehicles", VEHICLE_DOCUMENTS)):
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table});")}
         for column in documents:
@@ -261,7 +273,8 @@ def list_vehicles() -> list[dict]:
     for v in vehicles:
         h = homes.get(v["id"])
         c = current.get(v["id"])
-        item = {k: v[k] for k in ("id", "plate", "trailer_plate", "vehicle_type", "registration_expiry",
+        item = {k: v[k] for k in ("id", "plate", "category", "trailer_plate", "vehicle_type", "body_type", "payload",
+                                  "registration_expiry",
                                   "insurance_expiry", "status", "note", "photo", *VEHICLE_DOCUMENTS,
                                   "created_at", "updated_at")}
         item["home_driver"] = None
@@ -282,11 +295,12 @@ def list_drivers() -> list[dict]:
     """Every driver with their home truck and the truck they drive now."""
     with _conn() as conn:
         drivers = _rows(conn, """
-            SELECT d.*, hv.plate AS home_plate, hv.status AS home_status
+            SELECT d.*, hv.plate AS home_plate, hv.status AS home_status, hv.category AS home_category
             FROM fleet_drivers d LEFT JOIN fleet_vehicles hv ON hv.id = d.home_vehicle_id
             WHERE d.deleted_at IS NULL;""")
         current = {r["driver_id"]: r for r in _rows(conn, """
-            SELECT a.driver_id, a.vehicle_id, a.kind, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo
+            SELECT a.driver_id, a.vehicle_id, a.kind, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo,
+                   v.category
             FROM fleet_assignments a JOIN fleet_vehicles v ON v.id = a.vehicle_id
             WHERE a.ended_at IS NULL;""")}
     out = []
@@ -295,10 +309,10 @@ def list_drivers() -> list[dict]:
         item = {k: d[k] for k in ("id", "name", "phone", "id_number", "license_no", "license_class",
                                   "license_expiry", "status", "note", "photo", *DRIVER_DOCUMENTS,
                                   "created_at", "updated_at")}
-        item["home_vehicle"] = ({"id": d["home_vehicle_id"], "plate": d["home_plate"], "status": d["home_status"]}
-                                if d["home_vehicle_id"] else None)
+        item["home_vehicle"] = ({"id": d["home_vehicle_id"], "plate": d["home_plate"], "status": d["home_status"],
+                                 "category": d["home_category"]} if d["home_vehicle_id"] else None)
         item["current_vehicle"] = ({"id": c["vehicle_id"], "plate": c["plate"], "trailer_plate": c["trailer_plate"],
-                                    "photo": c["photo"],
+                                    "photo": c["photo"], "category": c["category"],
                                     "kind": c["kind"], "since": c["started_at"], "reason": c["reason"]} if c else None)
         out.append(item)
     out.sort(key=lambda r: (DRIVER_STATUSES.index(r["status"]) if r["status"] in DRIVER_STATUSES else 9,
@@ -328,7 +342,7 @@ HISTORY_STATES = ("open", "closed")
 
 def history_page(driver_id: int | None = None, vehicle_id: int | None = None, kinds: list[str] | None = None,
                  states: list[str] | None = None, query: str = "", sort_by: str | None = None, sort_dir: str = "desc",
-                 limit: int = 50, offset: int = 0) -> dict:
+                 limit: int = 50, offset: int = 0, category: str | None = None) -> dict:
     """One page of assignments: {"items", "total"}. `kinds` (primary / temporary) and `states` (open = still driving /
     closed) filter; `query` matches the driver's name, the plate, the own-truck plate or a reason. Search and sort run
     in Python, accents and case ignored, so "Ngô" comes before "Nguyễn" and "Đặng" next to "Dũng" (SQLite compares
@@ -343,6 +357,10 @@ def history_page(driver_id: int | None = None, vehicle_id: int | None = None, ki
     if vehicle_id is not None:
         where.append("vehicle_id = ?")
         params.append(vehicle_id)
+    if category in VEHICLE_CATEGORIES:
+        # only the trucks of that category (the Đầu kéo / Xe tải tabs; a purged truck's rows have no vehicle any more)
+        where.append("vehicle_id IN (SELECT id FROM fleet_vehicles WHERE category = ?)")
+        params.append(category)
     clean_kinds = [k for k in (kinds or []) if k in ASSIGNMENT_KINDS]
     if clean_kinds:
         where.append(f"kind IN ({','.join('?' * len(clean_kinds))})")
@@ -564,7 +582,9 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
 # ---------------------------------------------------------------------------
 # Trucks and drivers: create / edit / delete
 # ---------------------------------------------------------------------------
-_VEHICLE_FIELDS = ("plate", "trailer_plate", "vehicle_type", "registration_expiry", "insurance_expiry", "status", "note")
+# editable after creation (the category is not: see create_vehicle)
+_VEHICLE_FIELDS = ("plate", "trailer_plate", "vehicle_type", "body_type", "payload", "registration_expiry",
+                   "insurance_expiry", "status", "note")
 _DRIVER_FIELDS = ("name", "phone", "id_number", "license_no", "license_class", "license_expiry", "status", "note")
 
 
@@ -579,6 +599,10 @@ def _clean_vehicle(data: dict, partial: bool) -> dict:
         out["trailer_plate"] = _text(data.get("trailer_plate"), 30).upper()
     if "vehicle_type" in data or not partial:
         out["vehicle_type"] = _text(data.get("vehicle_type"), 60)
+    if "body_type" in data or not partial:
+        out["body_type"] = _text(data.get("body_type"), 60)
+    if "payload" in data or not partial:
+        out["payload"] = _text(data.get("payload"), 30)
     if "registration_expiry" in data or not partial:
         out["registration_expiry"] = _date(data.get("registration_expiry"), "Hạn đăng kiểm")
     if "insurance_expiry" in data or not partial:
@@ -605,19 +629,31 @@ def _check_vehicle_unique(conn, fields: dict, exclude_id: int | None) -> None:
             raise FleetError(f"Biển số {row[0]} {_IN_TRASH}" if row[1] else f"Biển số {row[0]} đã có trong danh sách", 409)
 
 
+def _category(value) -> str:
+    category = value or "tractor"
+    if category not in VEHICLE_CATEGORIES:
+        raise FleetError(f"Loại xe không hợp lệ: {category}")
+    return category
+
+
 def create_vehicle(data: dict) -> int:
-    """A new tractor; its "trailer_plate" hitches that trailer (made when it is new, see hitch_by_plate)."""
+    """A new tractor (category "tractor", the default) or truck ("truck"). A tractor's "trailer_plate" hitches that
+    trailer (made when it is new, see hitch_by_plate); a truck pulls none."""
     from backend.app.core.fleet_trailers import hitch_by_plate
+    category = _category(data.get("category"))
     fields = _clean_vehicle(data, partial=False)
+    if category == "truck" and fields["trailer_plate"]:
+        raise FleetError("Xe tải không kéo moóc")
     stamp = _now()
     with _conn() as conn:
         _check_vehicle_unique(conn, fields, None)
         cur = conn.execute(
-            "INSERT INTO fleet_vehicles (plate, plate_key, vehicle_type, registration_expiry, "
-            "insurance_expiry, status, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
-            (fields["plate"], plate_key(fields["plate"]),
-             fields["vehicle_type"], fields["registration_expiry"], fields["insurance_expiry"], fields["status"],
-             fields["note"], stamp, stamp))
+            "INSERT INTO fleet_vehicles (plate, plate_key, category, vehicle_type, body_type, payload, "
+            "registration_expiry, insurance_expiry, status, note, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            (fields["plate"], plate_key(fields["plate"]), category,
+             fields["vehicle_type"], fields["body_type"], fields["payload"], fields["registration_expiry"],
+             fields["insurance_expiry"], fields["status"], fields["note"], stamp, stamp))
         vehicle_id = cur.lastrowid
         if fields["trailer_plate"]:
             hitch_by_plate(conn, _vehicle(conn, vehicle_id), fields["trailer_plate"], stamp)
@@ -631,7 +667,10 @@ def update_vehicle(vehicle_id: int, data: dict) -> None:
     trailer_plate = fields.pop("trailer_plate", None)
     stamp = _now()
     with _conn() as conn:
-        _vehicle(conn, vehicle_id)
+        if _vehicle(conn, vehicle_id)["category"] == "truck":
+            if trailer_plate:
+                raise FleetError("Xe tải không kéo moóc")
+            trailer_plate = None
         _check_vehicle_unique(conn, fields, vehicle_id)
         if "plate" in fields:
             fields["plate_key"] = plate_key(fields["plate"])
@@ -746,7 +785,10 @@ def delete_driver(driver_id: int) -> None:
 # ---------------------------------------------------------------------------
 # Trash: deleted trucks / drivers wait TRASH_KEEP_DAYS days (photos kept) before being purged
 # ---------------------------------------------------------------------------
-TRASH_ENTITIES = {"vehicle": "fleet_vehicles", "driver": "fleet_drivers", "trailer": "fleet_trailers"}
+TRASH_ENTITIES = {"vehicle": "fleet_vehicles", "truck": "fleet_vehicles", "driver": "fleet_drivers",
+                  "trailer": "fleet_trailers"}
+# kinds sharing a table: which of its rows they are ("vehicle" = the tractors)
+_TRASH_WHERE = {"vehicle": "category = 'tractor'", "truck": "category = 'truck'"}
 
 
 def _keep_days() -> int:
@@ -754,10 +796,11 @@ def _keep_days() -> int:
     return TRASH_KEEP_DAYS
 
 
-def _trash_table(kind: str) -> str:
+def _trash_table(kind: str) -> tuple[str, str]:
+    """(table, the SQL condition picking the kind's rows)"""
     if kind not in TRASH_ENTITIES:
         raise FleetError(f"Loại không hợp lệ: {kind}")
-    return TRASH_ENTITIES[kind]
+    return TRASH_ENTITIES[kind], _TRASH_WHERE.get(kind, "1 = 1")
 
 
 def _clean_ids(ids) -> list[int]:
@@ -773,14 +816,15 @@ def _clean_ids(ids) -> list[int]:
 def trash_page(kind: str, limit: int = 50, offset: int = 0) -> dict:
     """{"items", "total", "keep_days"}: the kind's rows in the trash, last deleted first, each with "deleted_at",
     "purge_at" and "days_left" (whole days before it is deleted for good)."""
-    table = _trash_table(kind)
+    table, which = _trash_table(kind)
     keep = _keep_days()
     limit = max(1, min(int(limit or 50), HISTORY_MAX_LIMIT))
     offset = max(0, int(offset or 0))
     now = datetime.now(VN_TZ).replace(tzinfo=None)
     with _conn() as conn:
-        total = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL;").fetchone()[0]
-        rows = _rows(conn, f"SELECT * FROM {table} WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC, id DESC "
+        total = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL AND {which};").fetchone()[0]
+        rows = _rows(conn, f"SELECT * FROM {table} WHERE deleted_at IS NOT NULL AND {which} "
+                           "ORDER BY deleted_at DESC, id DESC "
                            "LIMIT ? OFFSET ?;", (limit, offset))
     for r in rows:
         purge = datetime.strptime(r["deleted_at"], "%Y-%m-%d %H:%M:%S") + timedelta(days=keep)
@@ -790,27 +834,28 @@ def trash_page(kind: str, limit: int = 50, offset: int = 0) -> dict:
 
 
 def trash_ids(kind: str) -> list[int]:
-    table = _trash_table(kind)
+    table, which = _trash_table(kind)
     with _conn() as conn:
-        return [r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE deleted_at IS NOT NULL ORDER BY id;")]
+        return [r[0] for r in conn.execute(f"SELECT id FROM {table} WHERE deleted_at IS NOT NULL AND {which} "
+                                           "ORDER BY id;")]
 
 
 def trash_count() -> dict:
     with _conn() as conn:
-        return {kind: conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL;").fetchone()[0]
-                for kind, table in TRASH_ENTITIES.items()}
+        return {kind: conn.execute(f"SELECT COUNT(*) FROM {table} WHERE deleted_at IS NOT NULL AND {which};")
+                .fetchone()[0] for kind, (table, which) in ((k, _trash_table(k)) for k in TRASH_ENTITIES)}
 
 
 def restore_from_trash(kind: str, ids) -> int:
     """Back out of the trash, as they were but without a truck / driver (those links were let go on delete)."""
-    table = _trash_table(kind)
+    table, which = _trash_table(kind)
     clean = _clean_ids(ids)
     if not clean:
         return 0
     stamp = _now()
     with _conn() as conn:
         cur = conn.execute(f"UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE deleted_at IS NOT NULL "
-                           f"AND id IN ({','.join('?' * len(clean))});", (stamp, *clean))
+                           f"AND {which} AND id IN ({','.join('?' * len(clean))});", (stamp, *clean))
         return max(cur.rowcount, 0)
 
 
@@ -828,12 +873,12 @@ def _purge(conn, table: str, where: str, params: tuple) -> int:
 
 def delete_from_trash(kind: str, ids) -> int:
     """Delete for good (photo included). The assignment history keeps their name / plate."""
-    table = _trash_table(kind)
+    table, which = _trash_table(kind)
     clean = _clean_ids(ids)
     if not clean:
         return 0
     with _conn() as conn:
-        return _purge(conn, table, f"id IN ({','.join('?' * len(clean))})", tuple(clean))
+        return _purge(conn, table, f"{which} AND id IN ({','.join('?' * len(clean))})", tuple(clean))
 
 
 def purge_expired_trash() -> int:
@@ -841,7 +886,7 @@ def purge_expired_trash() -> int:
     cutoff = (datetime.now(VN_TZ) - timedelta(days=_keep_days())).strftime("%Y-%m-%d %H:%M:%S")
     total = 0
     with _conn() as conn:
-        for table in TRASH_ENTITIES.values():
+        for table in sorted(set(TRASH_ENTITIES.values())):
             total += _purge(conn, table, "deleted_at < ?", (cutoff,))
     if total:
         logger.info(f"Purged {total} truck(s) / driver(s) from the fleet trash")
@@ -974,9 +1019,10 @@ def expiring_documents(today: date, within_days: int = EXPIRY_REMINDER_DAYS[0]) 
     out = []
     with _conn() as conn:
         for table, column, kind, label in EXPIRY_FIELDS:
-            entity, name_col, skip, _tab = EXPIRY_ENTITIES[table]
-            for row_id, subject, expiry in conn.execute(
-                    f"SELECT id, {name_col}, {column} FROM {table} WHERE {column} != '' AND status != ? "
+            entity, name_col, skip, tab = EXPIRY_ENTITIES[table]
+            category = "category" if table == "fleet_vehicles" else "''"
+            for row_id, subject, expiry, cat in conn.execute(
+                    f"SELECT id, {name_col}, {column}, {category} FROM {table} WHERE {column} != '' AND status != ? "
                     "AND deleted_at IS NULL;", (skip,)):
                 try:
                     left = (date.fromisoformat(expiry) - today).days
@@ -984,14 +1030,15 @@ def expiring_documents(today: date, within_days: int = EXPIRY_REMINDER_DAYS[0]) 
                     continue
                 if left <= within_days:
                     out.append({"kind": kind, "label": label, "entity": entity, "entity_id": row_id,
-                                "subject": subject, "expiry": expiry, "days_left": left})
+                                "subject": subject, "expiry": expiry, "days_left": left,
+                                "tab": CATEGORY_TABS.get(cat, tab)})
     out.sort(key=lambda r: (r["days_left"], r["subject"]))
     return out
 
 
 def _doc_tab(doc: dict) -> str:
     """The app tab listing the document's truck / driver / trailer."""
-    return next(tab for entity, _, _, tab in EXPIRY_ENTITIES.values() if entity == doc["entity"])
+    return doc.get("tab") or next(tab for entity, _, _, tab in EXPIRY_ENTITIES.values() if entity == doc["entity"])
 
 
 def _days_text(days_left: int) -> str:

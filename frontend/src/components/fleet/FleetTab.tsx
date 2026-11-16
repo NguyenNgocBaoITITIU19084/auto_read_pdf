@@ -9,7 +9,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
   deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, returnDriverHomeApi,
-  setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi,
+  setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi, type FleetTrashCount,
 } from '../../services/api';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { BulkActionBar, type BulkAction } from '../common/BulkActionBar';
@@ -29,13 +29,13 @@ import { Pagination } from '../common/Pagination';
 import { PAGE_SIZE_OPTIONS, applyColumnFilters, sortRows, usePageRows, usePaging, valueCounts } from './fleetTable';
 import { DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetAssignment, type FleetDocumentKind, type FleetDriver,
   type FleetHistoryPage,
-  type FleetVehicle, type VehicleStatus } from '../../types';
+  type FleetVehicle, type VehicleCategory, type VehicleStatus } from '../../types';
 import { DriverFormModal, DriverMoveModal, VehicleFormModal, VehicleStatusModal } from './FleetModals';
 import { FleetAvatar, PhotoLightbox } from './FleetPhoto';
 import { RowContextMenu, useRowContextMenu, type MenuGroup } from '../common/RowContextMenu';
 import { FleetDetailModal, type DetailAction, type FleetDetailTarget } from './FleetDetailModal';
 import {
-  Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, TD, TEMP_CHIP, TH, VEHICLE_TONE,
+  Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, TD, TEMP_CHIP, TH, TRUCK_CHIP, VEHICLE_TONE,
   docState, docWarnings, fromControl, soonestDays, type DocState,
 } from './fleetCells';
 import {
@@ -48,21 +48,28 @@ type VehicleFilter = 'all' | 'running' | 'down' | 'free' | 'expiring';
 type DriverFilter = 'all' | 'idle' | 'temporary' | 'expiring';
 type RowRef = { kind: 'vehicle' | 'driver'; id: number };
 
-/** Which app tab this is: the tractor units, or the drivers. Each also shows the assignment history. */
-export type FleetScreen = 'vehicles' | 'drivers';
-const VIEW_KEY: Record<FleetScreen, string> = { vehicles: 'fleet.view', drivers: 'fleet.drivers.view' };
+/** Which app tab this is: the tractor units (đầu kéo), the trucks (xe tải), or the drivers. Each also shows the
+ *  assignment history (of its own kind of truck on the two vehicle tabs). */
+export type FleetScreen = 'vehicles' | 'trucks' | 'drivers';
+const VIEW_KEY: Record<FleetScreen, string> = { vehicles: 'fleet.view', trucks: 'fleet.trucks.view', drivers: 'fleet.drivers.view' };
+// the vehicle table's own settings (columns, sort, page size) on each vehicle tab
+const TABLE_KEYS = {
+  vehicles: { sort: 'fleet_vehicles_sort', columns: 'fleet_vehicles_table', pageSize: 'fleet.vehicles.pageSize' },
+  trucks: { sort: 'fleet_trucks_sort', columns: 'fleet_trucks_table', pageSize: 'fleet.trucks.pageSize' },
+};
 
 const readView = (screen: FleetScreen): View => {
+  const list: View = screen === 'drivers' ? 'drivers' : 'vehicles';
   try {
-    return localStorage.getItem(VIEW_KEY[screen]) === 'history' ? 'history' : screen;
+    return localStorage.getItem(VIEW_KEY[screen]) === 'history' ? 'history' : list;
   } catch {
-    return screen;
+    return list;
   }
 };
 
 interface Props {
   initialSearchQuery?: string;
-  /** 'vehicles': the "Đầu kéo" tab; 'drivers': the "Tài xế" tab */
+  /** 'vehicles': the "Đầu kéo" tab; 'trucks': the "Xe tải" tab; 'drivers': the "Tài xế" tab */
   screen?: FleetScreen;
 }
 
@@ -74,6 +81,10 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const confirm = useConfirm();
   const f = t.fleet;
   const L = f.list;
+  // the vehicle tabs list one category; the drivers tab (and every picker) sees all trucks
+  const category: VehicleCategory = screen === 'trucks' ? 'truck' : 'tractor';
+  const isTrucks = screen === 'trucks';
+  const tableKeys = TABLE_KEYS[isTrucks ? 'trucks' : 'vehicles'];
   const [view, setView] = useState<View>(() => readView(screen));
   const [vehicles, setVehicles] = useState<FleetVehicle[] | null>(null);
   const [drivers, setDrivers] = useState<FleetDriver[] | null>(null);
@@ -81,7 +92,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const [vehicleCols, setVehicleCols] = useState<Record<string, string[]>>({});
   const [driverCols, setDriverCols] = useState<Record<string, string[]>>({});
   const [historyCols, setHistoryCols] = useState<Record<string, string[]>>({});
-  const vehicleSort = useTableSort('fleet_vehicles_sort');
+  const vehicleSort = useTableSort(tableKeys.sort);
   const driverSort = useTableSort('fleet_drivers_sort');
   const historySort = useTableSort('fleet_history_sort');
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>(null);
@@ -121,11 +132,13 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   }, []);
 
   const historyQuery = useDebouncedValue(query, 300);
+  // a vehicle tab's history is its own kind of truck's (a picked truck / driver shows all of theirs)
+  const historyCategory = screen === 'drivers' || historyFilter ? undefined : category;
   const historyPaging = usePaging('fleet.history.pageSize', JSON.stringify([historyFilter, historyCols, historySort.sort, historyQuery]));
   const loadHistory = useCallback(async () => {
     try {
       setHistory(await getFleetHistoryPageApi({
-        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id,
+        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, category: historyCategory,
         kinds: historyCols.vehicle_plate, states: historyCols.ended_at, q: historyQuery.trim() || undefined,
         sort_by: historySort.sort?.key, sort_dir: historySort.sort?.dir,
         limit: historyPaging.pageSize, offset: (historyPaging.page - 1) * historyPaging.pageSize,
@@ -133,7 +146,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     } catch {
       setHistory({ items: [], total: 0 });
     }
-  }, [historyFilter, historyCols, historyQuery, historySort.sort, historyPaging.page, historyPaging.pageSize]);
+  }, [historyFilter, historyCols, historyQuery, historySort.sort, historyPaging.page, historyPaging.pageSize, historyCategory]);
 
   useEffect(() => {
     void load();
@@ -163,7 +176,9 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     setView('history');
   };
 
-  const vs = vehicles || [];
+  const allVs = useMemo(() => vehicles || [], [vehicles]);
+  const vs = useMemo(() => (screen === 'drivers' ? allVs : allVs.filter((v) => (v.category || 'tractor') === category)),
+    [allVs, screen, category]);
   const ds = drivers || [];
   const away = useMemo(() => awayHomeDrivers(vs), [vs]);
 
@@ -186,7 +201,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   }), [today]);
 
   const shownVehicles = useMemo(() => vs.filter((v) => vehicleTest[vehicleFilter](v) && matches(query, v.plate, v.trailer_plate,
-    v.vehicle_type, v.note, v.current_driver?.name, v.home_driver?.name)), [vs, query, vehicleFilter, vehicleTest]);
+    v.vehicle_type, v.body_type, v.payload, v.note, v.current_driver?.name, v.home_driver?.name)), [vs, query, vehicleFilter, vehicleTest]);
   const shownDrivers = useMemo(() => ds.filter((d) => driverTest[driverFilter](d) && matches(query, d.name, d.phone, d.id_number,
     d.license_no, d.note, d.home_vehicle?.plate, d.current_vehicle?.plate)), [ds, query, driverFilter, driverTest]);
 
@@ -204,6 +219,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     docs: (v: FleetVehicle) => soonestDays(vehicleDocs(v), today),
     trailer: (v: FleetVehicle) => v.trailer_plate,
     type: (v: FleetVehicle) => v.vehicle_type,
+    body: (v: FleetVehicle) => v.body_type,
+    payload: (v: FleetVehicle) => v.payload,
     home: (v: FleetVehicle) => v.home_driver?.name ?? null,
     registration: (v: FleetVehicle) => v.registration_expiry,
     insurance: (v: FleetVehicle) => v.insurance_expiry,
@@ -235,7 +252,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     vehicleSortValue), [shownVehicles, vehicleCols, vehicleValue, vehicleSort.sort, vehicleSortValue]);
   const sortedDrivers = useMemo(() => sortRows(applyColumnFilters(shownDrivers, driverCols, driverValue), driverSort.sort,
     driverSortValue), [shownDrivers, driverCols, driverValue, driverSort.sort, driverSortValue]);
-  const vehiclePaging = usePaging('fleet.vehicles.pageSize', JSON.stringify([query, vehicleFilter, vehicleCols, vehicleSort.sort]));
+  const vehiclePaging = usePaging(tableKeys.pageSize, JSON.stringify([query, vehicleFilter, vehicleCols, vehicleSort.sort]));
   const driverPaging = usePaging('fleet.drivers.pageSize', JSON.stringify([query, driverFilter, driverCols, driverSort.sort]));
   const pageVehicles = usePageRows(sortedVehicles, vehiclePaging.page, vehiclePaging.pageSize);
   const pageDrivers = usePageRows(sortedDrivers, driverPaging.page, driverPaging.pageSize);
@@ -271,9 +288,13 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const defaults = (keys: [string, string, boolean][]): ColumnDef[] => keys.map(([key, label, visible]) => ({ key, label, visible }));
   const vehicleDefaults = useMemo(() => defaults([
     ['plate', L.vehicle, true], ['status', L.status, true], ['driver', L.driver, true], ['docs', L.docs, true],
-    ['trailer', C.trailer, false], ['type', C.type, false], ['home', C.home, false], ['registration', C.registration, false],
+    // a tractor's trailer, a truck's body and payload
+    ...(isTrucks
+      ? [['body', C.body, true], ['payload', C.payload, false]] as [string, string, boolean][]
+      : [['trailer', C.trailer, false]] as [string, string, boolean][]),
+    ['type', C.type, false], ['home', C.home, false], ['registration', C.registration, false],
     ['insurance', C.insurance, false], ['note', C.note, false], ['created', C.created, false],
-  ]), [L, C]);
+  ]), [L, C, isTrucks]);
   const driverDefaults = useMemo(() => defaults([
     ['name', L.driver, true], ['status', L.status, true], ['truck', L.truck, true], ['license', L.license, true],
     ['phone', C.phone, false], ['id_number', C.idNumber, false], ['license_no', C.licenseNo, false],
@@ -284,7 +305,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     ['started_at', f.cols.started, true], ['ended_at', f.cols.ended, true], ['driver_name', f.cols.name, true],
     ['vehicle_plate', f.cols.vehicle, true], ['reason', f.cols.reason, true], ['end_reason', f.cols.endReason, true],
   ]), [f.cols]);
-  const vehicleColumns = useColumnSettings({ storageKey: 'fleet_vehicles_table', defaultColumns: vehicleDefaults });
+  const vehicleColumns = useColumnSettings({ storageKey: tableKeys.columns, defaultColumns: vehicleDefaults });
   const driverColumns = useColumnSettings({ storageKey: 'fleet_drivers_table', defaultColumns: driverDefaults });
   const historyColumns = useColumnSettings({ storageKey: 'fleet_history_table', defaultColumns: historyDefaults });
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -292,22 +313,23 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
 
   // ---- trash ----
   const [trashOpen, setTrashOpen] = useState(false);
-  const [trashCount, setTrashCount] = useState({ vehicle: 0, driver: 0 });
+  const [trashCount, setTrashCount] = useState<FleetTrashCount>({ vehicle: 0, truck: 0, driver: 0, trailer: 0 });
   const loadTrashCount = useCallback(() => {
     getFleetTrashCountApi().then(setTrashCount).catch(() => {});
   }, []);
   useEffect(() => {
     loadTrashCount();
   }, [loadTrashCount]);
-  const trashKind: 'vehicle' | 'driver' = view === 'drivers' ? 'driver' : 'vehicle';
+  const trashKind: 'vehicle' | 'truck' | 'driver' = view === 'drivers' ? 'driver' : isTrucks ? 'truck' : 'vehicle';
   const trashBadge = trashCount[trashKind];
 
   // ---- Excel export: every row that matches the search / filters / sort (not just this page), every column ----
   const [exportOpen, setExportOpen] = useState(false);
   const [exportRows, setExportRows] = useState<Record<string, string | number>[]>([]);
   const [exporting, setExporting] = useState(false);
-  const exportTab: ExportTab = view === 'vehicles' ? 'fleet_vehicle' : view === 'drivers' ? 'fleet_driver' : 'fleet_history';
-  const exportPrefix = view === 'vehicles' ? 'doi_xe' : view === 'drivers' ? 'tai_xe' : 'lich_su_phan_cong';
+  const exportTab: ExportTab = view === 'vehicles' ? (isTrucks ? 'fleet_truck' : 'fleet_vehicle')
+    : view === 'drivers' ? 'fleet_driver' : 'fleet_history';
+  const exportPrefix = view === 'vehicles' ? (isTrucks ? 'xe_tai' : 'doi_xe') : view === 'drivers' ? 'tai_xe' : 'lich_su_phan_cong';
   const exportColumns = useMemo(() => [
     { key: 'STT', label: t.common.stt },
     ...activeColumns.columns.map((c) => ({ key: c.key, label: c.label })),
@@ -320,6 +342,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     driver: v.current_driver ? v.current_driver.name + tempNote(v.current_driver.kind) : '',
     docs: T.docState[docState(vehicleDocs(v), today)],
     trailer: v.trailer_plate,
+    body: v.body_type,
+    payload: v.payload,
     type: v.vehicle_type,
     home: v.home_driver?.name || '',
     registration: formatIsoDate(v.registration_expiry),
@@ -358,7 +382,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     const size = 1000;
     for (let offset = 0; ; offset += size) {
       const res = await getFleetHistoryPageApi({
-        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, kinds: historyCols.vehicle_plate,
+        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, category: historyCategory, kinds: historyCols.vehicle_plate,
         states: historyCols.ended_at, q: historyQuery.trim() || undefined, sort_by: historySort.sort?.key,
         sort_dir: historySort.sort?.dir, limit: size, offset,
       });
@@ -458,7 +482,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const applyStatus = async (kind: 'vehicle' | 'driver', ids: number[], status: string) => {
     setStatusPickerOpen(false);
     setBulkBusy('status');
-    const rows: (FleetVehicle | FleetDriver)[] = kind === 'vehicle' ? vs.filter((v) => ids.includes(v.id)) : ds.filter((d) => ids.includes(d.id));
+    const rows: (FleetVehicle | FleetDriver)[] = kind === 'vehicle' ? allVs.filter((v) => ids.includes(v.id)) : ds.filter((d) => ids.includes(d.id));
     const todo = rows.filter((r) => r.status !== status);
     const off: string[] = [];
     const res = await runEach(todo, async (r) => {
@@ -529,7 +553,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         : null;
   const driverMain = (d: FleetDriver): DetailAction[] => {
     const move = { label: f.actions.move, icon: <ArrowLeftRight className="w-4 h-4" />, onClick: () => setMoveFor(d) };
-    if (canReturnHome(d, vs)) {
+    if (canReturnHome(d, allVs)) {
       return [move, { label: f.actions.returnHome, icon: <Undo2 className="w-4 h-4" />, onClick: () => void returnHome(d.id, d.name), primary: true }];
     }
     return d.status === 'left' ? [] : [{ ...move, primary: true }];
@@ -553,7 +577,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const driverMenu = (d: FleetDriver): MenuGroup[] => [
     { label: d.name, items: [
       { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'driver', id: d.id }) },
-      ...(canReturnHome(d, vs)
+      ...(canReturnHome(d, allVs)
         ? [{ key: 'home', label: f.actions.returnHome, icon: Undo2, onClick: () => void returnHome(d.id, d.name) }] : []),
       ...(d.status !== 'left' ? [{ key: 'move', label: f.actions.move, icon: ArrowLeftRight, onClick: () => setMoveFor(d) }] : []),
     ] },
@@ -565,11 +589,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     { items: [{ key: 'delete', label: f.menu.delete, icon: Trash2, danger: true, onClick: () => void removeDriver(d) }] },
   ];
 
-  const menuVehicle = menu.state?.row.kind === 'vehicle' ? vs.find((v) => v.id === menu.state!.row.id) : undefined;
+  const menuVehicle = menu.state?.row.kind === 'vehicle' ? allVs.find((v) => v.id === menu.state!.row.id) : undefined;
   const menuDriver = menu.state?.row.kind === 'driver' ? ds.find((d) => d.id === menu.state!.row.id) : undefined;
   const menuGroups = menuVehicle ? vehicleMenu(menuVehicle) : menuDriver ? driverMenu(menuDriver) : [];
 
-  const detailVehicle = detail?.kind === 'vehicle' ? vs.find((v) => v.id === detail.id) : undefined;
+  const detailVehicle = detail?.kind === 'vehicle' ? allVs.find((v) => v.id === detail.id) : undefined;
   const detailDriver = detail?.kind === 'driver' ? ds.find((d) => d.id === detail.id) : undefined;
   const detailTarget: FleetDetailTarget | null = detailVehicle ? { kind: 'vehicle', item: detailVehicle }
     : detailDriver ? { kind: 'driver', item: detailDriver } : null;
@@ -621,8 +645,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   );
 
   const tabs: { id: View; label: string; count?: number }[] = [
-    screen === 'vehicles'
-      ? { id: 'vehicles', label: f.views.vehicles, count: vehicles?.length }
+    screen !== 'drivers'
+      ? { id: 'vehicles', label: isTrucks ? f.views.trucks : f.views.vehicles, count: vehicles ? vs.length : undefined }
       : { id: 'drivers', label: f.views.drivers, count: drivers?.length },
     { id: 'history', label: f.views.history },
   ];
@@ -678,7 +702,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       filter: { column: T.type, options: () => valueCounts(shownVehicles, vehicleValue.plate), value: vehicleCols.plate || [],
         onChange: setCol(setVehicleCols, 'plate'), format: (v) => v || t.common.columnFilter.empty },
       render: (v) => {
-        const sub = [v.vehicle_type, v.trailer_plate ? tf(L.trailer, { plate: v.trailer_plate }) : ''].filter(Boolean).join(' · ');
+        const sub = (v.category === 'truck' ? [v.vehicle_type, v.body_type, v.payload]
+          : [v.vehicle_type, v.trailer_plate ? tf(L.trailer, { plate: v.trailer_plate }) : '']).filter(Boolean).join(' · ');
         return (
           <div className="flex items-center gap-3">
             <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wide" onClick={openPhoto(v.photo, v.plate)} />
@@ -733,6 +758,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       render: (v) => <DocsCell entries={vehicleDocs(v)} today={today} muted={v.status === 'inactive'} />,
     },
     trailer: { td: 'whitespace-nowrap font-mono text-xs', render: (v) => plainCell(v.trailer_plate) },
+    body: { td: 'whitespace-nowrap', render: (v) => plainCell(v.body_type) },
+    payload: { td: 'whitespace-nowrap', render: (v) => plainCell(v.payload) },
     type: { render: (v) => plainCell(v.vehicle_type) },
     home: { render: (v) => plainCell(v.home_driver?.name || '') },
     registration: { render: (v) => dateCell(v.registration_expiry, v.status === 'inactive') },
@@ -781,6 +808,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.plate}</span>
+                {c.category === 'truck' && <Chip tone={TRUCK_CHIP}>{f.truckChip}</Chip>}
                 {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
               </div>
               <div className={MUTED}>{c.kind === 'temporary' ? homeLine : c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
@@ -870,7 +898,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   );
 
   const vehicleTable = () => {
-    if (vs.length === 0) return empty(f.empty.vehicles);
+    if (vs.length === 0) return empty(isTrucks ? f.empty.trucks : f.empty.vehicles);
     return (
       <table className="min-w-full text-sm">
         <thead className={THEAD}>{headerRow(vehicleColumns, vehicleSpecs, vehicleSort, true, selectHeader(vehicleSel, pageVehicles))}</thead>
@@ -920,7 +948,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
           driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageDrivers.map((d) => {
-            const back = canReturnHome(d, vs);
+            const back = canReturnHome(d, allVs);
             return (
               <tr key={d.id} data-testid={`driver-${d.id}`} {...rowEvents({ kind: 'driver', id: d.id })}
                 className={`${ROW} ${rowTone(driverSel.isSelected(d.id), menu.state?.row.kind === 'driver' && menu.state.row.id === d.id)} ${d.status === 'left' ? 'opacity-60' : ''}`}>
@@ -1051,7 +1079,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
               onClick={() => (view === 'vehicles' ? setVehicleForm({ open: true, vehicle: null }) : setDriverForm({ open: true, driver: null }))}
               className="inline-flex items-center gap-1.5 h-8 px-3 text-sm font-semibold rounded-lg bg-primary-600 hover:bg-primary-700 text-white shadow-sm whitespace-nowrap">
               <Plus className="w-4 h-4" />
-              {view === 'vehicles' ? f.actions.addVehicle : f.actions.addDriver}
+              {view === 'vehicles' ? (isTrucks ? f.actions.addTruck : f.actions.addVehicle) : f.actions.addDriver}
             </button>
           )}
         </div>
@@ -1112,11 +1140,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
           if (detailVehicle) setVehicleForm({ open: true, vehicle: detailVehicle });
           if (detailDriver) setDriverForm({ open: true, driver: detailDriver });
         }} />
-      <VehicleFormModal isOpen={vehicleForm.open} vehicle={vehicleForm.vehicle}
+      <VehicleFormModal isOpen={vehicleForm.open} vehicle={vehicleForm.vehicle} category={category}
         onClose={() => setVehicleForm({ open: false, vehicle: null })} onSaved={reload} />
-      <DriverFormModal isOpen={driverForm.open} driver={driverForm.driver} vehicles={vs}
+      <DriverFormModal isOpen={driverForm.open} driver={driverForm.driver} vehicles={allVs}
         onClose={() => setDriverForm({ open: false, driver: null })} onSaved={reload} />
-      <VehicleStatusModal vehicle={statusFor} vehicles={vs} onClose={() => setStatusFor(null)} onSaved={reload} />
+      <VehicleStatusModal vehicle={statusFor} vehicles={allVs} onClose={() => setStatusFor(null)} onSaved={reload} />
       <ExportModal isOpen={exportOpen} onClose={() => setExportOpen(false)} data={exportRows} allColumns={exportColumns}
         tab={exportTab} filenamePrefix={exportPrefix} />
       <ColumnConfigModal isOpen={columnsOpen} onClose={() => setColumnsOpen(false)} columns={activeColumns.columns}
@@ -1141,7 +1169,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       <RowContextMenu position={menu.state && menuGroups.length ? { x: menu.state.x, y: menu.state.y } : null}
         groups={menuGroups} onClose={menu.close} />
       <PhotoLightbox photo={viewing?.photo || null} name={viewing?.name || ''} onClose={closeViewer} />
-      <DriverMoveModal driver={moveFor} vehicles={vs} onClose={() => setMoveFor(null)} onSaved={reload} />
+      <DriverMoveModal driver={moveFor} vehicles={allVs} onClose={() => setMoveFor(null)} onSaved={reload} />
     </div>
   );
 };

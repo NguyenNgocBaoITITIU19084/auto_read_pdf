@@ -5,7 +5,7 @@ import {
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
-  FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
+  FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleCategory, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
   FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, VehicleDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
 } from '../types';
 
@@ -817,7 +817,8 @@ export const forgetAutoImportFileApi = async (sha256: string): Promise<void> => 
 // Fleet (trucks, drivers, assignments). Errors carry a Vietnamese `detail` naming the conflict.
 // ---------------------------------------------------------------------------
 export type VehicleInput = Partial<Pick<FleetVehicle,
-  'plate' | 'trailer_plate' | 'vehicle_type' | 'registration_expiry' | 'insurance_expiry' | 'status' | 'note'>>;
+  'plate' | 'trailer_plate' | 'vehicle_type' | 'body_type' | 'payload' | 'registration_expiry' | 'insurance_expiry' | 'status'
+  | 'note'>> & { /** on create only (tractor when left out) */ category?: VehicleCategory };
 export type DriverInput = Partial<Pick<FleetDriver,
   'name' | 'phone' | 'id_number' | 'license_no' | 'license_class' | 'license_expiry' | 'status' | 'note'>> & {
   home_vehicle_id?: number | null;
@@ -893,11 +894,14 @@ export const getFleetHistoryApi = async (params: { driver_id?: number; vehicle_i
 export const getFleetHistoryPageApi = async (params: {
   driver_id?: number; vehicle_id?: number; kinds?: string[]; states?: string[]; q?: string;
   sort_by?: string; sort_dir?: 'asc' | 'desc'; limit: number; offset: number;
+  /** only the tractors' / the trucks' assignments */
+  category?: VehicleCategory;
 }): Promise<FleetHistoryPage> =>
   (await apiClient.get<FleetHistoryPage>('/fleet/history/page', { params, paramsSerializer: listParams })).data;
 /** The fleet trash, shaped like the collections' trash APIs (TrashModal); fleet data has no collection, so the
  *  collection argument is ignored. */
-const fleetTrashApi = <T,>(kind: 'vehicle' | 'driver' | 'trailer') => ({
+export type FleetTrashKind = 'vehicle' | 'truck' | 'driver' | 'trailer';
+const fleetTrashApi = <T,>(kind: FleetTrashKind) => ({
   list: async (_collectionId: number, limit: number, offset: number) =>
     (await apiClient.get<PageResult<T> & { keep_days?: number }>('/fleet/trash', { params: { kind, limit, offset } })).data,
   ids: async (_collectionId: number) =>
@@ -908,9 +912,11 @@ const fleetTrashApi = <T,>(kind: 'vehicle' | 'driver' | 'trailer') => ({
     (await apiClient.post<{ deleted: number }>('/fleet/trash/delete', { kind, ids })).data.deleted,
 });
 export const fleetVehicleTrashApi = fleetTrashApi<FleetTrashedVehicle>('vehicle');
+export const fleetTruckTrashApi = fleetTrashApi<FleetTrashedVehicle>('truck');
 export const fleetDriverTrashApi = fleetTrashApi<FleetTrashedDriver>('driver');
 export const fleetTrailerTrashApi = fleetTrashApi<FleetTrashedTrailer>('trailer');
-export type FleetTrashCount = { vehicle: number; driver: number; trailer: number };
+/** vehicle: the tractors; truck: the trucks */
+export type FleetTrashCount = Record<FleetTrashKind, number>;
 export const getFleetTrashCountApi = async (): Promise<FleetTrashCount> =>
   (await apiClient.get<FleetTrashCount>('/fleet/trash/count')).data;
 

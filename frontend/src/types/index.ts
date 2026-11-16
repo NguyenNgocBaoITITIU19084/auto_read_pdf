@@ -616,7 +616,7 @@ export interface AppNotification {
     // fleet_expiry (count = documents; expired = how many of them already expired)
     expired?: number; documents?: FleetDocument[];
   };
-  nav_tab: 'vessel' | 'container' | 'booking' | 'fleet' | 'drivers' | 'trailers' | null;
+  nav_tab: 'vessel' | 'container' | 'booking' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
@@ -675,7 +675,7 @@ export interface AutoImportRunResult {
 // Excel export templates
 // ---------------------------------------------------------------------------
 /** Whose saved export templates: a tab, or one of the fleet tab's three tables */
-export type ExportTab = 'booking' | 'vessel' | 'container' | 'fleet_vehicle' | 'fleet_driver' | 'fleet_history' | 'fleet_trailer'
+export type ExportTab = 'booking' | 'vessel' | 'container' | 'fleet_vehicle' | 'fleet_truck' | 'fleet_driver' | 'fleet_history' | 'fleet_trailer'
   | 'fleet_hitch';
 export type ExportFill = 'header' | 'column';
 export type PaletteColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
@@ -718,12 +718,20 @@ export const DRIVER_STATUSES = ['active', 'leave', 'left'] as const;
 export type DriverStatus = typeof DRIVER_STATUSES[number];
 /** primary: the driver on their home truck; temporary: on another truck while theirs cannot run */
 export type AssignmentKind = 'primary' | 'temporary';
+/** tractor: đầu kéo (pulls a trailer); truck: xe tải (carries its own load, never a trailer). Set when made. */
+export const VEHICLE_CATEGORIES = ['tractor', 'truck'] as const;
+export type VehicleCategory = typeof VEHICLE_CATEGORIES[number];
 
 export interface FleetVehicle {
   id: number;
   plate: string;
+  category: VehicleCategory;
+  /** tractors only ('' on a truck) */
   trailer_plate: string;
   vehicle_type: string;
+  /** trucks: loại thùng (e.g. "Thùng kín") and tải trọng (free text, e.g. "8 tấn") */
+  body_type: string;
+  payload: string;
   /** 'YYYY-MM-DD' or '' */
   registration_expiry: string;
   insurance_expiry: string;
@@ -766,9 +774,10 @@ export interface FleetDriver {
   license_back: string;
   id_front: string;
   id_back: string;
-  home_vehicle: { id: number; plate: string; status: VehicleStatus } | null;
+  home_vehicle: { id: number; plate: string; status: VehicleStatus; category: VehicleCategory } | null;
   current_vehicle: {
-    id: number; plate: string; trailer_plate: string; photo: string; kind: AssignmentKind; since: string; reason: string;
+    id: number; plate: string; trailer_plate: string; photo: string; category: VehicleCategory; kind: AssignmentKind;
+    since: string; reason: string;
   } | null;
 }
 
@@ -803,6 +812,8 @@ export interface FleetDocument {
   /** 'YYYY-MM-DD' from /fleet/expiring, 'dd/mm/YYYY' inside a notification */
   expiry: string;
   days_left: number;
+  /** the app tab listing it (a truck's papers: 'trucks') */
+  tab?: 'fleet' | 'trucks' | 'drivers' | 'trailers';
 }
 
 export interface VehicleStatusResult {
@@ -822,7 +833,8 @@ export interface FleetHistoryPage {
 /** A truck / driver in the trash: its stored row plus when it goes for good. */
 export interface FleetTrashFields { id: number; deleted_at: string; purge_at: string; days_left: number }
 export interface FleetTrashedVehicle extends FleetTrashFields {
-  plate: string; trailer_plate: string; vehicle_type: string; status: VehicleStatus; photo: string; note: string;
+  plate: string; category: VehicleCategory; trailer_plate: string; vehicle_type: string; body_type: string; payload: string;
+  status: VehicleStatus; photo: string; note: string;
 }
 export interface FleetTrashedDriver extends FleetTrashFields {
   name: string; phone: string; license_no: string; license_class: string; status: DriverStatus; photo: string; note: string;

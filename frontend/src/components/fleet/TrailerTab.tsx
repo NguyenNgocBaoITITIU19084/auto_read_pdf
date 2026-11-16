@@ -100,7 +100,8 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     try {
       const [list, trucks] = await Promise.all([getFleetTrailersApi(), getFleetVehiclesApi()]);
       setTrailers(list);
-      setVehicles(trucks);
+      // only tractors pull a trailer (a truck, xe tải, carries its own load)
+      setVehicles(trucks.filter((v) => (v.category || 'tractor') === 'tractor'));
     } catch {
       setFailed(true);
     } finally {
