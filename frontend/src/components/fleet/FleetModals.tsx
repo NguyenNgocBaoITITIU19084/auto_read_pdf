@@ -14,12 +14,16 @@ import {
 } from '../../services/api';
 import { DriverSection, FieldInputBox, NO_PAPER_CHANGES, PaperPicker, PaperRow, type PaperChoices } from './DriverPapers';
 import { PhotoPicker, type PhotoChoice } from './FleetPhoto';
+import { FormBox } from './FieldPick';
+import { FieldCopyBar } from '../common/FieldCopyBar';
+import { useFieldSelection } from '../../hooks/useFieldSelection';
+import type { CopyEntry } from '../../utils/fieldCopy';
 import {
   DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_DOCUMENTS, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle,
   type VehicleCategory, type VehicleDocument, type VehicleStatus,
 } from '../../types';
 import {
-  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, freeVehicles, isConflict, isRunning, licenseExpired,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, isConflict, isRunning, licenseExpired,
   type PaperExpiry,
 } from './fleetUtils';
 
@@ -123,6 +127,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const [photo, setPhoto] = useState<PhotoChoice>(NO_PHOTO_CHANGE);
   const [papers, setPapers] = useState<VehiclePaperChoices>(NO_VEHICLE_PAPERS);
   const D = t.fleet.detail;
+  const picked = useFieldSelection(isOpen ? vehicle?.id ?? 'new' : null);
   // trailers free to pick (or this tractor's own), offered as the trailer plate's suggestions
   const [freeTrailers, setFreeTrailers] = useState<string[]>([]);
 
@@ -200,6 +205,26 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const expiryField = { ownership: 'ownership_expiry', registration: 'registration_expiry', insurance: 'insurance_expiry' } as const;
   const expiryLabel = { ownership: t.fleet.vehicleForm.ownership, registration: f.registration, insurance: f.insurance };
 
+  // editing: boxes are picked and copied together like the booking details (what is typed now is what is copied)
+  const pick = vehicle ? picked : null;
+  const entries: CopyEntry[] = [
+    { key: 'plate', label: f.plate, value: form.plate },
+    { key: 'vehicle_type', label: f.type, value: form.vehicle_type },
+    ...(isTruck ? [
+      { key: 'body_type', label: t.fleet.truckForm.body, value: form.body_type },
+      { key: 'payload', label: t.fleet.truckForm.payload, value: form.payload },
+    ] : [{ key: 'trailer_plate', label: f.trailer, value: form.trailer_plate }]),
+    { key: 'status', label: f.status, value: t.fleet.vehicleStatus[statusValue] },
+    { key: 'ownership_expiry', label: expiryLabel.ownership, value: formatIsoDate(form.ownership_expiry) },
+    { key: 'registration_expiry', label: expiryLabel.registration, value: formatIsoDate(form.registration_expiry) },
+    { key: 'insurance_expiry', label: expiryLabel.insurance, value: formatIsoDate(form.insurance_expiry) },
+    { key: 'note', label: f.note, value: form.note },
+  ];
+  const copyOf = (key: string) => entries.find((e) => e.key === key)?.value || '';
+  const box = (key: keyof typeof form, label: string, input: React.ReactElement, extra: { required?: boolean; className?: string } = {}) => (
+    <FormBox id={key} label={label} copyValue={copyOf(key)} picked={pick} {...extra}>{input}</FormBox>
+  );
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={vehicle ? tf(f.editTitle, { plate: vehicle.plate }) : f.addTitle} maxWidth="max-w-3xl">
       {/* laid out like the trailer and driver forms: photo + what it is, then its papers (with scans), then the note */}
@@ -207,38 +232,23 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
         <div className="flex items-start gap-4">
           <PhotoPicker kind="vehicle" name={form.plate} current={vehicle?.photo || ''} value={photo} onChange={setPhoto} onError={setError} stacked />
           <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
-            <div className="col-span-2">
-              <FieldInputBox label={f.plate} required>
-                <input autoFocus value={form.plate} onChange={set('plate')} placeholder={f.platePh} />
-              </FieldInputBox>
-            </div>
-            <FieldInputBox label={f.type}>
-              <input value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
-            </FieldInputBox>
-            {isTruck ? (
-              <FieldInputBox label={t.fleet.truckForm.body}>
-                <input value={form.body_type} onChange={set('body_type')} placeholder={t.fleet.truckForm.bodyPh} list="fleet-truck-bodies" />
-              </FieldInputBox>
-            ) : (
-              <FieldInputBox label={f.trailer}>
-                <input value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
-                  list="fleet-free-trailers" title={t.fleet.trailer.formHint} />
-              </FieldInputBox>
-            )}
-            {isTruck && (
-              <FieldInputBox label={t.fleet.truckForm.payload}>
-                <input value={form.payload} onChange={set('payload')} placeholder={t.fleet.truckForm.payloadPh} />
-              </FieldInputBox>
-            )}
-            <div className={isTruck ? '' : 'col-span-2'}>
-              <FieldInputBox label={f.status}>
-                <select value={statusValue} onChange={set('status')} disabled={!!vehicle}>
-                  {VEHICLE_STATUSES.map((s) => (
-                    <option key={s} value={s} disabled={formLocked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
-                  ))}
-                </select>
-              </FieldInputBox>
-            </div>
+            {box('plate', f.plate, <input autoFocus value={form.plate} onChange={set('plate')} placeholder={f.platePh} />,
+              { required: true, className: 'col-span-2' })}
+            {box('vehicle_type', f.type, <input value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />)}
+            {isTruck
+              ? box('body_type', t.fleet.truckForm.body,
+                <input value={form.body_type} onChange={set('body_type')} placeholder={t.fleet.truckForm.bodyPh} list="fleet-truck-bodies" />)
+              : box('trailer_plate', f.trailer, <input value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
+                list="fleet-free-trailers" title={t.fleet.trailer.formHint} />)}
+            {isTruck && box('payload', t.fleet.truckForm.payload,
+              <input value={form.payload} onChange={set('payload')} placeholder={t.fleet.truckForm.payloadPh} />)}
+            {box('status', f.status, (
+              <select value={statusValue} onChange={set('status')} disabled={!!vehicle}>
+                {VEHICLE_STATUSES.map((s) => (
+                  <option key={s} value={s} disabled={formLocked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
+                ))}
+              </select>
+            ), { className: isTruck ? '' : 'col-span-2' })}
             <div className="col-span-2">
               {formLocked && <LockHint papers={formExpired} />}
               {vehicle && <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>}
@@ -251,6 +261,13 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
             </datalist>
           </div>
         </div>
+
+        {pick && (
+          <div className="space-y-1.5">
+            <FieldCopyBar entries={entries} {...pick.barProps} />
+            <p className="text-[11px] text-slate-400">{D.editHint}</p>
+          </div>
+        )}
 
         <DriverSection title={D.papers}>
           <div className="space-y-3">
@@ -265,20 +282,15 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
               };
               const field = expiryField[kind];
               return (
-                <PaperRow key={kind} kind={kind} front={picker('front')} back={picker('back')} facts={(
-                  <FieldInputBox label={expiryLabel[kind]}>
-                    <input type="date" value={form[field]} onChange={set(field)} />
-                  </FieldInputBox>
-                )} />
+                <PaperRow key={kind} kind={kind} front={picker('front')} back={picker('back')}
+                  facts={box(field, expiryLabel[kind], <input type="date" value={form[field]} onChange={set(field)} />)} />
               );
             })}
           </div>
         </DriverSection>
 
         <DriverSection title={D.other}>
-          <FieldInputBox label={f.note}>
-            <textarea rows={2} value={form.note} onChange={set('note')} />
-          </FieldInputBox>
+          {box('note', f.note, <textarea rows={2} value={form.note} onChange={set('note')} />)}
         </DriverSection>
 
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}

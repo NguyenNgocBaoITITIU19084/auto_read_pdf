@@ -75,3 +75,29 @@ export const PickBox: React.FC<{
     </div>
   );
 };
+
+const INPUT_IN_BOX = 'min-w-0 flex-1 bg-transparent p-0 border-0 text-sm font-semibold text-slate-800 dark:text-slate-100 '
+  + 'placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:opacity-70';
+
+/** A form box (an input, select or textarea): in an edit popup it can also be picked and copied like the booking
+ *  details (`picked` given); in an add popup it is a plain labelled box. */
+export const FormBox: React.FC<{
+  id: string; label: string; copyValue: string; picked: Selection | null; required?: boolean; className?: string;
+  children: React.ReactElement;
+}> = ({ id, label, copyValue, picked, required, className = '', children }) => {
+  if (!picked) {
+    return (
+      <label className={`block px-2.5 py-1.5 rounded-xl border bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/30 ${className}`}>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          {label}{required && <span className="text-rose-500"> *</span>}
+        </span>
+        {React.cloneElement(children, { className: `block w-full ${INPUT_IN_BOX}` })}
+      </label>
+    );
+  }
+  return (
+    <PickBox id={id} label={required ? `${label} *` : label} copyValue={copyValue} picked={picked} className={className}>
+      {React.cloneElement(children, { 'aria-label': label, className: `block w-full ${INPUT_IN_BOX}` })}
+    </PickBox>
+  );
+};

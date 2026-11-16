@@ -8,12 +8,16 @@ import {
   uploadFleetTrailerDocumentApi, uploadFleetTrailerPhotoApi,
 } from '../../services/api';
 import { FleetAvatar, PhotoPicker, type PhotoChoice } from './FleetPhoto';
-import { DriverSection, FieldInputBox, PaperPicker, PaperRow } from './DriverPapers';
+import { DriverSection, PaperPicker, PaperRow } from './DriverPapers';
+import { FormBox } from './FieldPick';
+import { FieldCopyBar } from '../common/FieldCopyBar';
+import { useFieldSelection } from '../../hooks/useFieldSelection';
+import type { CopyEntry } from '../../utils/fieldCopy';
 import { Field, Footer, INPUT, LockHint, NO_PHOTO_CHANGE, savePhoto } from './FleetModals';
 import {
   VEHICLE_DOCUMENTS, VEHICLE_STATUSES, type FleetTrailer, type FleetVehicle, type TrailerStatus, type VehicleDocument,
 } from '../../types';
-import { LOCK_FREE_STATUSES, apiError, expiredPapers, formatStampShort, isRunning } from './fleetUtils';
+import { LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, formatStampShort, isRunning } from './fleetUtils';
 
 /** The company runs one kind of trailer: a new one starts as that (still editable). */
 const DEFAULT_TRAILER_TYPE = "Sàn 40'";
@@ -58,6 +62,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<PhotoChoice>(NO_PHOTO_CHANGE);
   const [papers, setPapers] = useState<TrailerPaperChoices>(NO_TRAILER_PAPERS);
+  const selection = useFieldSelection(isOpen ? trailer?.id ?? 'new' : null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -127,28 +132,38 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
 
   const tractors = vehicles.filter((v) => v.status !== 'inactive' || v.id === current?.id);
   const paperTitle = { registration: D.inspection, insurance: D.insuranceDoc, ownership: D.ownership };
+
+  // editing: boxes are picked and copied together like the booking details (what is typed now is what is copied)
+  const pick = trailer ? selection : null;
+  const entries: CopyEntry[] = [
+    { key: 'plate', label: f.plate, value: form.plate },
+    { key: 'trailer_type', label: f.type, value: form.trailer_type },
+    { key: 'payload', label: f.payload, value: form.payload },
+    { key: 'status', label: f.status, value: t.fleet.trailer.status[status] },
+    { key: 'vehicle', label: f.vehicle, value: inactive ? '' : picked?.plate || '' },
+    { key: 'ownership_expiry', label: f.ownership, value: formatIsoDate(form.ownership_expiry) },
+    { key: 'chassis_no', label: f.chassis, value: form.chassis_no },
+    { key: 'year', label: f.year, value: form.year },
+    { key: 'registration_expiry', label: f.registration, value: formatIsoDate(form.registration_expiry) },
+    { key: 'insurance_expiry', label: f.insurance, value: formatIsoDate(form.insurance_expiry) },
+    { key: 'note', label: f.note, value: form.note },
+  ];
+  const copyOf = (key: string) => entries.find((e) => e.key === key)?.value || '';
+  const box = (key: string, label: string, input: React.ReactElement, extra: { required?: boolean; className?: string } = {}) => (
+    <FormBox id={key} label={label} copyValue={copyOf(key)} picked={pick} {...extra}>{input}</FormBox>
+  );
+
   const facts: Record<TrailerPaper, React.ReactNode> = {
     ownership: (
       <>
-        <FieldInputBox label={f.ownership}>
-          <input type="date" value={form.ownership_expiry} onChange={set('ownership_expiry')} />
-        </FieldInputBox>
-        <FieldInputBox label={f.chassis}><input value={form.chassis_no} onChange={set('chassis_no')} /></FieldInputBox>
-        <FieldInputBox label={f.year}>
-          <input value={form.year} onChange={set('year')} placeholder={f.yearPh} inputMode="numeric" maxLength={4} />
-        </FieldInputBox>
+        {box('ownership_expiry', f.ownership, <input type="date" value={form.ownership_expiry} onChange={set('ownership_expiry')} />)}
+        {box('chassis_no', f.chassis, <input value={form.chassis_no} onChange={set('chassis_no')} />)}
+        {box('year', f.year, <input value={form.year} onChange={set('year')} placeholder={f.yearPh} inputMode="numeric" maxLength={4} />)}
       </>
     ),
-    registration: (
-      <FieldInputBox label={f.registration}>
-        <input type="date" value={form.registration_expiry} onChange={set('registration_expiry')} />
-      </FieldInputBox>
-    ),
-    insurance: (
-      <FieldInputBox label={f.insurance}>
-        <input type="date" value={form.insurance_expiry} onChange={set('insurance_expiry')} />
-      </FieldInputBox>
-    ),
+    registration: box('registration_expiry', f.registration,
+      <input type="date" value={form.registration_expiry} onChange={set('registration_expiry')} />),
+    insurance: box('insurance_expiry', f.insurance, <input type="date" value={form.insurance_expiry} onChange={set('insurance_expiry')} />),
   };
 
   return (
@@ -157,25 +172,18 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
         <div className="flex items-start gap-4">
           <PhotoPicker kind="trailer" name={form.plate} current={trailer?.photo || ''} value={photo} onChange={setPhoto} onError={setError} stacked />
           <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+            {box('plate', f.plate, <input autoFocus value={form.plate} onChange={set('plate')} placeholder={f.platePh} />,
+              { required: true, className: 'col-span-2' })}
+            {box('trailer_type', f.type, <input value={form.trailer_type} onChange={set('trailer_type')} placeholder={f.typePh} />)}
+            {box('payload', f.payload, <input value={form.payload} onChange={set('payload')} placeholder={f.payloadPh} />)}
             <div className="col-span-2">
-              <FieldInputBox label={f.plate} required>
-                <input autoFocus value={form.plate} onChange={set('plate')} placeholder={f.platePh} />
-              </FieldInputBox>
-            </div>
-            <FieldInputBox label={f.type}>
-              <input value={form.trailer_type} onChange={set('trailer_type')} placeholder={f.typePh} />
-            </FieldInputBox>
-            <FieldInputBox label={f.payload}>
-              <input value={form.payload} onChange={set('payload')} placeholder={f.payloadPh} />
-            </FieldInputBox>
-            <div className="col-span-2">
-              <FieldInputBox label={f.status}>
+              {box('status', f.status, (
                 <select value={status} onChange={set('status')}>
                   {VEHICLE_STATUSES.map((s) => (
                     <option key={s} value={s} disabled={locked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.trailer.status[s]}</option>
                   ))}
                 </select>
-              </FieldInputBox>
+              ))}
               {locked && <LockHint papers={expired} />}
               {!locked && !!trailer?.status_forced && status === 'not_ready' && (
                 <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300">{t.fleet.lock.renewed}</p>
@@ -183,6 +191,13 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
             </div>
           </div>
         </div>
+
+        {pick && (
+          <div className="space-y-1.5">
+            <FieldCopyBar entries={entries} {...pick.barProps} />
+            <p className="text-[11px] text-slate-400">{D.editHint}</p>
+          </div>
+        )}
 
         {/* which tractor pulls it: shown, and changed here */}
         <DriverSection title={f.connection}>
@@ -203,7 +218,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
               )}
             </div>
             <div className="space-y-1">
-              <FieldInputBox label={f.vehicle}>
+              {box('vehicle', f.vehicle, (
                 <select value={inactive ? '' : vehicleId} onChange={(e) => setVehicleId(e.target.value)} disabled={inactive}>
                   <option value="">{f.noVehicle}</option>
                   {tractors.map((v) => (
@@ -213,7 +228,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
                     </option>
                   ))}
                 </select>
-              </FieldInputBox>
+              ))}
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {inactive ? f.inactiveHint : replacing ? tf(t.fleet.trailer.hitchModal.replaceWarn, { plate: replacing })
                   : trailer ? f.changeHint : ''}
@@ -239,9 +254,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
         </DriverSection>
 
         <DriverSection title={D.other}>
-          <FieldInputBox label={f.note}>
-            <textarea rows={2} value={form.note} onChange={set('note')} />
-          </FieldInputBox>
+          {box('note', f.note, <textarea rows={2} value={form.note} onChange={set('note')} />)}
         </DriverSection>
 
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}

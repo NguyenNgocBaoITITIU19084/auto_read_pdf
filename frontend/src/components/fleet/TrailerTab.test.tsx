@@ -253,3 +253,21 @@ describe('TrailerTab paper lock', () => {
       status: 'not_ready', insurance_expiry: '2099-01-01' })));
   });
 });
+
+describe('TrailerTab form copy', () => {
+  it('editing a trailer: picks boxes and copies them together, the tractor included', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const on = { id: 1, plate: '51C-1', status: 'active' as const, photo: '', driver_name: 'An', since: '', reason: '' };
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1', { chassis_no: 'RL4-1', vehicle: on })]);
+    render(<TrailerTab />);
+    fireEvent.contextMenu(await screen.findByTestId('trailer-1'), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByRole('menuitem', { name: translations.vi.fleet.menu.edit }));
+    fireEvent.click(await screen.findByTestId('pick-plate'));
+    fireEvent.click(screen.getByTestId('pick-chassis_no'));
+    fireEvent.click(screen.getByTestId('pick-vehicle'));
+    fireEvent.click(screen.getByText(translations.vi.common.fieldCopy.copyLabeled));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+      `${R.form.plate}: 51R-1\n${R.form.vehicle}: 51C-1\n${R.form.chassis}: RL4-1`));
+  });
+});

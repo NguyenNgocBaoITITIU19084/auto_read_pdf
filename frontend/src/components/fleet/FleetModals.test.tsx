@@ -120,3 +120,29 @@ describe('VehicleFormModal papers', () => {
     expect(updateVehicle).toHaveBeenCalledWith(9, expect.objectContaining({ ownership_expiry: '2030-05-05' }));
   });
 });
+
+describe('VehicleFormModal copy', () => {
+  it('editing: picks boxes and copies them together like the booking details, or one at once', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const VF = translations.vi.fleet.vehicleForm;
+    render(<VehicleFormModal isOpen vehicle={{ ...truck, vehicle_type: 'Hino', registration_expiry: '2027-03-10' }}
+      onClose={() => {}} onSaved={() => {}} />);
+    fireEvent.change(screen.getByLabelText(VF.type), { target: { value: 'Hino 700' } });   // what is typed now is copied
+    fireEvent.click(screen.getByTestId('pick-plate'));
+    fireEvent.click(screen.getByTestId('pick-vehicle_type'));
+    fireEvent.click(screen.getByTestId('pick-registration_expiry'));
+    expect(screen.getByTestId('field-plate')).toHaveAttribute('data-selected', 'true');
+    fireEvent.click(screen.getByText(translations.vi.common.fieldCopy.copyLabeled));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+      `${VF.plate}: 51C-1\n${VF.type}: Hino 700\n${VF.registration}: 10/03/2027`));
+    fireEvent.click(screen.getByLabelText(`${translations.vi.common.copy} ${VF.registration}`));
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('10/03/2027'));
+  });
+
+  it('adding: plain boxes, nothing to pick', () => {
+    render(<VehicleFormModal isOpen vehicle={null} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.queryByTestId('pick-plate')).not.toBeInTheDocument();
+    expect(screen.queryByText(translations.vi.common.fieldCopy.copyLabeled)).not.toBeInTheDocument();
+  });
+});
