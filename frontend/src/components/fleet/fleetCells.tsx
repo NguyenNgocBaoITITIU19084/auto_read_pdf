@@ -41,6 +41,18 @@ export const Chip: React.FC<{ tone: string; children: React.ReactNode; title?: s
 
 export const TH = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 whitespace-nowrap';
 export const TD = 'px-4 py-3 align-middle';
+
+/** The row number (STT) column, right after the checkbox: counted across pages, as the booking table does. */
+export const SttTh: React.FC<{ label: string }> = ({ label }) => (
+  <th className="w-12 px-2 py-2.5 text-center text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 whitespace-nowrap">
+    {label}
+  </th>
+);
+export const SttTd: React.FC<{ n: number }> = ({ n }) => (
+  <td data-testid="stt" className="w-12 px-2 py-3 align-middle text-center tabular-nums text-xs font-semibold text-slate-400 dark:text-slate-500">{n}</td>
+);
+/** The STT of the `i`-th row of page `page` (1-based) of `pageSize` rows. */
+export const sttOf = (page: number, pageSize: number, i: number) => (page - 1) * pageSize + i + 1;
 export const MUTED = 'text-xs text-slate-500 dark:text-slate-400';
 export const ROW = 'cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500';
 

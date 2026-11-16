@@ -67,6 +67,7 @@ describe('TrailerTab', () => {
     render(<TrailerTab />);
     const row = await screen.findByTestId('trailer-1');
     expect(within(row).getByText('51C-1')).toBeInTheDocument();
+    expect(screen.getAllByTestId('stt').map((c) => c.textContent)).toEqual(['1', '2']);
     expect(within(row).getByText('Tài xế: An')).toBeInTheDocument();
     expect(within(screen.getByTestId('trailer-2')).getByText(R.noVehicle)).toBeInTheDocument();
 

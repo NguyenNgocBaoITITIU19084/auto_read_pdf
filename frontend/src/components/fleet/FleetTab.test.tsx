@@ -418,8 +418,12 @@ describe('FleetTab sort, column filters and pages', () => {
     render(<FleetTab />);
     await screen.findByTestId('vehicle-1');
     expect(screen.getAllByTestId(/^vehicle-/)).toHaveLength(25);
+    expect(screen.getByRole('columnheader', { name: translations.vi.common.stt })).toBeInTheDocument();
+    expect(within(screen.getByTestId('vehicle-1')).getByTestId('stt')).toHaveTextContent('1');
     fireEvent.click(screen.getByRole('button', { name: '2' }));
     expect(plates()).toEqual(['51C-026', '51C-027', '51C-028', '51C-029', '51C-030']);
+    // the STT counts on across pages
+    expect(within(screen.getByTestId('vehicle-26')).getByTestId('stt')).toHaveTextContent('26');
     fireEvent.change(screen.getByLabelText(f.screens.vehicles.search), { target: { value: '51C-00' } });
     expect(plates()).toEqual(['51C-001', '51C-002', '51C-003', '51C-004', '51C-005', '51C-006', '51C-007', '51C-008', '51C-009']);
   });

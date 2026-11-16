@@ -34,7 +34,7 @@ import { FleetAvatar, PhotoLightbox } from './FleetPhoto';
 import { TrailerFormModal, TrailerHitchModal } from './TrailerModals';
 import { PAGE_SIZE_OPTIONS, applyColumnFilters, sortRows, usePageRows, usePaging, valueCounts } from './fleetTable';
 import {
-  DOC_STATES, DateCell, DocsCell, MUTED, NoteIcon, ROW, StatusBadge, TD, TH, VEHICLE_TONE, docState, docWarnings, fromControl,
+  DOC_STATES, DateCell, DocsCell, MUTED, NoteIcon, ROW, StatusBadge, SttTd, SttTh, TD, TH, VEHICLE_TONE, sttOf, docState, docWarnings, fromControl,
   soonestDays, type DocState,
 } from './fleetCells';
 import {
@@ -506,6 +506,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     select?: React.ReactNode) => (
     <tr>
       {select}
+      <SttTh label={t.common.stt} />
       {visible(settings, table).map((c) => {
         const fl = table[c.key].filter;
         return (
@@ -546,13 +547,14 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
           <SelectHeader checked={sel.isPageAllSelected(pageRows)} partial={sel.isPagePartiallySelected(pageRows)} disabled={pageRows.length === 0}
             onChange={() => sel.selectPage(pageRows, !sel.isPageAllSelected(pageRows))} />
         ))}</thead>
-        {pageRows.length === 0 && emptyRow(visible(listColumns, specs).length + 2,
+        {pageRows.length === 0 && emptyRow(visible(listColumns, specs).length + 3,
           filter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {pageRows.map((r) => (
+          {pageRows.map((r, i) => (
             <tr key={r.id} data-testid={`trailer-${r.id}`} {...rowEvents(r)}
               className={`${ROW} ${rowTone(sel.isSelected(r.id), menu.state?.row === r.id)} ${r.status === 'inactive' ? 'opacity-60' : ''}`}>
               <SelectCell checked={sel.isSelected(r.id)} label={tf(B.rowLabel, { name: r.plate })} onToggle={(shift) => sel.toggle(r.id, shift)} />
+              <SttTd n={sttOf(paging.page, paging.pageSize, i)} />
               {cells(listColumns, specs, r)}
               <td className={`${TD} text-right whitespace-nowrap w-0`}>
                 <div className="inline-flex items-center gap-1">
@@ -589,11 +591,14 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     return (
       <table className="min-w-full text-sm">
         <thead className={THEAD}>{headerRow(historyColumns, historySpecs, historySort, false)}</thead>
-        {history.items.length === 0 && emptyRow(visible(historyColumns, historySpecs).length,
+        {history.items.length === 0 && emptyRow(visible(historyColumns, historySpecs).length + 1,
           historyQuery || colFilterCount ? f.filters.empty : R.empty.history)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {history.items.map((h) => (
-            <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">{cells(historyColumns, historySpecs, h)}</tr>
+          {history.items.map((h, i) => (
+            <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+              <SttTd n={sttOf(historyPaging.page, historyPaging.pageSize, i)} />
+              {cells(historyColumns, historySpecs, h)}
+            </tr>
           ))}
         </tbody>
       </table>

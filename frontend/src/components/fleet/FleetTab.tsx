@@ -35,7 +35,8 @@ import { FleetAvatar, PhotoLightbox } from './FleetPhoto';
 import { RowContextMenu, useRowContextMenu, type MenuGroup } from '../common/RowContextMenu';
 import { FleetDetailModal, type DetailAction, type FleetDetailTarget } from './FleetDetailModal';
 import {
-  Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, TD, TEMP_CHIP, TH, TRUCK_CHIP, VEHICLE_TONE,
+  Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, SttTd, SttTh, TD, TEMP_CHIP, TH, TRUCK_CHIP,
+  VEHICLE_TONE, sttOf,
   docState, docWarnings, fromControl, soonestDays, type DocState,
 } from './fleetCells';
 import {
@@ -895,6 +896,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     select?: React.ReactNode) => (
     <tr>
       {select}
+      <SttTh label={t.common.stt} />
       {settings.columns.filter((c) => c.visible && specs[c.key]).map((c) =>
         header(c.key, c.label, sorter, specs[c.key].filter, { width: settings.columnWidths[c.key], onResize: settings.startResize }))}
       {actions && <th className={TH}><span className="sr-only">{f.cols.actions}</span></th>}
@@ -919,16 +921,17 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     return (
       <table className="min-w-full text-sm">
         <thead className={THEAD}>{headerRow(vehicleColumns, vehicleSpecs, vehicleSort, true, selectHeader(vehicleSel, pageVehicles))}</thead>
-        {pageVehicles.length === 0 && emptyRow(visibleCount(vehicleColumns, vehicleSpecs) + 2,
+        {pageVehicles.length === 0 && emptyRow(visibleCount(vehicleColumns, vehicleSpecs) + 3,
           vehicleFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {pageVehicles.map((v) => {
+          {pageVehicles.map((v, i) => {
             const down = v.status === 'broken' || v.status === 'maintenance';
             return (
               <tr key={v.id} data-testid={`vehicle-${v.id}`} {...rowEvents({ kind: 'vehicle', id: v.id })}
                 className={`${ROW} ${rowTone(vehicleSel.isSelected(v.id), menu.state?.row.kind === 'vehicle' && menu.state.row.id === v.id)} ${v.status === 'inactive' ? 'opacity-60' : ''}`}>
                 <SelectCell checked={vehicleSel.isSelected(v.id)} label={tf(B.rowLabel, { name: v.plate })}
                   onToggle={(shift) => vehicleSel.toggle(v.id, shift)} />
+                <SttTd n={sttOf(vehiclePaging.page, vehiclePaging.pageSize, i)} />
                 {cells(vehicleColumns, vehicleSpecs, v)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
@@ -961,16 +964,17 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     return (
       <table className="min-w-full text-sm">
         <thead className={THEAD}>{headerRow(driverColumns, driverSpecs, driverSort, true, selectHeader(driverSel, pageDrivers))}</thead>
-        {pageDrivers.length === 0 && emptyRow(visibleCount(driverColumns, driverSpecs) + 2,
+        {pageDrivers.length === 0 && emptyRow(visibleCount(driverColumns, driverSpecs) + 3,
           driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {pageDrivers.map((d) => {
+          {pageDrivers.map((d, i) => {
             const back = canReturnHome(d, allVs);
             return (
               <tr key={d.id} data-testid={`driver-${d.id}`} {...rowEvents({ kind: 'driver', id: d.id })}
                 className={`${ROW} ${rowTone(driverSel.isSelected(d.id), menu.state?.row.kind === 'driver' && menu.state.row.id === d.id)} ${d.status === 'left' ? 'opacity-60' : ''}`}>
                 <SelectCell checked={driverSel.isSelected(d.id)} label={tf(B.rowLabel, { name: d.name })}
                   onToggle={(shift) => driverSel.toggle(d.id, shift)} />
+                <SttTd n={sttOf(driverPaging.page, driverPaging.pageSize, i)} />
                 {cells(driverColumns, driverSpecs, d)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
@@ -1001,11 +1005,14 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     return (
       <table className="min-w-full text-sm">
         <thead className={THEAD}>{headerRow(historyColumns, historySpecs, historySort, false)}</thead>
-        {history.items.length === 0 && emptyRow(visibleCount(historyColumns, historySpecs),
+        {history.items.length === 0 && emptyRow(visibleCount(historyColumns, historySpecs) + 1,
           historyQuery || colFilterCount ? f.filters.empty : f.empty.history)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-          {history.items.map((h) => (
-            <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">{cells(historyColumns, historySpecs, h)}</tr>
+          {history.items.map((h, i) => (
+            <tr key={h.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40">
+              <SttTd n={sttOf(historyPaging.page, historyPaging.pageSize, i)} />
+              {cells(historyColumns, historySpecs, h)}
+            </tr>
           ))}
         </tbody>
       </table>
