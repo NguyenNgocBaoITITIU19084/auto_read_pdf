@@ -134,7 +134,8 @@ export const DateCell: React.FC<{ iso: string; today: string; muted?: boolean }>
 export const FLEET_NOTE_MAX = 1000;
 
 /** The note mark next to a row's name, like the booking table's: hovering it shows the note in a card; with no note
- *  and `onSave` given, a faint mark whose card is a quick form to add one (Ctrl/⌘ + Enter saves, Esc closes). */
+ *  and `onSave` given, a faint mark whose card is a quick form to add one (Ctrl/⌘ + Enter saves, Esc closes). With
+ *  `onSave`, an existing note can be edited from its card too ("Sửa"; saved empty, it is cleared). */
 export const NoteIcon: React.FC<{ note: string; name?: string; onSave?: (note: string) => Promise<void> }> = ({ note, name = '', onSave }) => {
   const { t } = useApp();
   const text = note.trim();
@@ -142,9 +143,9 @@ export const NoteIcon: React.FC<{ note: string; name?: string; onSave?: (note: s
   const L = t.fleet.list;
   return (
     <NoteHover note={text} title={text ? t.fleet.cols.note : L.noteAdd} delay={120} className="inline-flex align-middle ml-1.5"
-      onSave={onSave} maxLength={FLEET_NOTE_MAX} addLabels={{
+      onSave={onSave} maxLength={FLEET_NOTE_MAX} allowEdit addLabels={{
         title: L.noteAdd, placeholder: tf(L.notePh, { name }), hint: t.booking.noteQuick.hint,
-        save: t.booking.form.save, saving: t.booking.form.saving,
+        save: t.booking.form.save, saving: t.booking.form.saving, edit: L.noteEdit, editTitle: L.noteEditTitle,
       }}>
       {text ? (
         <StickyNote data-testid="note-icon" aria-label={tf(L.noteTitle, { note: text })}

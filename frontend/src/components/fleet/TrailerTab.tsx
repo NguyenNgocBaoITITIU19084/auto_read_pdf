@@ -151,7 +151,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     } catch (err) {
       throw apiError(err, f.toast.error);
     }
-    addToast(tf(f.list.noteSaved, { name: r.plate }), 'success');
+    addToast(tf(note.trim() ? f.list.noteSaved : f.list.noteCleared, { name: r.plate }), 'success');
     reload();
   };
 

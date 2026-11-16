@@ -434,7 +434,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     } catch (err) {
       throw apiError(err, f.toast.error);
     }
-    addToast(tf(L.noteSaved, { name }), 'success');
+    addToast(tf(note.trim() ? L.noteSaved : L.noteCleared, { name }), 'success');
     reload();
   };
 

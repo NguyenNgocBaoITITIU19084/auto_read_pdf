@@ -76,3 +76,51 @@ describe('NoteHover', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+describe('NoteHover editing an existing note', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  const labels = { title: 'Thêm ghi chú', placeholder: 'Nhập ghi chú', save: 'Lưu', saving: 'Đang lưu', hint: '', edit: 'Sửa',
+    editTitle: 'Sửa ghi chú' };
+
+  it('a booking (no allowEdit): the note card has no edit button and lets the pointer through', () => {
+    render(<NoteHover note="Gọi khách" title="Ghi chú" onSave={vi.fn()} addLabels={labels}><span>B1</span></NoteHover>);
+    fireEvent.mouseEnter(screen.getByText('B1').parentElement!);
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(screen.getByRole('tooltip')).toHaveClass('pointer-events-none');
+    expect(screen.queryByRole('button', { name: /Sửa/ })).toBeNull();
+  });
+
+  it('with allowEdit: "Sửa" opens the note filled in, saves the change, and an empty save clears it', async () => {
+    vi.useRealTimers();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(<NoteHover note="Chở sắt thép, cọc" title="Ghi chú" onSave={onSave} addLabels={labels} allowEdit delay={0}>
+      <span>T1</span></NoteHover>);
+    fireEvent.mouseEnter(screen.getByText('T1').parentElement!);
+    const card = await screen.findByRole('tooltip');
+    expect(card).not.toHaveClass('pointer-events-none');
+    fireEvent.click(screen.getByRole('button', { name: /Sửa/ }));
+    const form = screen.getByRole('dialog', { name: 'Sửa ghi chú' });
+    const box = form.querySelector('textarea')!;
+    expect(box).toHaveValue('Chở sắt thép, cọc');
+    // leaving the card while editing keeps it open
+    fireEvent.mouseLeave(screen.getByText('T1').parentElement!);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: 'Chở sắt thép, cọc · xong 18/11' } });
+    fireEvent.keyDown(box, { key: 'Enter', metaKey: true });
+    await act(async () => {});
+    expect(onSave).toHaveBeenLastCalledWith('Chở sắt thép, cọc · xong 18/11');
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    rerender(<NoteHover note="Chở sắt thép, cọc · xong 18/11" title="Ghi chú" onSave={onSave} addLabels={labels} allowEdit delay={0}>
+      <span>T1</span></NoteHover>);
+    fireEvent.mouseEnter(screen.getByText('T1').parentElement!);
+    await screen.findByRole('tooltip');
+    fireEvent.click(screen.getByRole('button', { name: /Sửa/ }));
+    fireEvent.change(screen.getByRole('dialog').querySelector('textarea')!, { target: { value: '   ' } });
+    fireEvent.click(screen.getByText('Lưu'));
+    await act(async () => {});
+    expect(onSave).toHaveBeenLastCalledWith('');
+  });
+});

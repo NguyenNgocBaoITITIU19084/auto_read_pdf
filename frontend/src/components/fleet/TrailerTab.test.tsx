@@ -264,9 +264,9 @@ describe('TrailerTab form copy', () => {
     render(<TrailerTab />);
     fireEvent.contextMenu(await screen.findByTestId('trailer-1'), { clientX: 10, clientY: 10 });
     fireEvent.click(screen.getByRole('menuitem', { name: translations.vi.fleet.menu.edit }));
-    fireEvent.click(await screen.findByTestId('pick-plate'));
-    fireEvent.click(screen.getByTestId('pick-chassis_no'));
-    fireEvent.click(screen.getByTestId('pick-vehicle'));
+    fireEvent.click(await screen.findByTestId('field-plate'));
+    fireEvent.click(screen.getByTestId('field-chassis_no'));
+    fireEvent.click(screen.getByTestId('field-vehicle'));
     fireEvent.click(screen.getByText(translations.vi.common.fieldCopy.copyLabeled));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(
       `${R.form.plate}: 51R-1\n${R.form.vehicle}: 51C-1\n${R.form.chassis}: RL4-1`));

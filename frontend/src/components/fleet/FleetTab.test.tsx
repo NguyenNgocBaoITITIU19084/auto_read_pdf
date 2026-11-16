@@ -598,21 +598,22 @@ describe('FleetTab driver details', () => {
     const detail = await open();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    fireEvent.click(screen.getByTestId('pick-name'));
-    fireEvent.click(screen.getByTestId('pick-id_number'));
-    fireEvent.click(screen.getByTestId('pick-vehicle'));
-    expect(screen.getByTestId('pick-name')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByTestId('driver-field-name'));            // a click on the box picks it, like a booking card
+    fireEvent.click(screen.getByTestId('driver-field-id_number'));
+    fireEvent.click(screen.getByTestId('driver-current-vehicle'));
+    expect(screen.getByTestId('driver-field-name')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByTestId('driver-field-name')).toHaveAttribute('data-selected', 'true');
+    expect(within(screen.getByTestId('driver-field-name')).queryByRole('checkbox')).toBeNull();   // no separate tick
     fireEvent.click(within(detail).getByText(translations.vi.common.fieldCopy.copyLabeled));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${F.name}: An\n${D.currentVehicle}: 51C-1\n${F.idNumber}: 079091006789`));
-    // one more click unpicks it at once, even right after (no double-click guessing)
-    fireEvent.click(screen.getByTestId('pick-name'), { detail: 2 });
-    expect(screen.getByTestId('pick-name')).toHaveAttribute('aria-checked', 'false');
-    fireEvent.click(screen.getByTestId('pick-name'), { detail: 3 });
-    expect(screen.getByTestId('pick-name')).toHaveAttribute('aria-checked', 'true');
+    // one more click unpicks it; Space on the box picks it, as on a booking card
+    fireEvent.click(screen.getByTestId('driver-field-name'));
+    expect(screen.getByTestId('driver-field-name')).toHaveAttribute('aria-checked', 'false');
+    fireEvent.keyDown(screen.getByTestId('driver-field-name'), { key: ' ' });
+    expect(screen.getByTestId('driver-field-name')).toHaveAttribute('aria-checked', 'true');
     // a click in the text edits it, it does not pick the box
     fireEvent.click(within(detail).getByLabelText(F.licenseClass));
-    expect(screen.getByTestId('pick-license_class')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('driver-field-license_class')).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(within(screen.getByTestId('driver-field-license_no')).getByLabelText(`${translations.vi.common.copy} ${F.licenseNo}`));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('790123'));
   });
@@ -664,18 +665,18 @@ describe('FleetTab truck details', () => {
     fireEvent.keyDown(await screen.findByTestId('vehicle-1'), { key: 'Enter' });
     const detail = screen.getByTestId('fleet-detail');
     expect(await within(screen.getByTestId('field-trailer')).findByText("Sàn 40' · 32 tấn")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('pick-trailer'));
+    fireEvent.click(screen.getByTestId('field-trailer'));
     fireEvent.click(screen.getByTestId('field-plate'));                   // a click on the box picks it, like a booking
-    fireEvent.click(screen.getByTestId('pick-driver'));
+    fireEvent.click(screen.getByTestId('field-driver'));
     expect(screen.getByTestId('field-plate')).toHaveAttribute('data-selected', 'true');
     fireEvent.click(within(detail).getByText(translations.vi.common.fieldCopy.copyLabeled));
     const VF = f.vehicleForm;
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${VF.plate}: 51C-1\n${f.detail.driving}: An – 0909\n${translations.vi.tabs.trailers}: 51R-1 – Sàn 40' · 32 tấn`));
-    fireEvent.click(screen.getByTestId('pick-plate'));                    // one more click unpicks it
-    expect(screen.getByTestId('pick-plate')).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(screen.getByTestId('field-plate'));                    // one more click unpicks it
+    expect(screen.getByTestId('field-plate')).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(within(screen.getByTestId('field-type')).getByLabelText(`${translations.vi.common.copy} ${VF.type}`));
     await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('Hino'));
-    expect(screen.queryByTestId('pick-home')).not.toBeInTheDocument();    // the home driver box gave way to the trailer
+    expect(screen.queryByTestId('field-home')).not.toBeInTheDocument();    // the home driver box gave way to the trailer
     expect(within(screen.getByTestId('field-trailer')).getByText('51R-1')).toBeInTheDocument();
   });
 
@@ -976,5 +977,25 @@ describe('FleetTab quick notes', () => {
     fireEvent.click(within(form).getByText(translations.vi.booking.form.save));
     expect(await within(form).findByText('Không tìm thấy tài xế')).toBeInTheDocument();
     expect(api.updateFleetDriverApi).toHaveBeenCalledWith(1, { note: 'Nghỉ thứ 7' });
+  });
+});
+
+describe('FleetTab editing a note', () => {
+  it('the note card of a truck has "Sửa": it saves the changed note from the table', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(3, '51D-333.44', { category: 'truck', note: 'Chở sắt thép, cọc' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.updateFleetVehicleApi.mockResolvedValue({});
+    render(<FleetTab screen="trucks" />);
+    const row = await screen.findByTestId('vehicle-3');
+    fireEvent.mouseEnter(within(row).getByTestId('note-icon').parentElement!);
+    await screen.findByRole('tooltip');
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(f.list.noteEdit) }));
+    const form = screen.getByRole('dialog', { name: f.list.noteEditTitle });
+    const box = within(form).getByRole('textbox');
+    expect(box).toHaveValue('Chở sắt thép, cọc');
+    fireEvent.change(box, { target: { value: 'Chở sắt thép' } });
+    fireEvent.click(within(form).getByText(translations.vi.booking.form.save));
+    await waitFor(() => expect(api.updateFleetVehicleApi).toHaveBeenCalledWith(3, { note: 'Chở sắt thép' }));
+    expect(addToast).toHaveBeenCalledWith('Đã lưu ghi chú cho 51D-333.44', 'success');
   });
 });

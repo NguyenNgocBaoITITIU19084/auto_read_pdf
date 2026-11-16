@@ -181,7 +181,6 @@ const VehicleDetailModal: React.FC<{
 
         <div className="space-y-1.5">
           <FieldCopyBar entries={entries} {...picked.barProps} />
-          <p className="text-[11px] text-slate-400">{D.pickHint}</p>
         </div>
 
         <DriverSection title={isTruck ? D.crewTruck : D.crew}>

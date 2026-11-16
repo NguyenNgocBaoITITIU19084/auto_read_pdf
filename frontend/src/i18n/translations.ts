@@ -1476,6 +1476,7 @@ export const translations = {
         ownerAway: "Xe của {name} · đang lái tạm {plate}", owner: "Xe của {name}", ownerStatus: "Xe của {name} ({status})",
         noteTitle: "Ghi chú: {note}",
         noteAdd: "Thêm ghi chú", notePh: "Nhập ghi chú cho {name}...", noteSaved: "Đã lưu ghi chú cho {name}",
+        noteEdit: "Sửa", noteEditTitle: "Sửa ghi chú", noteCleared: "Đã xóa ghi chú của {name}",
       },
       filters: {
         all: "Tất cả", running: "Đang chạy", down: "Hư / bảo dưỡng", free: "Xe trống", expiring: "Giấy tờ sắp hết hạn",
@@ -3232,6 +3233,7 @@ export const translations = {
         ownerAway: "{name}'s truck · on temporary {plate}", owner: "{name}'s truck", ownerStatus: "{name}'s truck ({status})",
         noteTitle: "Note: {note}",
         noteAdd: "Add note", notePh: "Type a note for {name}...", noteSaved: "Note saved for {name}",
+        noteEdit: "Edit", noteEditTitle: "Edit note", noteCleared: "Note removed for {name}",
       },
       filters: {
         all: "All", running: "Running", down: "Broken / maintenance", free: "Free trucks", expiring: "Documents expiring",

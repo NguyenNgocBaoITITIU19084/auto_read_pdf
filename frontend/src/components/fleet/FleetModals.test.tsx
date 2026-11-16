@@ -129,9 +129,9 @@ describe('VehicleFormModal copy', () => {
     render(<VehicleFormModal isOpen vehicle={{ ...truck, vehicle_type: 'Hino', registration_expiry: '2027-03-10' }}
       onClose={() => {}} onSaved={() => {}} />);
     fireEvent.change(screen.getByLabelText(VF.type), { target: { value: 'Hino 700' } });   // what is typed now is copied
-    fireEvent.click(screen.getByTestId('pick-plate'));
-    fireEvent.click(screen.getByTestId('pick-vehicle_type'));
-    fireEvent.click(screen.getByTestId('pick-registration_expiry'));
+    fireEvent.click(screen.getByTestId('field-plate'));
+    fireEvent.click(screen.getByTestId('field-vehicle_type'));
+    fireEvent.click(screen.getByTestId('field-registration_expiry'));
     expect(screen.getByTestId('field-plate')).toHaveAttribute('data-selected', 'true');
     fireEvent.click(screen.getByText(translations.vi.common.fieldCopy.copyLabeled));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(
@@ -142,7 +142,7 @@ describe('VehicleFormModal copy', () => {
 
   it('adding: plain boxes, nothing to pick', () => {
     render(<VehicleFormModal isOpen vehicle={null} onClose={() => {}} onSaved={() => {}} />);
-    expect(screen.queryByTestId('pick-plate')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('field-plate')).not.toBeInTheDocument();
     expect(screen.queryByText(translations.vi.common.fieldCopy.copyLabeled)).not.toBeInTheDocument();
   });
 });
@@ -153,7 +153,7 @@ describe('VehicleFormModal pick by clicking the box', () => {
     const box = screen.getByTestId('field-vehicle_type');
     fireEvent.click(box);
     expect(box).toHaveAttribute('data-selected', 'true');
-    expect(screen.getByTestId('pick-vehicle_type')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('field-vehicle_type')).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(box);
     expect(box).not.toHaveAttribute('data-selected');
     fireEvent.click(screen.getByLabelText(translations.vi.fleet.vehicleForm.type));
