@@ -83,7 +83,7 @@ describe('NoteHover editing an existing note', () => {
   const labels = { title: 'Thêm ghi chú', placeholder: 'Nhập ghi chú', save: 'Lưu', saving: 'Đang lưu', hint: '', edit: 'Sửa',
     editTitle: 'Sửa ghi chú' };
 
-  it('a booking (no allowEdit): the note card has no edit button and lets the pointer through', () => {
+  it('without allowEdit: the note card has no edit button and lets the pointer through', () => {
     render(<NoteHover note="Gọi khách" title="Ghi chú" onSave={vi.fn()} addLabels={labels}><span>B1</span></NoteHover>);
     fireEvent.mouseEnter(screen.getByText('B1').parentElement!);
     act(() => { vi.advanceTimersByTime(300); });

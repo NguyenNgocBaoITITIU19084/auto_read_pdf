@@ -132,7 +132,8 @@ const BookingRow = React.memo(function BookingRow({
 }: BookingRowProps) {
   const note = getBookingNote(booking);
   const saveNote = (text: string) => onSaveNote(booking, text);
-  const noteHoverProps = { note, onSave: saveNote, addLabels: noteAddLabels };
+  // an existing note is edited from its card too ("Sửa"; saved empty, it is removed)
+  const noteHoverProps = { note, onSave: saveNote, addLabels: noteAddLabels, allowEdit: true };
   const eport = String(booking[EPORT_CUTOFF_KEY] || '').trim();
   const overdue = !!booking[OVERDUE_KEY];
   return (
@@ -699,12 +700,14 @@ export const BookingTab: React.FC<BookingTabProps> = ({
     hint: t.booking.noteQuick.hint,
     save: t.booking.form.save,
     saving: t.booking.form.saving,
+    edit: t.booking.noteQuick.edit,
+    editTitle: t.booking.noteQuick.editTitle,
   }), [t]);
 
   const saveBookingNote = useStableCallback(async (booking: Booking, note: string) => {
     try {
       const { item } = await updateBookingApi(booking.id, { [NOTE_KEY]: note } as Partial<Booking>);
-      addToast(t.booking.noteQuick.saved, 'success');
+      addToast(note.trim() ? t.booking.noteQuick.saved : t.booking.noteQuick.cleared, 'success');
       await handleBookingSaved(item, 'edit');
     } catch (e: any) {
       const detail = e?.response?.data?.detail;

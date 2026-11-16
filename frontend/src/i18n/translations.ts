@@ -813,7 +813,10 @@ export const translations = {
         title: "Thêm ghi chú",
         placeholder: "Nhập ghi chú cho booking này...",
         hint: "Ctrl/⌘ + Enter để lưu · Esc để đóng",
-        saved: "Đã lưu ghi chú"
+        saved: "Đã lưu ghi chú",
+        edit: "Sửa",
+        editTitle: "Sửa ghi chú",
+        cleared: "Đã xóa ghi chú"
       },
       form: {
         addButton: "Thêm booking",
@@ -2570,7 +2573,10 @@ export const translations = {
         title: "Add note",
         placeholder: "Type a note for this booking...",
         hint: "Ctrl/⌘ + Enter to save · Esc to close",
-        saved: "Note saved"
+        saved: "Note saved",
+        edit: "Edit",
+        editTitle: "Edit note",
+        cleared: "Note removed"
       },
       form: {
         addButton: "Add booking",

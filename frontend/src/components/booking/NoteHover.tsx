@@ -35,7 +35,7 @@ interface NoteHoverProps {
   /** longest note the quick-add form takes (the booking's by default) */
   maxLength?: number;
   /** An existing note can be edited from its card too (a "Sửa" button turns it into the form, filled in; saving it
-   *  empty clears the note). Off for bookings. */
+   *  empty clears the note). */
   allowEdit?: boolean;
 }
 
