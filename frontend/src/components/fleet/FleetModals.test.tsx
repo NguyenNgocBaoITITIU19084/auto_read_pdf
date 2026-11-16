@@ -14,6 +14,8 @@ const createDriver = vi.fn();
 const uploadDocument = vi.fn();
 const deleteDocument = vi.fn();
 const uploadVehiclePhoto = vi.fn();
+const uploadVehicleDocument = vi.fn();
+const deleteVehicleDocument = vi.fn();
 vi.mock('../../services/api', () => ({
   updateFleetVehicleApi: (...a: unknown[]) => updateVehicle(...a),
   uploadFleetVehiclePhotoApi: (...a: unknown[]) => uploadVehiclePhoto(...a),
@@ -24,6 +26,8 @@ vi.mock('../../services/api', () => ({
   moveDriverTemporaryApi: vi.fn(), setDriverHomeVehicleApi: vi.fn(), setFleetVehicleStatusApi: vi.fn(), unassignDriverApi: vi.fn(),
   fleetPhotoUrl: (n: string) => (n ? `http://api/fleet/photos/${n}` : ''),
   getFleetTrailersApi: async () => [],
+  uploadFleetVehicleDocumentApi: (...a: unknown[]) => uploadVehicleDocument(...a),
+  deleteFleetVehicleDocumentApi: (...a: unknown[]) => deleteVehicleDocument(...a),
 }));
 
 import { DriverFormModal, VehicleFormModal } from './FleetModals';
@@ -90,5 +94,29 @@ describe('DriverFormModal papers', () => {
     expect(uploadDocument).toHaveBeenCalledWith(42, 'id_back', back);
     expect(deleteDocument).not.toHaveBeenCalled();
     await waitFor(() => expect(addToast).toHaveBeenCalledWith(translations.vi.fleet.toast.saved, 'success'));
+  });
+});
+
+describe('VehicleFormModal papers', () => {
+  const D = translations.vi.fleet.detail;
+
+  it('edits like the add form: papers with their dates and scans, saved after the details', async () => {
+    globalThis.URL.createObjectURL = vi.fn(() => 'blob:x');
+    globalThis.URL.revokeObjectURL = vi.fn();
+    uploadVehicleDocument.mockReset().mockResolvedValue({});
+    deleteVehicleDocument.mockReset().mockResolvedValue({});
+    const withScan = { ...truck, insurance_back: 'vehicle_9_insurance_back_0a1b2c3d.jpg', registration_expiry: '2027-01-01' };
+    render(<VehicleFormModal isOpen vehicle={withScan} onClose={() => {}} onSaved={() => {}} />);
+    for (const kind of ['ownership', 'registration', 'insurance']) expect(screen.getByTestId(`paper-${kind}`)).toBeInTheDocument();
+    expect((screen.getByLabelText(translations.vi.fleet.vehicleForm.registration) as HTMLInputElement).value).toBe('2027-01-01');
+    expect(screen.getByAltText(`${D.insuranceDoc} – ${D.back}`)).toHaveAttribute('src', expect.stringContaining('insurance_back'));
+    const scan = new File([new Uint8Array(10)], 'dangky.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByTestId('paper-picker-ownership_front-input'), { target: { files: [scan] } });
+    fireEvent.click(screen.getByRole('button', { name: `${D.removeImage} · ${D.insuranceDoc} – ${D.back}` }));
+    fireEvent.change(screen.getByLabelText(translations.vi.fleet.vehicleForm.ownership), { target: { value: '2030-05-05' } });
+    fireEvent.click(screen.getByText(translations.vi.common.save));
+    await waitFor(() => expect(uploadVehicleDocument).toHaveBeenCalledWith(9, 'ownership_front', scan));
+    expect(deleteVehicleDocument).toHaveBeenCalledWith(9, 'insurance_back');
+    expect(updateVehicle).toHaveBeenCalledWith(9, expect.objectContaining({ ownership_expiry: '2030-05-05' }));
   });
 });

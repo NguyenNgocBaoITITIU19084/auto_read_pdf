@@ -10,12 +10,13 @@ import {
   moveDriverTemporaryApi,
   setDriverHomeVehicleApi, setFleetVehicleStatusApi, unassignDriverApi, updateFleetDriverApi, updateFleetVehicleApi,
   uploadFleetDriverPhotoApi, uploadFleetVehiclePhotoApi, uploadFleetDriverDocumentApi, deleteFleetDriverDocumentApi,
+  uploadFleetVehicleDocumentApi, deleteFleetVehicleDocumentApi,
 } from '../../services/api';
 import { DriverSection, FieldInputBox, NO_PAPER_CHANGES, PaperPicker, PaperRow, type PaperChoices } from './DriverPapers';
 import { PhotoPicker, type PhotoChoice } from './FleetPhoto';
 import {
-  DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleCategory,
-  type VehicleStatus,
+  DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_DOCUMENTS, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle,
+  type VehicleCategory, type VehicleDocument, type VehicleStatus,
 } from '../../types';
 import {
   DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, freeVehicles, isConflict, isRunning, licenseExpired,
@@ -96,6 +97,9 @@ const vehicleOptionLabel = (v: FleetVehicle, t: ReturnType<typeof useApp>['t']) 
 // ---------------------------------------------------------------------------
 // Truck: add / edit
 // ---------------------------------------------------------------------------
+type VehiclePaperChoices = Record<VehicleDocument, PhotoChoice>;
+const NO_VEHICLE_PAPERS = Object.fromEntries(VEHICLE_DOCUMENTS.map((d) => [d, NO_PHOTO_CHANGE])) as VehiclePaperChoices;
+
 interface VehicleFormProps {
   isOpen: boolean;
   vehicle: FleetVehicle | null;
@@ -117,6 +121,8 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<PhotoChoice>(NO_PHOTO_CHANGE);
+  const [papers, setPapers] = useState<VehiclePaperChoices>(NO_VEHICLE_PAPERS);
+  const D = t.fleet.detail;
   // trailers free to pick (or this tractor's own), offered as the trailer plate's suggestions
   const [freeTrailers, setFreeTrailers] = useState<string[]>([]);
 
@@ -137,6 +143,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     if (!isOpen) return;
     setError('');
     setPhoto(NO_PHOTO_CHANGE);
+    setPapers(NO_VEHICLE_PAPERS);
     setForm({
       plate: vehicle?.plate || '', trailer_plate: vehicle?.trailer_plate || '', vehicle_type: vehicle?.vehicle_type || '',
       body_type: vehicle?.body_type || '', payload: vehicle?.payload || '', ownership_expiry: vehicle?.ownership_expiry || '',
@@ -170,8 +177,14 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
       } else {
         id = (await createFleetVehicleApi({ ...data, category: isTruck ? 'truck' : 'tractor' })).id;
       }
-      const photoError = await savePhoto(photo, id, uploadFleetVehiclePhotoApi, deleteFleetVehiclePhotoApi, t.fleet.toast.error, t.fleet.photo.outdatedBackend);
-      if (photoError !== null) addToast(tf(t.fleet.photo.uploadFailed, { error: photoError }), 'error');
+      const errors = [await savePhoto(photo, id, uploadFleetVehiclePhotoApi, deleteFleetVehiclePhotoApi, t.fleet.toast.error,
+        t.fleet.photo.outdatedBackend)];
+      for (const which of VEHICLE_DOCUMENTS) {
+        errors.push(await savePhoto(papers[which], id, (i, file) => uploadFleetVehicleDocumentApi(i, which, file),
+          (i) => deleteFleetVehicleDocumentApi(i, which), t.fleet.toast.error, t.fleet.photo.outdatedBackend));
+      }
+      const failed = errors.filter((x): x is string => x !== null);
+      if (failed.length) addToast(tf(t.fleet.photo.uploadFailed, { error: [...new Set(failed)].join('; ') }), 'error');
       else addToast(t.fleet.toast.saved, 'success');
       onSaved();
       onClose();
@@ -182,68 +195,92 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     }
   };
 
+  const statusValue = formLocked && !vehicle && !LOCK_FREE_STATUSES.includes(form.status) ? 'not_ready' : form.status;
+  const paperTitle = { ownership: D.ownership, registration: D.inspection, insurance: D.insuranceDoc };
+  const expiryField = { ownership: 'ownership_expiry', registration: 'registration_expiry', insurance: 'insurance_expiry' } as const;
+  const expiryLabel = { ownership: t.fleet.vehicleForm.ownership, registration: f.registration, insurance: f.insurance };
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={vehicle ? tf(f.editTitle, { plate: vehicle.plate }) : f.addTitle} maxWidth="max-w-lg">
-      <form onSubmit={submit} className="space-y-3" noValidate>
-        <PhotoPicker kind="vehicle" name={form.plate} current={vehicle?.photo || ''} value={photo} onChange={setPhoto} onError={setError} />
-        <div className="grid grid-cols-2 gap-3">
-          <Field label={f.plate} required>
-            <input autoFocus className={INPUT} value={form.plate} onChange={set('plate')} placeholder={f.platePh} />
-          </Field>
-          {isTruck ? (
-            <Field label={f.type}>
-              <input className={INPUT} value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
-            </Field>
-          ) : (
-            <Field label={f.trailer}>
-              <input className={INPUT} value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
-                list="fleet-free-trailers" title={t.fleet.trailer.formHint} />
-              <datalist id="fleet-free-trailers">
-                {freeTrailers.map((plate) => <option key={plate} value={plate} />)}
-              </datalist>
-            </Field>
-          )}
-          {isTruck ? (
-            <>
-              <Field label={t.fleet.truckForm.body}>
-                <input className={INPUT} value={form.body_type} onChange={set('body_type')} placeholder={t.fleet.truckForm.bodyPh}
-                  list="fleet-truck-bodies" />
-                <datalist id="fleet-truck-bodies">
-                  {t.fleet.truckForm.bodies.map((b) => <option key={b} value={b} />)}
-                </datalist>
-              </Field>
-              <Field label={t.fleet.truckForm.payload}>
-                <input className={INPUT} value={form.payload} onChange={set('payload')} placeholder={t.fleet.truckForm.payloadPh} />
-              </Field>
-            </>
-          ) : (
-            <Field label={f.type}>
-              <input className={INPUT} value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
-            </Field>
-          )}
-          <Field label={f.status}>
-            <select className={INPUT} value={formLocked && !vehicle && !LOCK_FREE_STATUSES.includes(form.status) ? 'not_ready' : form.status}
-              onChange={set('status')} disabled={!!vehicle}>
-              {VEHICLE_STATUSES.map((s) => (
-                <option key={s} value={s} disabled={formLocked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label={t.fleet.vehicleForm.ownership}>
-            <input type="date" className={INPUT} value={form.ownership_expiry} onChange={set('ownership_expiry')} />
-          </Field>
-          <Field label={f.registration}>
-            <input type="date" className={INPUT} value={form.registration_expiry} onChange={set('registration_expiry')} />
-          </Field>
-          <Field label={f.insurance}>
-            <input type="date" className={INPUT} value={form.insurance_expiry} onChange={set('insurance_expiry')} />
-          </Field>
+    <Modal isOpen={isOpen} onClose={onClose} title={vehicle ? tf(f.editTitle, { plate: vehicle.plate }) : f.addTitle} maxWidth="max-w-3xl">
+      {/* laid out like the trailer and driver forms: photo + what it is, then its papers (with scans), then the note */}
+      <form onSubmit={submit} className="space-y-5" noValidate>
+        <div className="flex items-start gap-4">
+          <PhotoPicker kind="vehicle" name={form.plate} current={vehicle?.photo || ''} value={photo} onChange={setPhoto} onError={setError} stacked />
+          <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
+            <div className="col-span-2">
+              <FieldInputBox label={f.plate} required>
+                <input autoFocus value={form.plate} onChange={set('plate')} placeholder={f.platePh} />
+              </FieldInputBox>
+            </div>
+            <FieldInputBox label={f.type}>
+              <input value={form.vehicle_type} onChange={set('vehicle_type')} placeholder={f.typePh} />
+            </FieldInputBox>
+            {isTruck ? (
+              <FieldInputBox label={t.fleet.truckForm.body}>
+                <input value={form.body_type} onChange={set('body_type')} placeholder={t.fleet.truckForm.bodyPh} list="fleet-truck-bodies" />
+              </FieldInputBox>
+            ) : (
+              <FieldInputBox label={f.trailer}>
+                <input value={form.trailer_plate} onChange={set('trailer_plate')} placeholder={f.trailerPh}
+                  list="fleet-free-trailers" title={t.fleet.trailer.formHint} />
+              </FieldInputBox>
+            )}
+            {isTruck && (
+              <FieldInputBox label={t.fleet.truckForm.payload}>
+                <input value={form.payload} onChange={set('payload')} placeholder={t.fleet.truckForm.payloadPh} />
+              </FieldInputBox>
+            )}
+            <div className={isTruck ? '' : 'col-span-2'}>
+              <FieldInputBox label={f.status}>
+                <select value={statusValue} onChange={set('status')} disabled={!!vehicle}>
+                  {VEHICLE_STATUSES.map((s) => (
+                    <option key={s} value={s} disabled={formLocked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
+                  ))}
+                </select>
+              </FieldInputBox>
+            </div>
+            <div className="col-span-2">
+              {formLocked && <LockHint papers={formExpired} />}
+              {vehicle && <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>}
+            </div>
+            <datalist id="fleet-free-trailers">
+              {freeTrailers.map((plate) => <option key={plate} value={plate} />)}
+            </datalist>
+            <datalist id="fleet-truck-bodies">
+              {t.fleet.truckForm.bodies.map((b) => <option key={b} value={b} />)}
+            </datalist>
+          </div>
         </div>
-        {formExpired.length > 0 && <LockHint papers={formExpired} />}
-        {vehicle && <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>}
-        <Field label={f.note}>
-          <textarea className={`${INPUT} h-16 py-1.5`} value={form.note} onChange={set('note')} />
-        </Field>
+
+        <DriverSection title={D.papers}>
+          <div className="space-y-3">
+            {(['ownership', 'registration', 'insurance'] as const).map((kind) => {
+              const picker = (side: 'front' | 'back') => {
+                const which = `${kind}_${side}` as VehicleDocument;
+                return (
+                  <PaperPicker which={which} doc={paperTitle[kind]} side={side === 'front' ? D.front : D.back}
+                    current={vehicle?.[which] || ''} value={papers[which]}
+                    onChange={(next) => setPapers((prev) => ({ ...prev, [which]: next }))} onError={setError} />
+                );
+              };
+              const field = expiryField[kind];
+              return (
+                <PaperRow key={kind} kind={kind} front={picker('front')} back={picker('back')} facts={(
+                  <FieldInputBox label={expiryLabel[kind]}>
+                    <input type="date" value={form[field]} onChange={set(field)} />
+                  </FieldInputBox>
+                )} />
+              );
+            })}
+          </div>
+        </DriverSection>
+
+        <DriverSection title={D.other}>
+          <FieldInputBox label={f.note}>
+            <textarea rows={2} value={form.note} onChange={set('note')} />
+          </FieldInputBox>
+        </DriverSection>
+
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
         <Footer onCancel={onClose} saving={saving} />
       </form>
