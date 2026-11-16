@@ -270,7 +270,7 @@ export const NO_PAPER_CHANGES: PaperChoices = {
 };
 
 interface PaperPickerProps {
-  which: DriverDocument;
+  which: DriverDocument | VehicleDocument;
   doc: string;
   side: string;
   /** the scan stored now ('' = none) */

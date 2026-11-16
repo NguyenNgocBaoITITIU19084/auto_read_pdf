@@ -17,7 +17,21 @@ import {
   DRIVER_DOCUMENTS, DRIVER_STATUSES, VEHICLE_STATUSES, type DriverStatus, type FleetDriver, type FleetVehicle, type VehicleCategory,
   type VehicleStatus,
 } from '../../types';
-import { apiError, freeVehicles, isConflict } from './fleetUtils';
+import {
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, freeVehicles, isConflict, isRunning, licenseExpired,
+  type PaperExpiry,
+} from './fleetUtils';
+
+/** Why the status is locked: the expired papers, and that only "Không sẵn sàng" / "Ngưng hoạt động" are left. */
+export const LockHint: React.FC<{ papers: PaperExpiry[] }> = ({ papers }) => {
+  const { t } = useApp();
+  const L = t.fleet.lock;
+  return (
+    <p role="note" data-testid="paper-lock-hint" className="mt-1 text-[11px] font-medium text-orange-700 dark:text-orange-300">
+      {tf(L.hint, { papers: papers.map((p) => L.papers[p]).join(', ') })}
+    </p>
+  );
+};
 
 export const INPUT = 'w-full h-9 px-2.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 '
   + 'text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60';
@@ -97,8 +111,8 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const isTruck = (vehicle?.category || category) === 'truck';
   const f = isTruck ? { ...t.fleet.vehicleForm, ...t.fleet.truckForm } : t.fleet.vehicleForm;
   const [form, setForm] = useState({
-    plate: '', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', registration_expiry: '', insurance_expiry: '',
-    status: 'active' as VehicleStatus, note: '',
+    plate: '', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', registration_expiry: '',
+    insurance_expiry: '', status: 'active' as VehicleStatus, note: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -111,7 +125,8 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     let live = true;
     getFleetTrailersApi()
       .then((list) => live && setFreeTrailers(list
-        .filter((r) => r.status !== 'inactive' && (!r.vehicle || r.vehicle.id === vehicle?.id)).map((r) => r.plate)))
+        .filter((r) => r.status !== 'inactive' && r.status !== 'not_ready' && (!r.vehicle || r.vehicle.id === vehicle?.id))
+        .map((r) => r.plate)))
       .catch(() => live && setFreeTrailers([]));
     return () => {
       live = false;
@@ -124,7 +139,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     setPhoto(NO_PHOTO_CHANGE);
     setForm({
       plate: vehicle?.plate || '', trailer_plate: vehicle?.trailer_plate || '', vehicle_type: vehicle?.vehicle_type || '',
-      body_type: vehicle?.body_type || '', payload: vehicle?.payload || '',
+      body_type: vehicle?.body_type || '', payload: vehicle?.payload || '', ownership_expiry: vehicle?.ownership_expiry || '',
       registration_expiry: vehicle?.registration_expiry || '', insurance_expiry: vehicle?.insurance_expiry || '',
       status: vehicle?.status || 'active', note: vehicle?.note || '',
     });
@@ -132,6 +147,9 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
 
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
+  // expired papers in the form: it is saved as not_ready (the server forces it too)
+  const formExpired = expiredPapers(form);
+  const formLocked = formExpired.length > 0;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -204,9 +222,15 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
             </Field>
           )}
           <Field label={f.status}>
-            <select className={INPUT} value={form.status} onChange={set('status')} disabled={!!vehicle}>
-              {VEHICLE_STATUSES.map((s) => <option key={s} value={s}>{t.fleet.vehicleStatus[s]}</option>)}
+            <select className={INPUT} value={formLocked && !vehicle && !LOCK_FREE_STATUSES.includes(form.status) ? 'not_ready' : form.status}
+              onChange={set('status')} disabled={!!vehicle}>
+              {VEHICLE_STATUSES.map((s) => (
+                <option key={s} value={s} disabled={formLocked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
+              ))}
             </select>
+          </Field>
+          <Field label={t.fleet.vehicleForm.ownership}>
+            <input type="date" className={INPUT} value={form.ownership_expiry} onChange={set('ownership_expiry')} />
           </Field>
           <Field label={f.registration}>
             <input type="date" className={INPUT} value={form.registration_expiry} onChange={set('registration_expiry')} />
@@ -215,6 +239,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
             <input type="date" className={INPUT} value={form.insurance_expiry} onChange={set('insurance_expiry')} />
           </Field>
         </div>
+        {formExpired.length > 0 && <LockHint papers={formExpired} />}
         {vehicle && <p className="text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>}
         <Field label={f.note}>
           <textarea className={`${INPUT} h-16 py-1.5`} value={form.note} onChange={set('note')} />
@@ -266,6 +291,11 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
+  // an expired licence in the form: only not_ready / leave / left; a status it can't keep shows (and saves) as not_ready
+  const licenceLocked = licenseExpired(form);
+  const driverStatus: DriverStatus = licenceLocked && !DRIVER_LOCK_FREE_STATUSES.includes(form.status)
+    ? (driver && DRIVER_LOCK_FREE_STATUSES.includes(driver.status) ? driver.status : 'not_ready') : form.status;
+
   // a new driver can be given a truck nobody has as their own truck yet
   const unassigned = useMemo(() => vehicles.filter((v) => !v.home_driver && v.status !== 'inactive'), [vehicles]);
 
@@ -278,9 +308,10 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
     setSaving(true);
     setError('');
     try {
+      const data = { ...form, status: driverStatus };
       const id = driver
-        ? (await updateFleetDriverApi(driver.id, form)).id
-        : (await createFleetDriverApi({ ...form, home_vehicle_id: homeId ? Number(homeId) : null })).id;
+        ? (await updateFleetDriverApi(driver.id, data)).id
+        : (await createFleetDriverApi({ ...data, home_vehicle_id: homeId ? Number(homeId) : null })).id;
       const errors = [await savePhoto(photo, id, uploadFleetDriverPhotoApi, deleteFleetDriverPhotoApi, t.fleet.toast.error,
         t.fleet.photo.outdatedBackend)];
       for (const which of DRIVER_DOCUMENTS) {
@@ -315,10 +346,17 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
               <input value={form.phone} onChange={set('phone')} inputMode="tel" />
             </FieldInputBox>
             <FieldInputBox label={f.status}>
-              <select value={form.status} onChange={set('status')}>
-                {DRIVER_STATUSES.map((s) => <option key={s} value={s}>{t.fleet.driverStatus[s]}</option>)}
+              <select value={driverStatus} onChange={set('status')}>
+                {DRIVER_STATUSES.map((s) => (
+                  <option key={s} value={s} disabled={licenceLocked && !DRIVER_LOCK_FREE_STATUSES.includes(s)}>{t.fleet.driverStatus[s]}</option>
+                ))}
               </select>
             </FieldInputBox>
+            {licenceLocked && (
+              <p role="note" data-testid="licence-lock-hint" className="col-span-2 text-[11px] font-medium text-orange-700 dark:text-orange-300">
+                {t.fleet.licenseLock.hint}
+              </p>
+            )}
             {!driver && (
               <div className="col-span-2">
                 <FieldInputBox label={f.homeVehicle}>
@@ -402,9 +440,14 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // expired papers: only not_ready / inactive can be picked
+  const expired = vehicle ? expiredPapers(vehicle) : [];
+  const locked = expired.length > 0;
+
   useEffect(() => {
     if (!vehicle) return;
-    setStatus(vehicle.status === 'active' ? 'broken' : 'active');
+    setStatus(expiredPapers(vehicle).length ? (vehicle.status === 'not_ready' ? 'inactive' : 'not_ready')
+      : isRunning(vehicle.status) ? 'broken' : 'ready');
     setReason('');
     setSpareId('');
     setError('');
@@ -414,7 +457,7 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
   const spares = useMemo(() => freeVehicles(vehicles, vehicle?.id), [vehicles, vehicle]);
   if (!vehicle) return null;
   const driver = vehicle.current_driver;
-  const stops = status !== 'active';
+  const stops = !isRunning(status);
   const asksForDriver = stops && !!driver;
   const moving = asksForDriver && plan === 'move' && spares.length > 0;
 
@@ -452,8 +495,11 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
       <form onSubmit={submit} className="space-y-3" noValidate>
         <Field label={m.status}>
           <select className={INPUT} value={status} onChange={(e) => setStatus(e.target.value as VehicleStatus)}>
-            {VEHICLE_STATUSES.map((s) => <option key={s} value={s}>{t.fleet.vehicleStatus[s]}</option>)}
+            {VEHICLE_STATUSES.map((s) => (
+              <option key={s} value={s} disabled={locked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
+            ))}
           </select>
+          {locked && <LockHint papers={expired} />}
         </Field>
         <Field label={m.reason}>
           <input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={m.reasonPh} />
@@ -614,7 +660,7 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
             <option value="">{mode === 'temporary' ? m.pick : m.noHome}</option>
             {choices.map((v) => (
               <option key={v.id} value={v.id}>
-                {vehicleOptionLabel(v, t)}{v.status !== 'active' ? ` — ${t.fleet.vehicleStatus[v.status]}` : ''}
+                {vehicleOptionLabel(v, t)}{!isRunning(v.status) ? ` — ${t.fleet.vehicleStatus[v.status]}` : ''}
               </option>
             ))}
           </select>

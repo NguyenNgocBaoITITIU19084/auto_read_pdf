@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArchiveRestore, Container, Copy, FileSpreadsheet, History, Info, Link2, Link2Off, ListChecks, Loader2, MoreHorizontal,
+  AlertTriangle, ArchiveRestore, Container, Lock, Copy, FileSpreadsheet, History, Info, Link2, Link2Off, ListChecks, Loader2, MoreHorizontal,
   Pencil, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -37,7 +37,9 @@ import {
   DOC_STATES, DateCell, DocsCell, MUTED, NoteIcon, ROW, StatusBadge, TD, TH, VEHICLE_TONE, docState, docWarnings, fromControl,
   soonestDays, type DocState,
 } from './fleetCells';
-import { apiError, formatIsoDate, formatStampShort, matches, todayVnIso } from './fleetUtils';
+import {
+  LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, formatStampShort, isRunning, matches, todayVnIso,
+} from './fleetUtils';
 
 type View = 'trailers' | 'history';
 type Filter = 'all' | 'hitched' | 'free' | 'down' | 'expiring';
@@ -53,7 +55,9 @@ const readView = (): View => {
 };
 
 const docsOf = (r: FleetTrailer): [FleetDocumentKind, string][] =>
-  [['registration', r.registration_expiry], ['insurance', r.insurance_expiry]];
+  [['ownership', r.ownership_expiry], ['registration', r.registration_expiry], ['insurance', r.insurance_expiry]];
+/** a trailer in these is off its tractor and cannot be hitched */
+const canHitch = (r: FleetTrailer) => r.status !== 'inactive' && r.status !== 'not_ready';
 
 interface Props {
   initialSearchQuery?: string;
@@ -163,8 +167,8 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const tests: Record<Filter, (r: FleetTrailer) => boolean> = useMemo(() => ({
     all: () => true,
     hitched: (r) => !!r.vehicle,
-    free: (r) => r.status === 'active' && !r.vehicle,
-    down: (r) => r.status === 'broken' || r.status === 'maintenance',
+    free: (r) => isRunning(r.status) && !r.vehicle,
+    down: (r) => r.status === 'broken' || r.status === 'maintenance' || r.status === 'not_ready',
     expiring: (r) => r.status !== 'inactive' && docWarnings(docsOf(r), today).length > 0,
   }), [today]);
   const shown = useMemo(() => rows.filter((r) => tests[filter](r) && matches(query, r.plate, r.trailer_type, r.chassis_no,
@@ -186,6 +190,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     chassis: (r: FleetTrailer) => r.chassis_no,
     payload: (r: FleetTrailer) => r.payload,
     year: (r: FleetTrailer) => r.year,
+    ownership: (r: FleetTrailer) => r.ownership_expiry,
     registration: (r: FleetTrailer) => r.registration_expiry,
     insurance: (r: FleetTrailer) => r.insurance_expiry,
     note: (r: FleetTrailer) => r.note,
@@ -206,7 +211,8 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const listDefaults = useMemo(() => defaults([
     ['plate', C.plate, true], ['status', C.status, true], ['vehicle', C.vehicle, true], ['docs', C.docs, true],
     ['type', C.type, false], ['chassis', C.chassis, false], ['payload', C.payload, false], ['year', C.year, false],
-    ['registration', C.registration, false], ['insurance', C.insurance, false], ['note', C.note, false], ['created', C.created, false],
+    ['ownership', C.ownership, false], ['registration', C.registration, false], ['insurance', C.insurance, false], ['note', C.note, false],
+    ['created', C.created, false],
   ]), [C]);
   const historyDefaults = useMemo(() => defaults([
     ['started_at', C.started, true], ['ended_at', C.ended, true], ['trailer_plate', C.plate, true],
@@ -247,7 +253,9 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     return {
       label: ids.length > 1 ? tf(f.bulk.statusTitle, { count: ids.length }) : f.bulk.status,
       items: VEHICLE_STATUSES.map((s) => ({
-        key: `status-${s}`, label: R.status[s], icon: ListChecks, disabled: ids.length === 1 && r.status === s,
+        key: `status-${s}`, label: R.status[s], icon: ListChecks,
+        // expired papers: only not_ready / inactive (the server refuses the rest)
+        disabled: ids.length === 1 && (r.status === s || (expiredPapers(r, today).length > 0 && !LOCK_FREE_STATUSES.includes(s))),
         onClick: () => void applyStatus(ids, s),
       })),
     };
@@ -255,7 +263,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const menuFor = (r: FleetTrailer): MenuGroup[] => [
     { label: r.plate, items: [
       { key: 'edit', label: f.menu.edit, icon: Pencil, onClick: () => setForm({ open: true, trailer: r }) },
-      ...(r.status !== 'inactive'
+      ...(canHitch(r)
         ? [{ key: 'hitch', label: r.vehicle ? R.actions.change : R.actions.hitch, icon: Link2, onClick: () => setHitchFor(r) }] : []),
       ...(r.vehicle ? [{ key: 'unhitch', label: R.actions.unhitch, icon: Link2Off, onClick: () => void unhitch(r) }] : []),
       { key: 'history', label: f.menu.history, icon: History, onClick: () => showHistory(r) },
@@ -308,6 +316,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     chassis: r.chassis_no,
     payload: r.payload,
     year: r.year,
+    ownership: formatIsoDate(r.ownership_expiry),
     registration: formatIsoDate(r.registration_expiry),
     insurance: formatIsoDate(r.insurance_expiry),
     note: r.note,
@@ -431,7 +440,11 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     status: {
       filter: { options: () => valueCounts(shown, value.status, [...VEHICLE_STATUSES]), value: cols.status || [],
         onChange: setCol(setCols, 'status'), format: (v) => R.status[v as TrailerStatus] ?? v },
-      render: (r) => <StatusBadge tone={VEHICLE_TONE[r.status]}>{R.status[r.status]}</StatusBadge>,
+      render: (r) => (
+        <span title={r.status_forced ? f.lock.forced : undefined} data-testid={r.status_forced ? 'status-forced' : undefined}>
+          <StatusBadge tone={VEHICLE_TONE[r.status]}>{R.status[r.status]}{!!r.status_forced && <Lock className="w-3 h-3" aria-hidden />}</StatusBadge>
+        </span>
+      ),
     },
     vehicle: {
       filter: { options: () => valueCounts(shown, value.vehicle, ['hitched', 'free']), value: cols.vehicle || [],
@@ -464,6 +477,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
         format: (v) => v || t.common.columnFilter.empty },
       render: (r) => plainCell(r.year),
     },
+    ownership: { render: (r) => <DateCell iso={r.ownership_expiry} today={today} muted={r.status === 'inactive'} /> },
     registration: { render: (r) => <DateCell iso={r.registration_expiry} today={today} muted={r.status === 'inactive'} /> },
     insurance: { render: (r) => <DateCell iso={r.insurance_expiry} today={today} muted={r.status === 'inactive'} /> },
     note: { td: 'max-w-[18rem]', render: (r) => <span className="line-clamp-2 text-slate-600 dark:text-slate-300">{r.note || f.none}</span> },
@@ -542,7 +556,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
               {cells(listColumns, specs, r)}
               <td className={`${TD} text-right whitespace-nowrap w-0`}>
                 <div className="inline-flex items-center gap-1">
-                  {r.status !== 'inactive' && (r.vehicle ? (
+                  {canHitch(r) && (r.vehicle ? (
                     <button type="button" onClick={() => setHitchFor(r)} disabled={busyId === r.id}
                       className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
                       <Link2 className="w-3.5 h-3.5" />{R.actions.change}

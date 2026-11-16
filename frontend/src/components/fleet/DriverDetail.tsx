@@ -17,7 +17,9 @@ import { DocumentTile, DriverSection, FieldBox, PaperRow } from './DriverPapers'
 import type { DetailAction } from './FleetDetailModal';
 import { FleetAvatar, photoProblem } from './FleetPhoto';
 import { PickBox, PickToggle, boxTone, type Selection } from './FieldPick';
-import { EXPIRY_WARN_DAYS, apiError, daysUntil, formatIsoDate, formatStampShort, todayVnIso } from './fleetUtils';
+import {
+  DRIVER_LOCK_FREE_STATUSES, EXPIRY_WARN_DAYS, apiError, daysUntil, formatIsoDate, formatStampShort, licenseExpired, todayVnIso,
+} from './fleetUtils';
 
 const HISTORY_SHOWN = 5;
 
@@ -146,6 +148,8 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
       ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
       : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'}`}>{daysLeftText(expiryDays, t)}</span>
   ) : null;
+  // an expired licence (as typed now): only not_ready / leave / left can be picked
+  const licenceLocked = licenseExpired({ license_expiry: value('license_expiry') });
   const current = driver.current_vehicle;
   const currentText = current ? [current.plate, current.kind === 'temporary' ? f.kind.temporary : ''].filter(Boolean).join(' · ') : '';
 
@@ -203,9 +207,21 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
             {box('phone', F.phone, <input value={value('phone')} onChange={set('phone')} inputMode="tel" />)}
             {box('status', F.status, (
               <select value={value('status')} onChange={set('status')}>
-                {DRIVER_STATUSES.map((s) => <option key={s} value={s}>{f.driverStatus[s]}</option>)}
+                {DRIVER_STATUSES.map((s) => (
+                  <option key={s} value={s} disabled={licenceLocked && !DRIVER_LOCK_FREE_STATUSES.includes(s) && s !== driver.status}>
+                    {f.driverStatus[s]}
+                  </option>
+                ))}
               </select>
             ))}
+            {licenceLocked && (
+              <p role="note" data-testid="licence-lock-hint" className="col-span-2 text-[11px] font-medium text-orange-700 dark:text-orange-300">
+                {f.licenseLock.hint}
+              </p>
+            )}
+            {!licenceLocked && !!driver.status_forced && (
+              <p className="col-span-2 text-[11px] text-orange-700 dark:text-orange-300">{f.licenseLock.forced}</p>
+            )}
             {isDirty('status') && <p className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{F.statusHint}</p>}
           </div>
           <div data-testid="driver-current-vehicle"

@@ -28,11 +28,20 @@ from backend.app.core.timezone import VN_TZ
 
 logger = logging.getLogger("backend.fleet")
 
-VEHICLE_STATUSES = ("active", "broken", "maintenance", "inactive")
-VEHICLE_STATUS_LABELS = {"active": "Đang chạy", "broken": "Hư hỏng", "maintenance": "Bảo dưỡng",
-                         "inactive": "Ngưng hoạt động"}
-DRIVER_STATUSES = ("active", "leave", "left")
-DRIVER_STATUS_LABELS = {"active": "Đang làm", "leave": "Nghỉ phép", "left": "Đã nghỉ việc"}
+VEHICLE_STATUSES = ("ready", "active", "not_ready", "broken", "maintenance", "inactive")
+VEHICLE_STATUS_LABELS = {"ready": "Sẵn sàng", "active": "Đang chạy", "not_ready": "Không sẵn sàng", "broken": "Hư hỏng",
+                         "maintenance": "Bảo dưỡng", "inactive": "Ngưng hoạt động"}
+# the statuses a truck / trailer can run in (the rest stop it: its driver gets off, a trailer comes off its tractor)
+RUNNING_STATUSES = ("ready", "active")
+# Papers whose expiry locks a truck / trailer in "not_ready" (Không sẵn sàng): (column, label). Expired = the date is
+# before today. While one is expired only these statuses can be picked; "inactive" (out of service) is never forced.
+PAPER_EXPIRIES = (("ownership_expiry", "Đăng ký"), ("registration_expiry", "Đăng kiểm"), ("insurance_expiry", "Bảo hiểm"))
+LOCK_FREE_STATUSES = ("not_ready", "inactive")
+DRIVER_STATUSES = ("active", "not_ready", "leave", "left")
+DRIVER_STATUS_LABELS = {"active": "Đang làm", "not_ready": "Không sẵn sàng", "leave": "Nghỉ phép", "left": "Đã nghỉ việc"}
+# A driver whose licence has expired (the date is before today) is "not_ready", off their truck; while it is expired
+# only these can be picked. Someone on leave or who quit is not driving anyway: never forced.
+DRIVER_LOCK_FREE_STATUSES = ("not_ready", "leave", "left")
 ASSIGNMENT_KINDS = ("primary", "temporary")
 VEHICLE_CATEGORIES = ("tractor", "truck")
 # the app tab listing each category
@@ -42,9 +51,11 @@ CATEGORY_TABS = {"tractor": "fleet", "truck": "trucks"}
 EXPIRY_REMINDER_DAYS = (30, 7, 0)
 EXPIRY_FIELDS = (
     # (table, column, kind, label)
+    ("fleet_vehicles", "ownership_expiry", "ownership", "Đăng ký xe"),
     ("fleet_vehicles", "registration_expiry", "registration", "Đăng kiểm"),
     ("fleet_vehicles", "insurance_expiry", "insurance", "Bảo hiểm"),
     ("fleet_drivers", "license_expiry", "license", "Bằng lái"),
+    ("fleet_trailers", "ownership_expiry", "trailer_ownership", "Đăng ký moóc"),
     ("fleet_trailers", "registration_expiry", "trailer_registration", "Đăng kiểm moóc"),
     ("fleet_trailers", "insurance_expiry", "trailer_insurance", "Bảo hiểm moóc"),
 )
@@ -67,10 +78,12 @@ DOCUMENT_MAX_SIDE = 2000
 # ... and of a truck's: đăng kiểm (registration, as registration_expiry), bảo hiểm, giấy đăng ký xe (ownership, if any)
 VEHICLE_DOCUMENTS = ("registration_front", "registration_back", "insurance_front", "insurance_back",
                      "ownership_front", "ownership_back")
-DOCUMENTS = {"driver": DRIVER_DOCUMENTS, "vehicle": VEHICLE_DOCUMENTS}
+# ... and of a trailer's: the same three papers as a truck's
+TRAILER_DOCUMENTS = VEHICLE_DOCUMENTS
+DOCUMENTS = {"driver": DRIVER_DOCUMENTS, "vehicle": VEHICLE_DOCUMENTS, "trailer": TRAILER_DOCUMENTS}
 # the image columns of each table (all deleted with the row when it is purged)
 IMAGE_COLUMNS = {"fleet_vehicles": ("photo", *VEHICLE_DOCUMENTS), "fleet_drivers": ("photo", *DRIVER_DOCUMENTS),
-                 "fleet_trailers": ("photo",)}
+                 "fleet_trailers": ("photo", *TRAILER_DOCUMENTS)}
 _PHOTO_NAME = re.compile(r"^(vehicle|driver|trailer)_\d+_"
                          r"(?:(?:license|id|registration|insurance|ownership)_(?:front|back)_)?[0-9a-f]{8}\.jpg$")
 _NOT_FOUND = {"vehicle": "Không tìm thấy xe", "driver": "Không tìm thấy tài xế", "trailer": "Không tìm thấy moóc"}
@@ -173,7 +186,16 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
     for column, default in (("category", "tractor"), ("body_type", ""), ("payload", "")):
         if column not in have:
             conn.execute(f"ALTER TABLE fleet_vehicles ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}';")
-    for table, documents in (("fleet_drivers", DRIVER_DOCUMENTS), ("fleet_vehicles", VEHICLE_DOCUMENTS)):
+    # Hạn đăng ký, and whether the status was forced to not_ready by expired papers (1: it comes back to "ready" once
+    # they are renewed; a not_ready picked by hand stays)
+    for table in ("fleet_vehicles", "fleet_trailers", "fleet_drivers"):
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table});")}
+        if "ownership_expiry" not in have and table != "fleet_drivers":
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN ownership_expiry TEXT NOT NULL DEFAULT '';")
+        if "status_forced" not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN status_forced INTEGER NOT NULL DEFAULT 0;")
+    for table, documents in (("fleet_drivers", DRIVER_DOCUMENTS), ("fleet_vehicles", VEHICLE_DOCUMENTS),
+                             ("fleet_trailers", TRAILER_DOCUMENTS)):
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table});")}
         for column in documents:
             if column not in have:
@@ -274,7 +296,7 @@ def list_vehicles() -> list[dict]:
         h = homes.get(v["id"])
         c = current.get(v["id"])
         item = {k: v[k] for k in ("id", "plate", "category", "trailer_plate", "vehicle_type", "body_type", "payload",
-                                  "registration_expiry",
+                                  "ownership_expiry", "registration_expiry", "status_forced",
                                   "insurance_expiry", "status", "note", "photo", *VEHICLE_DOCUMENTS,
                                   "created_at", "updated_at")}
         item["home_driver"] = None
@@ -307,7 +329,7 @@ def list_drivers() -> list[dict]:
     for d in drivers:
         c = current.get(d["id"])
         item = {k: d[k] for k in ("id", "name", "phone", "id_number", "license_no", "license_class",
-                                  "license_expiry", "status", "note", "photo", *DRIVER_DOCUMENTS,
+                                  "license_expiry", "status", "status_forced", "note", "photo", *DRIVER_DOCUMENTS,
                                   "created_at", "updated_at")}
         item["home_vehicle"] = ({"id": d["home_vehicle_id"], "plate": d["home_plate"], "status": d["home_status"],
                                  "category": d["home_category"]} if d["home_vehicle_id"] else None)
@@ -417,7 +439,7 @@ def _settle_home(conn, driver: dict, stamp: str, reason: str = "") -> bool:
     if driver["status"] != "active" or not driver.get("home_vehicle_id") or _open_by_driver(conn, driver["id"]):
         return False
     vehicle = _vehicle(conn, driver["home_vehicle_id"])
-    if vehicle["status"] != "active" or _open_by_vehicle(conn, vehicle["id"]):
+    if vehicle["status"] not in RUNNING_STATUSES or _open_by_vehicle(conn, vehicle["id"]):
         return False
     _open(conn, driver, vehicle, "primary", reason, stamp)
     return True
@@ -478,7 +500,7 @@ def move_temporary(driver_id: int, vehicle_id: int, reason: str = "") -> dict:
             raise FleetError(f"{driver['name']} đang {DRIVER_STATUS_LABELS.get(driver['status'], driver['status']).lower()}")
         if driver.get("home_vehicle_id") == vehicle_id:
             raise FleetError(f"Xe {vehicle['plate']} là xe gốc của {driver['name']}: dùng \"Trả về xe gốc\"")
-        if vehicle["status"] != "active":
+        if vehicle["status"] not in RUNNING_STATUSES:
             raise FleetError(f"Xe {vehicle['plate']} đang {VEHICLE_STATUS_LABELS[vehicle['status']].lower()}", 409)
         on_vehicle = _open_by_vehicle(conn, vehicle_id)
         if on_vehicle and on_vehicle["driver_id"] != driver_id:
@@ -500,7 +522,7 @@ def return_home(driver_id: int) -> dict:
         if driver["status"] != "active":
             raise FleetError(f"{driver['name']} đang {DRIVER_STATUS_LABELS.get(driver['status'], driver['status']).lower()}")
         home = _vehicle(conn, driver["home_vehicle_id"])
-        if home["status"] != "active":
+        if home["status"] not in RUNNING_STATUSES:
             raise FleetError(f"Xe gốc {home['plate']} vẫn đang {VEHICLE_STATUS_LABELS[home['status']].lower()}", 409)
         on_home = _open_by_vehicle(conn, home["id"])
         if on_home and on_home["driver_id"] != driver_id:
@@ -523,13 +545,15 @@ def unassign(driver_id: int, reason: str = "") -> dict:
 
 
 def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_vehicle_id: int | None = None,
-                       bring_home_driver: bool = False) -> dict:
+                       bring_home_driver: bool = False, forced: bool = False) -> dict:
     """Change a truck's status in one step with what it means for its driver:
-    - not running any more (broken / maintenance / inactive): the driver on it moves to `move_to_vehicle_id` for now,
-      or gets off it when none is given;
+    - not running any more (not_ready / broken / maintenance / inactive): the driver on it moves to
+      `move_to_vehicle_id` for now, or gets off it when none is given;
     - running again: its home driver, when idle, gets back on it. A home driver away on a temporary truck comes back
       too with `bring_home_driver` ("Đã sửa xong") as long as nobody else is on the truck; otherwise they are left
       there and reported as `home_driver_away`, for the user to bring back with return_home().
+    While its papers are expired only not_ready / inactive can be picked (409 otherwise). `forced`: the change is the
+    paper lock's own (see enforce_papers), remembered so renewed papers bring it back to "ready".
     Returns {"vehicle_id", "status", "moved_driver", "home_driver_away", "returned_driver"}."""
     if status not in VEHICLE_STATUSES:
         raise FleetError(f"Trạng thái xe không hợp lệ: {status}")
@@ -537,25 +561,30 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
     moved, away, returned = None, None, None
     with _conn() as conn:
         vehicle = _vehicle(conn, vehicle_id)
+        if not forced:
+            _check_paper_lock(vehicle, status)
         on_vehicle = _open_by_vehicle(conn, vehicle_id)
         target = None
         if move_to_vehicle_id is not None:
-            if status == "active":
+            if status in RUNNING_STATUSES:
                 raise FleetError("Chỉ chuyển tài xế sang xe khác khi xe không chạy được")
             if not on_vehicle:
                 raise FleetError(f"Xe {vehicle['plate']} không có tài xế nào đang lái")
             if move_to_vehicle_id == vehicle_id:
                 raise FleetError("Hãy chọn một xe khác")
             target = _vehicle(conn, move_to_vehicle_id)
-            if target["status"] != "active":
+            if target["status"] not in RUNNING_STATUSES:
                 raise FleetError(f"Xe {target['plate']} đang {VEHICLE_STATUS_LABELS[target['status']].lower()}", 409)
             busy = _open_by_vehicle(conn, move_to_vehicle_id)
             if busy:
                 raise FleetError(f"Xe {target['plate']} đang do {busy['driver_name']} lái", 409)
-        conn.execute("UPDATE fleet_vehicles SET status = ?, updated_at = ? WHERE id = ?;", (status, stamp, vehicle_id))
+        # a change by hand clears the "forced" mark; the same status again keeps it
+        flag = 1 if forced else (vehicle.get("status_forced") or 0) if status == vehicle["status"] else 0
+        conn.execute("UPDATE fleet_vehicles SET status = ?, status_forced = ?, updated_at = ? WHERE id = ?;",
+                     (status, flag, stamp, vehicle_id))
         label = VEHICLE_STATUS_LABELS[status]
         why = f"Xe {vehicle['plate']} {label.lower()}" + (f": {_text(reason)}" if _text(reason) else "")
-        if status != "active" and on_vehicle:
+        if status not in RUNNING_STATUSES and on_vehicle:
             driver = _driver(conn, on_vehicle["driver_id"])
             _close(conn, on_vehicle, why, stamp)
             if target:
@@ -563,7 +592,7 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
                 _open(conn, driver, target, kind, why, stamp)
             moved = {"id": driver["id"], "name": driver["name"], "to_vehicle_id": target["id"] if target else None,
                      "to_plate": target["plate"] if target else ""}
-        if status == "active":
+        if status in RUNNING_STATUSES:
             home = _home_driver_of(conn, vehicle_id)
             if home and not _settle_home(conn, home, stamp, f"Xe {vehicle['plate']} chạy lại"):
                 where = _open_by_driver(conn, home["id"])
@@ -583,8 +612,8 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
 # Trucks and drivers: create / edit / delete
 # ---------------------------------------------------------------------------
 # editable after creation (the category is not: see create_vehicle)
-_VEHICLE_FIELDS = ("plate", "trailer_plate", "vehicle_type", "body_type", "payload", "registration_expiry",
-                   "insurance_expiry", "status", "note")
+_VEHICLE_FIELDS = ("plate", "trailer_plate", "vehicle_type", "body_type", "payload", "ownership_expiry",
+                   "registration_expiry", "insurance_expiry", "status", "note")
 _DRIVER_FIELDS = ("name", "phone", "id_number", "license_no", "license_class", "license_expiry", "status", "note")
 
 
@@ -603,6 +632,8 @@ def _clean_vehicle(data: dict, partial: bool) -> dict:
         out["body_type"] = _text(data.get("body_type"), 60)
     if "payload" in data or not partial:
         out["payload"] = _text(data.get("payload"), 30)
+    if "ownership_expiry" in data or not partial:
+        out["ownership_expiry"] = _date(data.get("ownership_expiry"), "Hạn đăng ký")
     if "registration_expiry" in data or not partial:
         out["registration_expiry"] = _date(data.get("registration_expiry"), "Hạn đăng kiểm")
     if "insurance_expiry" in data or not partial:
@@ -644,16 +675,21 @@ def create_vehicle(data: dict) -> int:
     fields = _clean_vehicle(data, partial=False)
     if category == "truck" and fields["trailer_plate"]:
         raise FleetError("Xe tải không kéo moóc")
+    # papers already expired: it starts as not_ready (forced), whatever was picked
+    forced = int(bool(expired_papers(fields)) and fields["status"] not in LOCK_FREE_STATUSES)
+    if forced:
+        fields["status"] = "not_ready"
     stamp = _now()
     with _conn() as conn:
         _check_vehicle_unique(conn, fields, None)
         cur = conn.execute(
-            "INSERT INTO fleet_vehicles (plate, plate_key, category, vehicle_type, body_type, payload, "
-            "registration_expiry, insurance_expiry, status, note, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "INSERT INTO fleet_vehicles (plate, plate_key, category, vehicle_type, body_type, payload, ownership_expiry, "
+            "registration_expiry, insurance_expiry, status, status_forced, note, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             (fields["plate"], plate_key(fields["plate"]), category,
-             fields["vehicle_type"], fields["body_type"], fields["payload"], fields["registration_expiry"],
-             fields["insurance_expiry"], fields["status"], fields["note"], stamp, stamp))
+             fields["vehicle_type"], fields["body_type"], fields["payload"], fields["ownership_expiry"],
+             fields["registration_expiry"], fields["insurance_expiry"], fields["status"], forced, fields["note"],
+             stamp, stamp))
         vehicle_id = cur.lastrowid
         if fields["trailer_plate"]:
             hitch_by_plate(conn, _vehicle(conn, vehicle_id), fields["trailer_plate"], stamp)
@@ -687,6 +723,8 @@ def update_vehicle(vehicle_id: int, data: dict) -> None:
             current = _vehicle(conn, vehicle_id)["status"]
         if data["status"] != current:
             set_vehicle_status(vehicle_id, data["status"])
+    # new dates may lock it (expired) or free it (renewed)
+    enforce_vehicle_papers(vehicle_id)
 
 
 def delete_vehicle(vehicle_id: int) -> None:
@@ -728,14 +766,18 @@ def _clean_driver(data: dict, partial: bool) -> dict:
 
 
 def create_driver(data: dict) -> int:
+    """A new driver; one whose licence has already expired starts as not_ready (forced), whatever was picked."""
     fields = _clean_driver(data, partial=False)
+    forced = int(license_expired(fields) and fields["status"] not in DRIVER_LOCK_FREE_STATUSES)
+    if forced:
+        fields["status"] = "not_ready"
     stamp = _now()
     with _conn() as conn:
         cur = conn.execute(
-            "INSERT INTO fleet_drivers (name, phone, id_number, license_no, license_class, license_expiry, status, note, "
-            "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "INSERT INTO fleet_drivers (name, phone, id_number, license_no, license_class, license_expiry, status, "
+            "status_forced, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             (fields["name"], fields["phone"], fields["id_number"], fields["license_no"], fields["license_class"],
-             fields["license_expiry"], fields["status"], fields["note"], stamp, stamp))
+             fields["license_expiry"], fields["status"], forced, fields["note"], stamp, stamp))
         driver_id = cur.lastrowid
     vehicle_id = data.get("home_vehicle_id")
     if vehicle_id:
@@ -749,12 +791,23 @@ def create_driver(data: dict) -> int:
 
 
 def update_driver(driver_id: int, data: dict) -> None:
-    """Edit a driver. Going on leave gets them off their truck; quitting also gives up their home truck; coming back
-    to work puts them on their home truck when it is free and running."""
+    """Edit a driver. Going on leave or not ready gets them off their truck; quitting also gives up their home truck;
+    coming back to work puts them on their home truck when it is free and running. A status other than the stored one
+    is a change by hand: refused while the licence is expired (unless not_ready / leave / left), and it clears the
+    "forced" mark. The new licence date then locks or frees them (see enforce_driver_papers)."""
     fields = _clean_driver({k: v for k, v in data.items() if k in _DRIVER_FIELDS}, partial=True)
     stamp = _now()
     with _conn() as conn:
         before = _driver(conn, driver_id)
+        if fields.get("status", before["status"]) == before["status"]:
+            fields.pop("status", None)
+        else:
+            after = {**before, **fields}
+            if license_expired(after) and fields["status"] not in DRIVER_LOCK_FREE_STATUSES:
+                raise FleetError(f"{before['name']}: bằng lái đã hết hạn, chỉ chuyển được sang "
+                                 f"\"{DRIVER_STATUS_LABELS['not_ready']}\", \"{DRIVER_STATUS_LABELS['leave']}\" "
+                                 f"hoặc \"{DRIVER_STATUS_LABELS['left']}\"", 409)
+            fields["status_forced"] = 0
         if fields:
             sets = ", ".join(f"{k} = ?" for k in fields)
             conn.execute(f"UPDATE fleet_drivers SET {sets}, updated_at = ? WHERE id = ?;",
@@ -771,6 +824,7 @@ def update_driver(driver_id: int, data: dict) -> None:
                 conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL WHERE id = ?;", (driver_id,))
             if status == "active":
                 _settle_home(conn, _driver(conn, driver_id), stamp, "Đi làm lại")
+    enforce_driver_papers(driver_id)
 
 
 def delete_driver(driver_id: int) -> None:
@@ -856,7 +910,19 @@ def restore_from_trash(kind: str, ids) -> int:
     with _conn() as conn:
         cur = conn.execute(f"UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE deleted_at IS NOT NULL "
                            f"AND {which} AND id IN ({','.join('?' * len(clean))});", (stamp, *clean))
-        return max(cur.rowcount, 0)
+        restored = max(cur.rowcount, 0)
+    # papers that ran out while it was in the trash lock it now
+    if kind in ("vehicle", "truck"):
+        for vehicle_id in clean:
+            enforce_vehicle_papers(vehicle_id)
+    elif kind == "driver":
+        for driver_id in clean:
+            enforce_driver_papers(driver_id)
+    elif kind == "trailer":
+        from backend.app.core.fleet_trailers import enforce_trailer_papers
+        for trailer_id in clean:
+            enforce_trailer_papers(trailer_id)
+    return restored
 
 
 def _purge(conn, table: str, where: str, params: tuple) -> int:
@@ -991,7 +1057,7 @@ def _document_column(entity: str, which: str) -> str:
 
 
 def set_document(entity: str, entity_id: int, which: str, data: bytes) -> str:
-    """Store a scan of a driver's / truck's papers (`which`: one of DOCUMENTS[entity]), kept larger than a photo so
+    """Store a scan of a driver's / truck's / trailer's papers (`which`: one of DOCUMENTS[entity]), kept larger than a photo so
     its text stays readable. Returns the new name."""
     column = _document_column(entity, which)
     return _store_image(entity, entity_id, column, _to_jpeg(data, DOCUMENT_MAX_SIDE, 90))
@@ -1007,6 +1073,115 @@ def set_driver_document(driver_id: int, which: str, data: bytes) -> str:
 
 def remove_driver_document(driver_id: int, which: str) -> None:
     remove_document("driver", driver_id, which)
+
+
+# ---------------------------------------------------------------------------
+# Paper lock: a truck / trailer whose đăng ký, đăng kiểm or bảo hiểm has expired is "not_ready" (Không sẵn sàng)
+# ---------------------------------------------------------------------------
+def _vn_today() -> date:
+    return datetime.now(VN_TZ).date()
+
+
+def expired_papers(row: dict, today: date | None = None) -> list[str]:
+    """The labels of the row's papers whose expiry date is before `today` (VN date), in PAPER_EXPIRIES order."""
+    today = today or _vn_today()
+    out = []
+    for column, label in PAPER_EXPIRIES:
+        value = row.get(column) or ""
+        try:
+            if value and date.fromisoformat(value) < today:
+                out.append(label)
+        except ValueError:
+            continue
+    return out
+
+
+def _check_paper_lock(row: dict, status: str, today: date | None = None) -> None:
+    """Refuse a status other than not_ready / inactive while a paper is expired (409, naming the papers)."""
+    expired = expired_papers(row, today)
+    if expired and status not in LOCK_FREE_STATUSES:
+        raise FleetError(f"{row['plate']}: {', '.join(expired)} đã hết hạn, chỉ chuyển được sang "
+                         f"\"{VEHICLE_STATUS_LABELS['not_ready']}\" hoặc \"{VEHICLE_STATUS_LABELS['inactive']}\"", 409)
+
+
+def _paper_move(row: dict, today: date | None = None) -> tuple[str, str] | None:
+    """What the lock does to the row: ("not_ready", reason) when a paper has expired, ("ready", reason) when the
+    papers of a row it had forced are valid again, else None. "inactive" rows are left alone."""
+    if row["status"] == "inactive":
+        return None
+    expired = expired_papers(row, today)
+    if expired and row["status"] != "not_ready":
+        return "not_ready", f"{', '.join(expired)} hết hạn"
+    if not expired and row["status"] == "not_ready" and row.get("status_forced"):
+        return "ready", "Giấy tờ đã gia hạn"
+    return None
+
+
+def enforce_vehicle_papers(vehicle_id: int, today: date | None = None) -> str | None:
+    """Apply the paper lock to one truck, through set_vehicle_status so its driver moves as for any other change
+    (forced to not_ready: the driver gets off; back to ready: its home driver gets back on). Returns the new status
+    when it changed."""
+    with _conn() as conn:
+        rows = _rows(conn, "SELECT * FROM fleet_vehicles WHERE id = ? AND deleted_at IS NULL;", (vehicle_id,))
+    move = _paper_move(rows[0], today) if rows else None
+    if not move:
+        return None
+    status, reason = move
+    if status == "ready":
+        set_vehicle_status(vehicle_id, "ready", reason, bring_home_driver=True)
+    else:
+        set_vehicle_status(vehicle_id, "not_ready", reason, forced=True)
+    logger.info(f"Paper lock: vehicle {rows[0]['plate']} -> {status} ({reason})")
+    return status
+
+
+def license_expired(row: dict, today: date | None = None) -> bool:
+    """The driver's licence date is before `today` (VN date); its last day still counts."""
+    try:
+        return bool(row.get("license_expiry")) and date.fromisoformat(row["license_expiry"]) < (today or _vn_today())
+    except ValueError:
+        return False
+
+
+def enforce_driver_papers(driver_id: int, today: date | None = None) -> str | None:
+    """The licence lock on one driver: an expired licence makes a working driver not_ready (off their truck, home
+    truck kept); a renewed one brings a driver it had forced back to work (and onto their home truck when it can
+    run). Someone on leave or who quit is left alone. Returns the new status when it changed."""
+    stamp = _now()
+    with _conn() as conn:
+        rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE id = ? AND deleted_at IS NULL;", (driver_id,))
+        if not rows:
+            return None
+        driver = rows[0]
+        expired = license_expired(driver, today)
+        if expired and driver["status"] == "active":
+            conn.execute("UPDATE fleet_drivers SET status = 'not_ready', status_forced = 1, updated_at = ? WHERE id = ?;",
+                         (stamp, driver_id))
+            _close(conn, _open_by_driver(conn, driver_id), "Bằng lái hết hạn", stamp)
+            status = "not_ready"
+        elif not expired and driver["status"] == "not_ready" and driver["status_forced"]:
+            conn.execute("UPDATE fleet_drivers SET status = 'active', status_forced = 0, updated_at = ? WHERE id = ?;",
+                         (stamp, driver_id))
+            _settle_home(conn, {**driver, "status": "active"}, stamp, "Bằng lái đã gia hạn")
+            status = "active"
+        else:
+            return None
+    logger.info(f"Paper lock: driver {driver['name']} -> {status}")
+    return status
+
+
+def enforce_papers(today: date | None = None) -> int:
+    """The paper lock over every truck, trailer and driver (papers run out with time): run with the reminders.
+    Returns how many changed."""
+    from backend.app.core.fleet_trailers import enforce_trailer_papers
+    with _conn() as conn:
+        vehicles = [r[0] for r in conn.execute("SELECT id FROM fleet_vehicles WHERE deleted_at IS NULL;")]
+        trailer_ids = [r[0] for r in conn.execute("SELECT id FROM fleet_trailers WHERE deleted_at IS NULL;")]
+        driver_ids = [r[0] for r in conn.execute("SELECT id FROM fleet_drivers WHERE deleted_at IS NULL;")]
+    changed = sum(1 for v in vehicles if enforce_vehicle_papers(v, today))
+    changed += sum(1 for t in trailer_ids if enforce_trailer_papers(t, today))
+    changed += sum(1 for d in driver_ids if enforce_driver_papers(d, today))
+    return changed
 
 
 # ---------------------------------------------------------------------------

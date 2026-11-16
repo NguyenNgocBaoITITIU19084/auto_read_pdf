@@ -18,6 +18,7 @@ class VehicleIn(BaseModel):
     vehicle_type: Optional[str] = None
     body_type: Optional[str] = None       # trucks: loại thùng
     payload: Optional[str] = None         # trucks: tải trọng
+    ownership_expiry: Optional[str] = None   # hạn đăng ký
     registration_expiry: Optional[str] = None
     insurance_expiry: Optional[str] = None
     status: Optional[str] = None
@@ -64,6 +65,7 @@ class TrailerIn(BaseModel):
     chassis_no: Optional[str] = None
     payload: Optional[str] = None
     year: Optional[str] = None
+    ownership_expiry: Optional[str] = None
     registration_expiry: Optional[str] = None
     insurance_expiry: Optional[str] = None
     status: Optional[str] = None
@@ -236,6 +238,19 @@ async def upload_trailer_photo(trailer_id: int, file: UploadFile = File(...)):
 @router.delete("/trailers/{trailer_id}/photo")
 def delete_trailer_photo(trailer_id: int):
     _run(fleet.remove_photo, "trailer", trailer_id)
+    return _run(trailers.get_trailer, trailer_id)
+
+
+@router.post("/trailers/{trailer_id}/documents/{which}")
+async def upload_trailer_document(trailer_id: int, which: str, file: UploadFile = File(...)):
+    """A scan of the trailer's đăng kiểm / bảo hiểm / đăng ký xe, front or back (`which`: registration_front, ...)."""
+    _run(fleet.set_document, "trailer", trailer_id, which, await file.read())
+    return _run(trailers.get_trailer, trailer_id)
+
+
+@router.delete("/trailers/{trailer_id}/documents/{which}")
+def delete_trailer_document(trailer_id: int, which: str):
+    _run(fleet.remove_document, "trailer", trailer_id, which)
     return _run(trailers.get_trailer, trailer_id)
 
 

@@ -9,12 +9,15 @@ import { EXPIRY_WARN_DAYS, daysUntil, formatIsoDate } from './fleetUtils';
 /** Table pieces shared by the fleet tabs (tractors, drivers, trailers): status badges, document and date cells. */
 
 export const VEHICLE_TONE: Record<VehicleStatus, { badge: string; dot: string }> = {
+  ready: { badge: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300', dot: 'bg-sky-500' },
+  not_ready: { badge: 'bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300', dot: 'bg-orange-500' },
   active: { badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300', dot: 'bg-emerald-500' },
   broken: { badge: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300', dot: 'bg-rose-500' },
   maintenance: { badge: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300', dot: 'bg-amber-500' },
   inactive: { badge: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400', dot: 'bg-slate-400' },
 };
 export const DRIVER_TONE: Record<DriverStatus, { badge: string; dot: string }> = {
+  not_ready: { badge: 'bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300', dot: 'bg-orange-500' },
   active: { badge: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300', dot: 'bg-emerald-500' },
   leave: { badge: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300', dot: 'bg-amber-500' },
   left: { badge: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400', dot: 'bg-slate-400' },

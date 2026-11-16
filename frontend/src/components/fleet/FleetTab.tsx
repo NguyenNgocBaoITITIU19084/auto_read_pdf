@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArchiveRestore, ArrowLeftRight, CheckCircle2, Copy, Eye, ListChecks, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
+  AlertTriangle, ArchiveRestore, Lock, ArrowLeftRight, CheckCircle2, Copy, Eye, ListChecks, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
   FileSpreadsheet, Info, SlidersHorizontal, Trash2, Truck, Undo2, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -39,7 +39,8 @@ import {
   docState, docWarnings, fromControl, soonestDays, type DocState,
 } from './fleetCells';
 import {
-  apiError, awayHomeDrivers, canReturnHome, formatIsoDate, formatStampShort, matches, todayVnIso,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, awayHomeDrivers, licenseExpired, canReturnHome, expiredPapers, formatIsoDate, formatStampShort, isRunning, matches,
+  todayVnIso,
 } from './fleetUtils';
 
 type View = 'vehicles' | 'drivers' | 'history';
@@ -183,14 +184,14 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const away = useMemo(() => awayHomeDrivers(vs), [vs]);
 
   const vehicleDocs = (v: FleetVehicle): [FleetDocumentKind, string][] =>
-    [['registration', v.registration_expiry], ['insurance', v.insurance_expiry]];
+    [['ownership', v.ownership_expiry], ['registration', v.registration_expiry], ['insurance', v.insurance_expiry]];
   const driverDocs = (d: FleetDriver): [FleetDocumentKind, string][] => [['license', d.license_expiry]];
 
   const vehicleTest: Record<VehicleFilter, (v: FleetVehicle) => boolean> = useMemo(() => ({
     all: () => true,
-    running: (v) => v.status === 'active',
-    down: (v) => v.status === 'broken' || v.status === 'maintenance',
-    free: (v) => v.status === 'active' && !v.current_driver,
+    running: (v) => isRunning(v.status),
+    down: (v) => v.status === 'broken' || v.status === 'maintenance' || v.status === 'not_ready',
+    free: (v) => isRunning(v.status) && !v.current_driver,
     expiring: (v) => v.status !== 'inactive' && docWarnings(vehicleDocs(v), today).length > 0,
   }), [today]);
   const driverTest: Record<DriverFilter, (d: FleetDriver) => boolean> = useMemo(() => ({
@@ -222,6 +223,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     body: (v: FleetVehicle) => v.body_type,
     payload: (v: FleetVehicle) => v.payload,
     home: (v: FleetVehicle) => v.home_driver?.name ?? null,
+    ownership: (v: FleetVehicle) => v.ownership_expiry,
     registration: (v: FleetVehicle) => v.registration_expiry,
     insurance: (v: FleetVehicle) => v.insurance_expiry,
     note: (v: FleetVehicle) => v.note,
@@ -292,7 +294,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     ...(isTrucks
       ? [['body', C.body, true], ['payload', C.payload, false]] as [string, string, boolean][]
       : [['trailer', C.trailer, false]] as [string, string, boolean][]),
-    ['type', C.type, false], ['home', C.home, false], ['registration', C.registration, false],
+    ['type', C.type, false], ['home', C.home, false], ['ownership', C.ownership, false], ['registration', C.registration, false],
     ['insurance', C.insurance, false], ['note', C.note, false], ['created', C.created, false],
   ]), [L, C, isTrucks]);
   const driverDefaults = useMemo(() => defaults([
@@ -346,6 +348,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     payload: v.payload,
     type: v.vehicle_type,
     home: v.home_driver?.name || '',
+    ownership: formatIsoDate(v.ownership_expiry),
     registration: formatIsoDate(v.registration_expiry),
     insurance: formatIsoDate(v.insurance_expiry),
     note: v.note,
@@ -487,7 +490,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     const off: string[] = [];
     const res = await runEach(todo, async (r) => {
       if (kind === 'driver') return updateFleetDriverApi(r.id, { status: status as DriverStatus });
-      const out = await setFleetVehicleStatusApi(r.id, status as VehicleStatus, '', null, status === 'active');
+      const out = await setFleetVehicleStatusApi(r.id, status as VehicleStatus, '', null, isRunning(status as VehicleStatus));
       if (out.moved_driver && !out.moved_driver.to_vehicle_id) off.push(out.moved_driver.name);
       return out;
     }, f.toast.error);
@@ -539,7 +542,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     return {
       label: ids.length > 1 ? tf(B.statusTitle, { count: ids.length }) : B.status,
       items: options.map(([s, label]) => ({
-        key: `status-${s}`, label, icon: ListChecks, disabled: ids.length === 1 && row.status === s,
+        key: `status-${s}`, label, icon: ListChecks,
+        // a truck with expired papers: only not_ready / inactive (the server refuses the rest)
+        disabled: ids.length === 1 && (row.status === s || (kind === 'vehicle'
+          ? expiredPapers(row as FleetVehicle, today).length > 0 && !LOCK_FREE_STATUSES.includes(s as VehicleStatus)
+          // a driver with an expired licence: only not_ready / leave / left
+          : licenseExpired(row as FleetDriver, today) && !DRIVER_LOCK_FREE_STATUSES.includes(s as DriverStatus))),
         onClick: () => void applyStatus(kind, ids, s),
       })),
     };
@@ -547,7 +555,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
 
   // ---- one place for each row's actions: the right-click / "⋯" menu and the detail window use them alike ----
   const vehicleMain = (v: FleetVehicle): DetailAction | null =>
-    v.status === 'active' ? { label: f.quick.report, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v), primary: true }
+    isRunning(v.status) ? { label: f.quick.report, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v), primary: true }
       : v.status === 'broken' || v.status === 'maintenance'
         ? { label: f.quick.repaired, icon: <CheckCircle2 className="w-4 h-4" />, onClick: () => void markRepaired(v), primary: true }
         : null;
@@ -564,7 +572,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     return [
       { label: v.plate, items: [
         { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'vehicle', id: v.id }) },
-        ...(main ? [{ key: 'main', label: main.label, icon: v.status === 'active' ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
+        ...(main ? [{ key: 'main', label: main.label, icon: isRunning(v.status) ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
       ] },
       statusGroup('vehicle', v),
       { items: [
@@ -602,7 +610,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     const status = { label: f.menu.status, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v) };
     const main = vehicleMain(v);
     if (!main) return [status];
-    return v.status === 'active' ? [main] : [status, main];
+    return isRunning(v.status) ? [main] : [status, main];
   };
   const detailActions: DetailAction[] = detailVehicle ? vehicleDetailActions(detailVehicle)
     : detailDriver ? driverMain(detailDriver) : [];
@@ -718,7 +726,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     status: {
       filter: { options: () => valueCounts(shownVehicles, vehicleValue.status, [...VEHICLE_STATUSES]), value: vehicleCols.status || [],
         onChange: setCol(setVehicleCols, 'status'), format: (v) => f.vehicleStatus[v as VehicleStatus] ?? v },
-      render: (v) => <StatusBadge tone={VEHICLE_TONE[v.status]}>{f.vehicleStatus[v.status]}</StatusBadge>,
+      render: (v) => (
+        <span title={v.status_forced ? f.lock.forced : undefined} data-testid={v.status_forced ? 'status-forced' : undefined}>
+          <StatusBadge tone={VEHICLE_TONE[v.status]}>{f.vehicleStatus[v.status]}{!!v.status_forced && <Lock className="w-3 h-3" aria-hidden />}</StatusBadge>
+        </span>
+      ),
     },
     driver: {
       filter: { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'temporary', 'none']), value: vehicleCols.driver || [],
@@ -762,6 +774,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     payload: { td: 'whitespace-nowrap', render: (v) => plainCell(v.payload) },
     type: { render: (v) => plainCell(v.vehicle_type) },
     home: { render: (v) => plainCell(v.home_driver?.name || '') },
+    ownership: { render: (v) => dateCell(v.ownership_expiry, v.status === 'inactive') },
     registration: { render: (v) => dateCell(v.registration_expiry, v.status === 'inactive') },
     insurance: { render: (v) => dateCell(v.insurance_expiry, v.status === 'inactive') },
     note: { td: 'max-w-[18rem]', render: (v) => <span className="line-clamp-2 text-slate-600 dark:text-slate-300">{v.note || f.none}</span> },
@@ -783,7 +796,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     status: {
       filter: { options: () => valueCounts(shownDrivers, driverValue.status, [...DRIVER_STATUSES]), value: driverCols.status || [],
         onChange: setCol(setDriverCols, 'status'), format: (v) => f.driverStatus[v as DriverStatus] ?? v },
-      render: (d) => <StatusBadge tone={DRIVER_TONE[d.status]}>{f.driverStatus[d.status]}</StatusBadge>,
+      render: (d) => (
+        <span title={d.status_forced ? f.licenseLock.forced : undefined} data-testid={d.status_forced ? 'status-forced' : undefined}>
+          <StatusBadge tone={DRIVER_TONE[d.status]}>{f.driverStatus[d.status]}{!!d.status_forced && <Lock className="w-3 h-3" aria-hidden />}</StatusBadge>
+        </span>
+      ),
     },
     truck: {
       filter: { options: () => valueCounts(shownDrivers, driverValue.truck, ['primary', 'temporary', 'none']), value: driverCols.truck || [],
@@ -791,7 +808,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       render: (d) => {
         const c = d.current_vehicle;
         const home = d.home_vehicle;
-        const homeLine = home ? (home.status !== 'active'
+        const homeLine = home ? (!isRunning(home.status)
           ? tf(L.homeWithStatus, { plate: home.plate, status: f.vehicleStatus[home.status].toLowerCase() })
           : tf(L.tempHome, { plate: home.plate })) : '';
         if (!c) {
@@ -915,7 +932,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
                 {cells(vehicleColumns, vehicleSpecs, v)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
-                    {v.status === 'active' && (
+                    {isRunning(v.status) && (
                       <button type="button" onClick={() => setStatusFor(v)}
                         className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-50/60 dark:hover:bg-amber-950/20">
                         <Wrench className="w-3.5 h-3.5" />{f.quick.report}

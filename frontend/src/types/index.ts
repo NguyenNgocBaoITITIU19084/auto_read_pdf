@@ -712,9 +712,12 @@ export interface NotificationSettings {
 // ---------------------------------------------------------------------------
 // Fleet (trucks, drivers, who drives which truck)
 // ---------------------------------------------------------------------------
-export const VEHICLE_STATUSES = ['active', 'broken', 'maintenance', 'inactive'] as const;
+/** ready / active run (a driver can be on it, a trailer hitched); the rest stop it. not_ready is also what expired
+ *  papers (đăng ký, đăng kiểm, bảo hiểm) force: see `status_forced`. */
+export const VEHICLE_STATUSES = ['ready', 'active', 'not_ready', 'broken', 'maintenance', 'inactive'] as const;
 export type VehicleStatus = typeof VEHICLE_STATUSES[number];
-export const DRIVER_STATUSES = ['active', 'leave', 'left'] as const;
+/** not_ready is also what an expired licence forces (see `status_forced`) */
+export const DRIVER_STATUSES = ['active', 'not_ready', 'leave', 'left'] as const;
 export type DriverStatus = typeof DRIVER_STATUSES[number];
 /** primary: the driver on their home truck; temporary: on another truck while theirs cannot run */
 export type AssignmentKind = 'primary' | 'temporary';
@@ -732,10 +735,13 @@ export interface FleetVehicle {
   /** trucks: loại thùng (e.g. "Thùng kín") and tải trọng (free text, e.g. "8 tấn") */
   body_type: string;
   payload: string;
-  /** 'YYYY-MM-DD' or '' */
+  /** 'YYYY-MM-DD' or '' (đăng ký, đăng kiểm, bảo hiểm) */
+  ownership_expiry: string;
   registration_expiry: string;
   insurance_expiry: string;
   status: VehicleStatus;
+  /** 1: the paper lock put it in not_ready (it goes back to ready once renewed) */
+  status_forced: number;
   note: string;
   /** stored photo name ('' = none); see fleetPhotoUrl */
   photo: string;
@@ -764,6 +770,8 @@ export interface FleetDriver {
   license_class: string;
   license_expiry: string;
   status: DriverStatus;
+  /** 1: an expired licence put them in not_ready (back to active once renewed) */
+  status_forced: number;
   note: string;
   /** stored photo name ('' = none); see fleetPhotoUrl */
   photo: string;
@@ -802,7 +810,8 @@ export const VEHICLE_DOCUMENTS = ['registration_front', 'registration_back', 'in
   'ownership_front', 'ownership_back'] as const;
 export type VehicleDocument = typeof VEHICLE_DOCUMENTS[number];
 export type FleetDocumentImage = DriverDocument | VehicleDocument;
-export type FleetDocumentKind = 'registration' | 'insurance' | 'license' | 'trailer_registration' | 'trailer_insurance';
+export type FleetDocumentKind = 'ownership' | 'registration' | 'insurance' | 'license' | 'trailer_ownership' | 'trailer_registration'
+  | 'trailer_insurance';
 export interface FleetDocument {
   kind: FleetDocumentKind;
   label: string;
@@ -855,13 +864,23 @@ export interface FleetTrailer {
   payload: string;
   /** 'YYYY' or '' */
   year: string;
-  /** 'YYYY-MM-DD' or '' */
+  /** 'YYYY-MM-DD' or '' (đăng ký, đăng kiểm, bảo hiểm) */
+  ownership_expiry: string;
   registration_expiry: string;
   insurance_expiry: string;
   status: TrailerStatus;
+  /** 1: the paper lock put it in not_ready */
+  status_forced: number;
   note: string;
   /** stored photo name ('' = none); see fleetPhotoUrl */
   photo: string;
+  /** scans of its papers, like a truck's: đăng kiểm, bảo hiểm, giấy đăng ký (stored image names, '' = none) */
+  registration_front: string;
+  registration_back: string;
+  insurance_front: string;
+  insurance_back: string;
+  ownership_front: string;
+  ownership_back: string;
   created_at: string;
   updated_at: string;
   /** the tractor pulling it now, with that tractor's current driver */

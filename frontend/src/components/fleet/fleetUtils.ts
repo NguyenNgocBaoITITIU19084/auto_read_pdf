@@ -1,4 +1,4 @@
-import type { FleetDriver, FleetVehicle } from '../../types';
+import type { DriverStatus, FleetDriver, FleetVehicle, VehicleStatus } from '../../types';
 import { VN_TIME_ZONE } from '../../utils/vnTime';
 
 /** Documents expiring within this many days are flagged (same as the backend reminder). */
@@ -63,14 +63,38 @@ export function liveDaysLeft(doc: { expiry: string; days_left: number }, today: 
   return daysUntil(iso, today) ?? doc.days_left;
 }
 
+/** Statuses a truck / trailer runs in ("Sẵn sàng", "Đang chạy"); the others stop it. */
+export const RUNNING_STATUSES: readonly VehicleStatus[] = ['ready', 'active'];
+export const isRunning = (status: VehicleStatus) => RUNNING_STATUSES.includes(status);
+/** While a paper is expired only these can be picked (the backend refuses the rest) */
+export const LOCK_FREE_STATUSES: readonly VehicleStatus[] = ['not_ready', 'inactive'];
+export const PAPER_EXPIRIES = ['ownership_expiry', 'registration_expiry', 'insurance_expiry'] as const;
+export type PaperExpiry = typeof PAPER_EXPIRIES[number];
+
+/** The papers whose expiry date is before today (the day itself still counts as valid, as on the server). */
+export function expiredPapers(row: Record<PaperExpiry, string>, today: string = todayVnIso()): PaperExpiry[] {
+  return PAPER_EXPIRIES.filter((k) => {
+    const n = daysUntil(row[k], today);
+    return n !== null && n < 0;
+  });
+}
+
+/** While a driver's licence is expired only these can be picked (the backend refuses the rest) */
+export const DRIVER_LOCK_FREE_STATUSES: readonly DriverStatus[] = ['not_ready', 'leave', 'left'];
+/** The licence date is before today (its last day still counts, as on the server). */
+export function licenseExpired(row: { license_expiry: string }, today: string = todayVnIso()): boolean {
+  const n = daysUntil(row.license_expiry, today);
+  return n !== null && n < 0;
+}
+
 /** Trucks a driver can take now: running and nobody on them (`except`: leave this one out). */
 export function freeVehicles(vehicles: FleetVehicle[], except?: number | null): FleetVehicle[] {
-  return vehicles.filter((v) => v.status === 'active' && !v.current_driver && v.id !== except);
+  return vehicles.filter((v) => isRunning(v.status) && !v.current_driver && v.id !== except);
 }
 
 /** Home trucks running again while their driver is still away on a temporary truck: they can go back. */
 export function awayHomeDrivers(vehicles: FleetVehicle[]): FleetVehicle[] {
-  return vehicles.filter((v) => v.status === 'active' && !v.current_driver && v.home_driver?.status === 'active'
+  return vehicles.filter((v) => isRunning(v.status) && !v.current_driver && v.home_driver?.status === 'active'
     && v.home_driver.driving_vehicle_id !== null && v.home_driver.driving_vehicle_id !== v.id);
 }
 
@@ -78,7 +102,7 @@ export function awayHomeDrivers(vehicles: FleetVehicle[]): FleetVehicle[] {
 export function canReturnHome(d: FleetDriver, vehicles: FleetVehicle[]): boolean {
   if (d.status !== 'active' || !d.home_vehicle || d.current_vehicle?.id === d.home_vehicle.id) return false;
   const home = vehicles.find((v) => v.id === d.home_vehicle!.id);
-  return !!home && home.status === 'active' && !home.current_driver;
+  return !!home && isRunning(home.status) && !home.current_driver;
 }
 
 /** Expiring or expired documents of running trucks and working drivers. */
@@ -88,6 +112,6 @@ export function expiringCount(vehicles: FleetVehicle[], drivers: FleetDriver[], 
     return n !== null && n <= EXPIRY_WARN_DAYS;
   };
   return vehicles.filter((v) => v.status !== 'inactive').reduce(
-    (n, v) => n + (soon(v.registration_expiry) ? 1 : 0) + (soon(v.insurance_expiry) ? 1 : 0), 0)
+    (n, v) => n + (soon(v.ownership_expiry) ? 1 : 0) + (soon(v.registration_expiry) ? 1 : 0) + (soon(v.insurance_expiry) ? 1 : 0), 0)
     + drivers.filter((d) => d.status !== 'left' && soon(d.license_expiry)).length;
 }

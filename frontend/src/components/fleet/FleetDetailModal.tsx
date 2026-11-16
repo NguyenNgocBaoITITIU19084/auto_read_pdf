@@ -10,6 +10,7 @@ import { FieldCopyBar } from '../common/FieldCopyBar';
 import { Modal } from '../common/Modal';
 import { daysLeftText } from '../common/ReminderViews';
 import { FleetAvatar } from './FleetPhoto';
+import { VEHICLE_TONE } from './fleetCells';
 import { DocumentTile, DriverSection, PaperRow, usePaperTitle } from './DriverPapers';
 import { DriverDetailModal } from './DriverDetail';
 import { PickBox } from './FieldPick';
@@ -123,10 +124,7 @@ const VehicleDetailModal: React.FC<{
     return () => { alive = false; };
   }, [v.id, v.updated_at]);
 
-  const statusTone = v.status === 'active' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-    : v.status === 'broken' ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-      : v.status === 'maintenance' ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-        : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400';
+  const statusTone = VEHICLE_TONE[v.status].badge;
   const c = v.current_driver;
   const trailerFacts = trailer ? [trailer.trailer_type, trailer.payload].filter(Boolean).join(' · ') : '';
 
@@ -142,6 +140,7 @@ const VehicleDetailModal: React.FC<{
     ] : [
       { key: 'trailer', label: t.tabs.trailers, value: [v.trailer_plate, trailerFacts].filter(Boolean).join(' – ') },
     ]),
+    { key: 'ownership', label: f.vehicleForm.ownership, value: formatIsoDate(v.ownership_expiry) },
     { key: 'registration', label: VF.registration, value: formatIsoDate(v.registration_expiry) },
     { key: 'insurance', label: VF.insurance, value: formatIsoDate(v.insurance_expiry) },
     { key: 'note', label: VF.note, value: v.note },
@@ -170,7 +169,12 @@ const VehicleDetailModal: React.FC<{
           )}
           <div className="flex-1 min-w-0 grid grid-cols-2 gap-2">
             {box('plate', <div className="text-lg font-bold text-slate-900 dark:text-slate-100">{v.plate}</div>, 'col-span-2')}
-            {box('status', <span className={`mt-0.5 self-start inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>{f.vehicleStatus[v.status]}</span>)}
+            {box('status', (
+              <div className="space-y-1">
+                <span className={`mt-0.5 self-start inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusTone}`}>{f.vehicleStatus[v.status]}</span>
+                {!!v.status_forced && <p className="text-[11px] text-orange-700 dark:text-orange-300">{f.lock.forced}</p>}
+              </div>
+            ))}
             {box('type')}
           </div>
         </div>
@@ -218,7 +222,8 @@ const VehicleDetailModal: React.FC<{
                 <PaperRow key={kind} kind={kind} front={tile('front')} back={tile('back')}
                   hint={kind === 'ownership' ? D.ifAny : undefined}
                   facts={kind === 'registration' ? box('registration', <DateValue iso={v.registration_expiry} />)
-                    : kind === 'insurance' ? box('insurance', <DateValue iso={v.insurance_expiry} />) : null} />
+                    : kind === 'insurance' ? box('insurance', <DateValue iso={v.insurance_expiry} />)
+                      : box('ownership', <DateValue iso={v.ownership_expiry} />)} />
               );
             })}
           </div>

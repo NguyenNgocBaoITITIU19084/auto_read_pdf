@@ -188,3 +188,39 @@ def test_trailer_api():
     assert client.delete(f"/api/v1/fleet/trailers/{t['id']}").status_code == 200
     assert client.get("/api/v1/fleet/trash", params={"kind": "trailer"}).json()["items"][0]["plate"] == "51R-1"
     assert client.get("/api/v1/export/templates", params={"tab": "fleet_trailer"}).status_code == 200
+
+
+# --- papers (đăng ký / đăng kiểm / bảo hiểm scans) ---------------------------------
+def test_trailer_papers_are_stored_listed_and_purged_with_it():
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", (2600, 1600), "white").save(buf, "PNG")
+    t = tr.create_trailer({"plate": "51R-9"})
+    reg = fleet.set_document("trailer", t, "registration_front", buf.getvalue())
+    own = fleet.set_document("trailer", t, "ownership_back", buf.getvalue())
+    assert reg.startswith(f"trailer_{t}_registration_front_") and fleet.photo_path(reg) is not None
+    assert max(Image.open(fleet.photo_path(reg)).size) == fleet.DOCUMENT_MAX_SIDE
+    got = tr.get_trailer(t)
+    assert (got["registration_front"], got["ownership_back"], got["insurance_front"]) == (reg, own, "")
+    with pytest.raises(fleet.FleetError):
+        fleet.set_document("trailer", t, "license_front", buf.getvalue())
+    fleet.remove_document("trailer", t, "ownership_back")
+    assert tr.get_trailer(t)["ownership_back"] == "" and fleet.photo_path(own) is None
+    tr.delete_trailer(t)
+    fleet.delete_from_trash("trailer", [t])
+    assert fleet.photo_path(reg) is None
+
+
+def test_trailer_papers_api():
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 200), "white").save(buf, "PNG")
+    t = tr.create_trailer({"plate": "51R-9"})
+    res = client.post(f"/api/v1/fleet/trailers/{t}/documents/insurance_back",
+                      files={"file": ("a.png", buf.getvalue(), "image/png")})
+    assert res.status_code == 200, res.text
+    assert res.json()["insurance_back"].startswith(f"trailer_{t}_insurance_back_")
+    assert client.delete(f"/api/v1/fleet/trailers/{t}/documents/insurance_back").json()["insurance_back"] == ""
+    assert client.delete(f"/api/v1/fleet/trailers/{t}/documents/nope").status_code == 400

@@ -2777,9 +2777,15 @@ def get_booking_tasks(col_id: int | None = None, now: datetime | None = None) ->
 
 
 def run_reminders(now: datetime | None = None) -> dict:
-    """The periodic reminder pass: cut-off reminders, the morning brief when it is due, then fleet document expiry."""
-    from backend.app.core.fleet import scan_expiry_reminders
+    """The periodic reminder pass: cut-off reminders, the morning brief when it is due, the fleet's paper lock (expired
+    papers make a truck / trailer "Không sẵn sàng"), then fleet document expiry."""
+    from backend.app.core.fleet import enforce_papers, scan_expiry_reminders
     result = {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
+    try:
+        result["paper_lock"] = enforce_papers(now.astimezone(VN_TZ).date() if now else None)
+    except Exception:
+        logger.exception("Fleet paper lock failed")
+        result["paper_lock"] = 0
     try:
         result["fleet"] = scan_expiry_reminders(now)
     except Exception:

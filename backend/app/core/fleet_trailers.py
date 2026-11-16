@@ -16,13 +16,16 @@ import re
 from datetime import datetime
 
 from backend.app.core.fleet import (
-    VEHICLE_STATUSES, FleetError, _conn, _date, _fold, _now, _rows, _text, _vehicle, plate_key,
+    LOCK_FREE_STATUSES, TRAILER_DOCUMENTS, VEHICLE_STATUSES, FleetError, _check_paper_lock, _conn, _date, _fold, _now,
+    _paper_move, _rows, _text, _vehicle, expired_papers, logger, plate_key,
 )
 
-TRAILER_STATUSES = VEHICLE_STATUSES          # active / broken / maintenance / inactive
-TRAILER_STATUS_LABELS = {"active": "Đang dùng", "broken": "Hư hỏng", "maintenance": "Bảo dưỡng",
-                         "inactive": "Ngưng hoạt động"}
-_TRAILER_FIELDS = ("plate", "trailer_type", "chassis_no", "payload", "year", "registration_expiry",
+TRAILER_STATUSES = VEHICLE_STATUSES          # ready / active / not_ready / broken / maintenance / inactive
+TRAILER_STATUS_LABELS = {"ready": "Sẵn sàng", "active": "Đang dùng", "not_ready": "Không sẵn sàng", "broken": "Hư hỏng",
+                         "maintenance": "Bảo dưỡng", "inactive": "Ngưng hoạt động"}
+# a trailer in these comes off its tractor and cannot be hitched
+UNHITCHED_STATUSES = ("not_ready", "inactive")
+_TRAILER_FIELDS = ("plate", "trailer_type", "chassis_no", "payload", "year", "ownership_expiry", "registration_expiry",
                    "insurance_expiry", "status", "note")
 _YEAR_RE = re.compile(r"^\d{4}$")
 HITCH_MAX_LIMIT = 1000
@@ -130,8 +133,10 @@ def list_trailers() -> list[dict]:
     out = []
     for t in trailers:
         p = pulling.get(t["id"])
-        item = {k: t[k] for k in ("id", "plate", "trailer_type", "chassis_no", "payload", "year", "registration_expiry",
-                                  "insurance_expiry", "status", "note", "photo", "created_at", "updated_at")}
+        item = {k: t[k] for k in ("id", "plate", "trailer_type", "chassis_no", "payload", "year", "ownership_expiry",
+                                  "registration_expiry", "insurance_expiry", "status", "status_forced", "note",
+                                  "photo", *TRAILER_DOCUMENTS,
+                                  "created_at", "updated_at")}
         item["vehicle"] = ({"id": p["vehicle_id"], "plate": p["plate"], "status": p["status"], "photo": p["photo"],
                             "driver_name": p["driver_name"] or "", "since": p["started_at"], "reason": p["reason"]}
                            if p else None)
@@ -228,6 +233,14 @@ def _hitch(conn, trailer: dict, vehicle: dict, reason: str, stamp: str) -> dict:
     return {"replaced": theirs["trailer_plate"] if theirs else "", "from_plate": mine["vehicle_plate"] if mine else ""}
 
 
+def _check_hitchable(trailer: dict) -> None:
+    """Out of service or not ready (expired papers, ...): it cannot go on a tractor."""
+    if trailer["status"] in UNHITCHED_STATUSES:
+        expired = expired_papers(trailer)
+        why = f" ({', '.join(expired)} hết hạn)" if expired else ""
+        raise FleetError(f"Moóc {trailer['plate']} đang {TRAILER_STATUS_LABELS[trailer['status']].lower()}{why}")
+
+
 def hitch(trailer_id: int, vehicle_id: int | None, reason: str = "") -> dict:
     """Hitch the trailer to a tractor (None: unhitch it). The explicit move: it comes off another tractor, and the
     tractor's own trailer comes off, without asking."""
@@ -238,8 +251,7 @@ def hitch(trailer_id: int, vehicle_id: int | None, reason: str = "") -> dict:
             _close(conn, _open_by_trailer(conn, trailer_id), reason or "Tháo moóc", stamp)
             return {"replaced": "", "from_plate": ""}
         vehicle = _vehicle(conn, vehicle_id)
-        if trailer["status"] == "inactive":
-            raise FleetError(f"Moóc {trailer['plate']} đang ngưng hoạt động")
+        _check_hitchable(trailer)
         return _hitch(conn, trailer, vehicle, reason, stamp)
 
 
@@ -260,8 +272,7 @@ def hitch_by_plate(conn, vehicle: dict, plate: str, stamp: str) -> None:
         other = _open_by_trailer(conn, trailer["id"])
         if other and other["vehicle_id"] != vehicle["id"]:
             raise FleetError(f"Moóc {trailer['plate']} đang gắn với xe {other['vehicle_plate']}", 409)
-        if trailer["status"] == "inactive":
-            raise FleetError(f"Moóc {trailer['plate']} đang ngưng hoạt động")
+        _check_hitchable(trailer)
     else:
         trailer_id = _insert(conn, {"plate": _text(plate, 30).upper()}, stamp)
         trailer = _trailer(conn, trailer_id)
@@ -295,6 +306,8 @@ def _clean(data: dict, partial: bool) -> dict:
         if year and (not _YEAR_RE.match(year) or not 1950 <= int(year) <= datetime.now().year + 1):
             raise FleetError(f"Năm sản xuất không hợp lệ: {year}")
         out["year"] = year
+    if "ownership_expiry" in data or not partial:
+        out["ownership_expiry"] = _date(data.get("ownership_expiry"), "Hạn đăng ký")
     if "registration_expiry" in data or not partial:
         out["registration_expiry"] = _date(data.get("registration_expiry"), "Hạn đăng kiểm")
     if "insurance_expiry" in data or not partial:
@@ -321,12 +334,17 @@ def _check_unique(conn, plate: str, exclude_id: int | None) -> None:
 def _insert(conn, data: dict, stamp: str) -> int:
     fields = _clean(data, partial=False)
     _check_unique(conn, fields["plate"], None)
+    # papers already expired: it starts as not_ready (forced), whatever was picked
+    forced = int(bool(expired_papers(fields)) and fields["status"] not in LOCK_FREE_STATUSES)
+    if forced:
+        fields["status"] = "not_ready"
     cur = conn.execute(
-        "INSERT INTO fleet_trailers (plate, plate_key, trailer_type, chassis_no, payload, year, registration_expiry, "
-        "insurance_expiry, status, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+        "INSERT INTO fleet_trailers (plate, plate_key, trailer_type, chassis_no, payload, year, ownership_expiry, "
+        "registration_expiry, insurance_expiry, status, status_forced, note, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
         (fields["plate"], plate_key(fields["plate"]), fields["trailer_type"], fields["chassis_no"], fields["payload"],
-         fields["year"], fields["registration_expiry"], fields["insurance_expiry"], fields["status"], fields["note"],
-         stamp, stamp))
+         fields["year"], fields["ownership_expiry"], fields["registration_expiry"], fields["insurance_expiry"],
+         fields["status"], forced, fields["note"], stamp, stamp))
     return cur.lastrowid
 
 
@@ -338,18 +356,25 @@ def create_trailer(data: dict) -> int:
         if data.get("vehicle_id"):
             vehicle = _vehicle(conn, int(data["vehicle_id"]))
             trailer = _trailer(conn, trailer_id)
-            if trailer["status"] == "inactive":
-                raise FleetError(f"Moóc {trailer['plate']} đang ngưng hoạt động")
+            _check_hitchable(trailer)
             _hitch(conn, trailer, vehicle, "", stamp)
         return trailer_id
 
 
 def update_trailer(trailer_id: int, data: dict) -> None:
-    """Edit a trailer. A new plate shows on the tractor pulling it; going out of service takes it off."""
+    """Edit a trailer. A new plate shows on the tractor pulling it; going out of service or not ready takes it off.
+    A status other than the stored one is a change by hand: refused while a paper is expired (unless not_ready /
+    inactive), and it clears the "forced" mark. The same status (the form always sends it) changes nothing; the new
+    dates then lock or free it (see enforce_trailer_papers)."""
     fields = _clean({k: v for k, v in data.items() if k in _TRAILER_FIELDS}, partial=True)
     stamp = _now()
     with _conn() as conn:
         before = _trailer(conn, trailer_id)
+        if fields.get("status", before["status"]) == before["status"]:
+            fields.pop("status", None)
+        else:
+            _check_paper_lock({**before, **fields}, fields["status"])
+            fields["status_forced"] = 0
         if "plate" in fields:
             _check_unique(conn, fields["plate"], trailer_id)
             fields["plate_key"] = plate_key(fields["plate"])
@@ -361,8 +386,27 @@ def update_trailer(trailer_id: int, data: dict) -> None:
         if hitched and "plate" in fields and fields["plate"] != before["plate"]:
             conn.execute("UPDATE fleet_trailer_hitches SET trailer_plate = ? WHERE id = ?;", (fields["plate"], hitched["id"]))
             _sync_cache(conn, hitched["vehicle_id"])
-        if hitched and fields.get("status") == "inactive" and before["status"] != "inactive":
-            _close(conn, hitched, TRAILER_STATUS_LABELS["inactive"], stamp)
+        if hitched and fields.get("status") in UNHITCHED_STATUSES:
+            _close(conn, hitched, TRAILER_STATUS_LABELS[fields["status"]], stamp)
+    enforce_trailer_papers(trailer_id)
+
+
+def enforce_trailer_papers(trailer_id: int, today=None) -> str | None:
+    """The paper lock on one trailer (see fleet.enforce_vehicle_papers): an expired paper makes it not_ready and takes
+    it off its tractor; renewed papers bring a trailer it had forced back to "ready". Returns the new status."""
+    stamp = _now()
+    with _conn() as conn:
+        rows = _rows(conn, "SELECT * FROM fleet_trailers WHERE id = ? AND deleted_at IS NULL;", (trailer_id,))
+        move = _paper_move(rows[0], today) if rows else None
+        if not move:
+            return None
+        status, reason = move
+        conn.execute("UPDATE fleet_trailers SET status = ?, status_forced = ?, updated_at = ? WHERE id = ?;",
+                     (status, int(status == "not_ready"), stamp, trailer_id))
+        if status == "not_ready":
+            _close(conn, _open_by_trailer(conn, trailer_id), f"{TRAILER_STATUS_LABELS['not_ready']}: {reason}", stamp)
+    logger.info(f"Paper lock: trailer {rows[0]['plate']} -> {status} ({reason})")
+    return status
 
 
 def delete_trailer(trailer_id: int) -> None:

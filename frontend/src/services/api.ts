@@ -938,6 +938,11 @@ export const hitchFleetTrailerApi = async (id: number, vehicleId: number | null,
 export const uploadFleetTrailerPhotoApi = (id: number, file: Blob) => uploadPhoto<FleetTrailer>(`/fleet/trailers/${id}/photo`, file);
 export const deleteFleetTrailerPhotoApi = async (id: number): Promise<FleetTrailer> =>
   (await apiClient.delete<FleetTrailer>(`/fleet/trailers/${id}/photo`)).data;
+/** A scan of the trailer's đăng kiểm / bảo hiểm / đăng ký xe, front or back. */
+export const uploadFleetTrailerDocumentApi = (id: number, which: VehicleDocument, file: Blob) =>
+  uploadPhoto<FleetTrailer>(`/fleet/trailers/${id}/documents/${which}`, file);
+export const deleteFleetTrailerDocumentApi = async (id: number, which: VehicleDocument): Promise<FleetTrailer> =>
+  (await apiClient.delete<FleetTrailer>(`/fleet/trailers/${id}/documents/${which}`)).data;
 export const getFleetHitchesApi = async (params: { trailer_id?: number; vehicle_id?: number; limit?: number } = {}) =>
   (await apiClient.get<FleetHitch[]>('/fleet/trailers/history', { params })).data;
 export const getFleetHitchPageApi = async (params: {

@@ -19,6 +19,7 @@ const api = {
   createFleetTrailerApi: vi.fn(),
   deleteFleetTrailerApi: vi.fn(),
   updateFleetTrailerApi: vi.fn(),
+  uploadFleetTrailerDocumentApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetTrailersApi: (...a: unknown[]) => api.getFleetTrailersApi(...a),
@@ -29,6 +30,8 @@ vi.mock('../../services/api', () => ({
   deleteFleetTrailerApi: (...a: unknown[]) => api.deleteFleetTrailerApi(...a),
   updateFleetTrailerApi: (...a: unknown[]) => api.updateFleetTrailerApi(...a),
   uploadFleetTrailerPhotoApi: vi.fn(),
+  uploadFleetTrailerDocumentApi: (...a: unknown[]) => api.uploadFleetTrailerDocumentApi(...a),
+  deleteFleetTrailerDocumentApi: vi.fn(),
   deleteFleetTrailerPhotoApi: vi.fn(),
   getFleetTrashCountApi: async () => ({ vehicle: 0, driver: 0, trailer: 2 }),
   fleetVehicleTrashApi: {}, fleetDriverTrashApi: {}, fleetTrailerTrashApi: {},
@@ -39,11 +42,12 @@ import { TrailerTab } from './TrailerTab';
 
 const R = translations.vi.fleet.trailer;
 const trailer = (id: number, plate: string, extra: Partial<FleetTrailer> = {}): FleetTrailer => ({
-  id, plate, trailer_type: '', chassis_no: '', payload: '', year: '', registration_expiry: '', insurance_expiry: '', status: 'active',
-  note: '', photo: '', created_at: '', updated_at: '', vehicle: null, ...extra,
+  id, plate, trailer_type: '', chassis_no: '', payload: '', year: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active',
+  note: '', photo: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '',
+  ownership_back: '', created_at: '', updated_at: '', vehicle: null, ...extra,
 });
 const truck = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
-  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
+  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
   created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null, ...extra,
 });
 
@@ -159,5 +163,93 @@ describe('TrailerTab quick status from the row menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: R.status.broken }));
     await waitFor(() => expect(api.updateFleetTrailerApi).toHaveBeenCalledWith(1, { status: 'broken' }));
     expect(addToast).toHaveBeenCalledWith(`51R-1: ${R.status.broken}`, 'success');
+  });
+});
+
+describe('TrailerTab form', () => {
+  const pulling = { id: 1, plate: '51C-1', status: 'active' as const, photo: '', driver_name: 'An', since: '2026-11-15 08:00:00', reason: '' };
+
+  it('saves the papers\' scans with a new trailer', async () => {
+    const urls = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    URL.createObjectURL = vi.fn(() => 'blob:scan');
+    URL.revokeObjectURL = vi.fn();
+    api.getFleetTrailersApi.mockResolvedValue([]);
+    api.createFleetTrailerApi.mockResolvedValue(trailer(5, '51R-5'));
+    api.uploadFleetTrailerDocumentApi.mockResolvedValue({});
+    render(<TrailerTab />);
+    fireEvent.click(await screen.findByText(R.actions.add));
+    const D = translations.vi.fleet.detail;
+    expect(screen.getByTestId('paper-ownership')).toBeInTheDocument();
+    expect(screen.getByTestId('paper-registration')).toBeInTheDocument();
+    expect(screen.getByText(R.form.notConnected)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(new RegExp(R.form.plate)), { target: { value: '51R-5' } });
+    fireEvent.change(screen.getByLabelText(R.form.chassis), { target: { value: 'RL4-123' } });
+    fireEvent.change(screen.getByLabelText(R.form.registration), { target: { value: '2027-05-01' } });
+    const scan = new File(['x'], 'dk.jpg', { type: 'image/jpeg' });
+    fireEvent.change(screen.getByTestId('paper-picker-registration_front-input'), { target: { files: [scan] } });
+    expect(screen.getByRole('img', { name: `${D.inspection} – ${D.front}` })).toBeInTheDocument();
+    fireEvent.click(screen.getByText(translations.vi.common.save));
+    await waitFor(() => expect(api.uploadFleetTrailerDocumentApi).toHaveBeenCalledWith(5, 'registration_front', scan));
+    expect(api.createFleetTrailerApi).toHaveBeenCalledWith(expect.objectContaining({
+      plate: '51R-5', chassis_no: 'RL4-123', registration_expiry: '2027-05-01', vehicle_id: null }));
+    expect(api.uploadFleetTrailerDocumentApi).toHaveBeenCalledTimes(1);
+    URL.createObjectURL = urls.create;
+    URL.revokeObjectURL = urls.revoke;
+  });
+
+  it('shows the tractor pulling it, lists tractors only, and moves it to another one', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([truck(1, '51C-1', { trailer_plate: '51R-1' }), truck(2, '51C-2', { trailer_plate: '51R-9' }),
+      truck(3, '51D-3', { category: 'truck' })]);
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1', { vehicle: pulling })]);
+    api.updateFleetTrailerApi.mockResolvedValue(trailer(1, '51R-1'));
+    api.hitchFleetTrailerApi.mockResolvedValue({});
+    render(<TrailerTab />);
+    fireEvent.contextMenu(await screen.findByTestId('trailer-1'), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByRole('menuitem', { name: translations.vi.fleet.menu.edit }));
+    const box = await screen.findByTestId('trailer-connection');
+    expect(within(box).getByText('Đang gắn với đầu kéo 51C-1')).toBeInTheDocument();
+    expect(within(box).getByText('Tài xế: An')).toBeInTheDocument();
+    const select = screen.getByLabelText(R.form.vehicle) as HTMLSelectElement;
+    expect(select.value).toBe('1');
+    expect([...select.options].map((o) => o.value)).toEqual(['', '1', '2']);     // the truck (xe tải) is not there
+    fireEvent.change(select, { target: { value: '2' } });
+    expect(screen.getByText(/Moóc 51R-9 đang gắn trên đầu kéo này sẽ được tháo ra/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(translations.vi.common.save));
+    await waitFor(() => expect(api.hitchFleetTrailerApi).toHaveBeenCalledWith(1, 2));
+  });
+
+  it('saving without touching the tractor does not move the trailer', async () => {
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1', { vehicle: pulling })]);
+    api.updateFleetTrailerApi.mockResolvedValue(trailer(1, '51R-1'));
+    render(<TrailerTab />);
+    fireEvent.contextMenu(await screen.findByTestId('trailer-1'), { clientX: 10, clientY: 10 });
+    fireEvent.click(screen.getByRole('menuitem', { name: translations.vi.fleet.menu.edit }));
+    fireEvent.click(await screen.findByText(translations.vi.common.save));
+    await waitFor(() => expect(api.updateFleetTrailerApi).toHaveBeenCalled());
+    expect(api.hitchFleetTrailerApi).not.toHaveBeenCalled();
+  });
+});
+
+describe('TrailerTab paper lock', () => {
+  it('a locked trailer cannot be hitched, and renewing it in the form says it goes back to ready', async () => {
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1', { status: 'not_ready', status_forced: 1, insurance_expiry: '2001-01-01' })]);
+    api.updateFleetTrailerApi.mockResolvedValue(trailer(1, '51R-1'));
+    render(<TrailerTab />);
+    const row = await screen.findByTestId('trailer-1');
+    expect(within(row).queryByText(R.actions.hitch)).not.toBeInTheDocument();
+    expect(within(row).getByTestId('status-forced')).toBeInTheDocument();
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    expect(screen.queryByRole('menuitem', { name: R.actions.hitch })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: R.status.ready })).toBeDisabled();
+    fireEvent.click(screen.getByRole('menuitem', { name: translations.vi.fleet.menu.edit }));
+
+    expect(await screen.findByTestId('paper-lock-hint')).toHaveTextContent('Bảo hiểm đã hết hạn');
+    expect((screen.getByLabelText(R.form.vehicle) as HTMLSelectElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(R.form.insurance), { target: { value: '2099-01-01' } });
+    expect(screen.queryByTestId('paper-lock-hint')).not.toBeInTheDocument();
+    expect(screen.getByText(translations.vi.fleet.lock.renewed)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(translations.vi.common.save));
+    await waitFor(() => expect(api.updateFleetTrailerApi).toHaveBeenCalledWith(1, expect.objectContaining({
+      status: 'not_ready', insurance_expiry: '2099-01-01' })));
   });
 });

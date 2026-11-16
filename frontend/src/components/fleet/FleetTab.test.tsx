@@ -83,11 +83,11 @@ import { FleetTab } from './FleetTab';
 const f = translations.vi.fleet;
 
 const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
-  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
+  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
   created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null, ...extra,
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
-  id, name, phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active', note: '', photo: '',
+  id, name, phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active', status_forced: 0, note: '', photo: '',
   license_front: '', license_back: '', id_front: '', id_back: '',
   created_at: '', updated_at: '', home_vehicle: null, current_vehicle: null, ...extra,
 });
@@ -515,7 +515,7 @@ describe('FleetTab Excel export', () => {
     expect(props.tab).toBe('fleet_vehicle');
     expect(props.filenamePrefix).toBe('doi_xe');
     expect(props.allColumns.map((c: { key: string }) => c.key)).toEqual(
-      ['STT', 'plate', 'status', 'driver', 'docs', 'trailer', 'type', 'home', 'registration', 'insurance', 'note', 'created']);
+      ['STT', 'plate', 'status', 'driver', 'docs', 'trailer', 'type', 'home', 'ownership', 'registration', 'insurance', 'note', 'created']);
     expect(props.data).toEqual([expect.objectContaining({
       STT: 1, plate: '51D-999', status: 'Hư hỏng', driver: `${an.name} (lái tạm)`, trailer: '51R-9',
       registration: '01/05/2031', docs: 'Còn hạn', type: '—', note: '—' })]);
@@ -851,5 +851,70 @@ describe('FleetTab trucks (xe tải)', () => {
     render(<FleetTab screen="drivers" />);
     const row = await screen.findByTestId('driver-1');
     expect(within(row).getByText(f.truckChip)).toBeInTheDocument();
+  });
+});
+
+describe('FleetTab paper lock', () => {
+  it('marks a truck the lock made not ready, and only lets not ready / out of service be picked', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-1', { status: 'not_ready', status_forced: 1, registration_expiry: '2000-01-01' }),
+      vehicle(2, '51C-2', { status: 'ready' }),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    expect(within(row).getByText(f.vehicleStatus.not_ready)).toBeInTheDocument();
+    expect(within(row).getByTestId('status-forced')).toHaveAttribute('title', f.lock.forced);
+    expect(within(row).queryByText(f.quick.repaired)).not.toBeInTheDocument();
+    // "Sẵn sàng" runs: it gets the "Báo hư" button and counts as running
+    expect(within(screen.getByTestId('vehicle-2')).getByText(f.quick.report)).toBeInTheDocument();
+    const filters = screen.getByRole('group', { name: f.filters.label });
+    expect(within(filters).getByRole('button', { name: /Đang chạy\s*1/ })).toBeInTheDocument();
+
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: f.vehicleStatus.ready })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: f.vehicleStatus.active })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: f.vehicleStatus.inactive })).not.toBeDisabled();
+  });
+
+  it('the new-truck form warns that expired papers save it as not ready', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    fireEvent.click(await screen.findByText(f.actions.addVehicle));
+    fireEvent.change(await screen.findByLabelText(f.vehicleForm.ownership), { target: { value: '2001-02-03' } });
+    expect(screen.getByTestId('paper-lock-hint')).toHaveTextContent('Đăng ký đã hết hạn');
+    const status = screen.getByLabelText(f.vehicleForm.status) as HTMLSelectElement;
+    expect(status.value).toBe('not_ready');
+    expect([...status.options].filter((o) => !o.disabled).map((o) => o.value)).toEqual(['not_ready', 'inactive']);
+  });
+});
+
+describe('FleetTab licence lock', () => {
+  it('marks a driver an expired licence made not ready, and only lets not ready / leave / left be picked', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { status: 'not_ready', status_forced: 1, license_expiry: '2000-01-01' })]);
+    render(<FleetTab screen="drivers" />);
+    const row = await screen.findByTestId('driver-1');
+    expect(within(row).getByText(f.driverStatus.not_ready)).toBeInTheDocument();
+    expect(within(row).getByTestId('status-forced')).toHaveAttribute('title', f.licenseLock.forced);
+    fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: f.driverStatus.active })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: f.driverStatus.leave })).not.toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: f.driverStatus.left })).not.toBeDisabled();
+  });
+
+  it('the driver details lock "Đang làm" while the licence typed is expired, and free it once renewed', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { status: 'not_ready', status_forced: 1, license_expiry: '2000-01-01' })]);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.doubleClick(await screen.findByTestId('driver-1'));
+    const detail = await screen.findByTestId('fleet-detail');
+    expect(within(detail).getByTestId('licence-lock-hint')).toBeInTheDocument();
+    const status = within(detail).getByLabelText(translations.vi.fleet.driverForm.status) as HTMLSelectElement;
+    expect([...status.options].find((o) => o.value === 'active')!.disabled).toBe(true);
+    fireEvent.change(within(detail).getByLabelText(translations.vi.fleet.driverForm.licenseExpiry), { target: { value: '2099-01-01' } });
+    expect(within(detail).queryByTestId('licence-lock-hint')).not.toBeInTheDocument();
+    expect([...status.options].find((o) => o.value === 'active')!.disabled).toBe(false);
   });
 });
