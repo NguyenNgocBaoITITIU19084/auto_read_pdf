@@ -79,6 +79,19 @@ describe('TrailerTab', () => {
     expect(screen.getByTestId('trailer-2')).toBeInTheDocument();
   });
 
+  it('keeps "Không sẵn sàng" out of "Hư / bảo dưỡng", in a chip of its own', async () => {
+    api.getFleetTrailersApi.mockResolvedValue([
+      trailer(1, '51R-1', { status: 'broken' }), trailer(2, '51R-2', { status: 'maintenance' }), trailer(3, '51R-3', { status: 'not_ready' }),
+    ]);
+    render(<TrailerTab />);
+    await screen.findByTestId('trailer-1');
+    const shown = () => screen.getAllByTestId(/^trailer-\d+$/).map((r) => r.dataset.testid);
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${R.filters.down}`) }));
+    expect(shown()).toEqual(['trailer-1', 'trailer-2']);
+    fireEvent.click(screen.getByRole('button', { name: /^Không sẵn sàng/ }));
+    expect(shown()).toEqual(['trailer-3']);
+  });
+
   it('hitches a free trailer and warns that the tractor\'s own trailer comes off', async () => {
     api.getFleetTrailersApi.mockResolvedValue([trailer(2, '51R-2')]);
     api.hitchFleetTrailerApi.mockResolvedValue({ ...trailer(2, '51R-2'), replaced: '51R-9', from_plate: '' });

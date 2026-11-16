@@ -46,7 +46,7 @@ import {
 
 type View = 'vehicles' | 'drivers' | 'history';
 type HistoryFilter = { driver_id?: number; vehicle_id?: number; label: string } | null;
-type VehicleFilter = 'all' | 'running' | 'down' | 'free' | 'expiring';
+type VehicleFilter = 'all' | 'running' | 'down' | 'notReady' | 'free' | 'expiring';
 type DriverFilter = 'all' | 'idle' | 'temporary' | 'expiring';
 type RowRef = { kind: 'vehicle' | 'driver'; id: number };
 
@@ -191,7 +191,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const vehicleTest: Record<VehicleFilter, (v: FleetVehicle) => boolean> = useMemo(() => ({
     all: () => true,
     running: (v) => isRunning(v.status),
-    down: (v) => v.status === 'broken' || v.status === 'maintenance' || v.status === 'not_ready',
+    down: (v) => v.status === 'broken' || v.status === 'maintenance',
+    notReady: (v) => v.status === 'not_ready',
     free: (v) => isRunning(v.status) && !v.current_driver,
     expiring: (v) => v.status !== 'inactive' && docWarnings(vehicleDocs(v), today).length > 0,
   }), [today]);
@@ -679,12 +680,13 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     red: 'text-rose-700 dark:text-rose-300',
     amber: 'text-amber-800 dark:text-amber-300',
     sky: 'text-sky-700 dark:text-sky-300',
+    orange: 'text-orange-700 dark:text-orange-300',
   };
   const filterChips: { id: string; label: string; count: number; tone: string; active: boolean; select: () => void }[] =
     view === 'vehicles'
       ? ([
         ['all', f.filters.all, filterTone.neutral], ['running', f.filters.running, filterTone.green], ['down', f.filters.down, filterTone.red],
-        ['free', f.filters.free, filterTone.sky], ['expiring', f.filters.expiring, filterTone.amber],
+        ['notReady', t.fleet.vehicleStatus.not_ready, filterTone.orange], ['free', f.filters.free, filterTone.sky], ['expiring', f.filters.expiring, filterTone.amber],
       ] as [VehicleFilter, string, string][]).map(([id, label, tone]) => ({
         id, label, tone, count: vs.filter(vehicleTest[id]).length, active: vehicleFilter === id, select: () => setVehicleFilter(id),
       }))
@@ -1047,11 +1049,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         </div>
         {view !== 'history' ? (
           <div role="group" aria-label={f.filters.label} className="flex flex-wrap items-center gap-1.5">
-            {vehicles && filterChips.filter((c) => c.id === 'all' || c.count > 0 || c.active).map((c) => (
+            {/* every chip shows, so each kind of filter is always there; an empty one is greyed */}
+            {vehicles && filterChips.map((c) => (
               <button key={c.id} type="button" aria-pressed={c.active} onClick={c.select}
                 className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold border transition-colors ${c.active
                   ? 'border-primary-500 bg-primary-600 text-white'
-                  : `border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 ${c.tone}`}`}>
+                  : `border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 ${c.tone} ${c.count === 0 ? 'opacity-50' : ''}`}`}>
                 {c.label}
                 <span className={`min-w-[1.25rem] px-1 rounded-full text-[11px] ${c.active ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{c.count}</span>
               </button>

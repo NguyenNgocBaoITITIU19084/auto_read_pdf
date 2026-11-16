@@ -304,6 +304,7 @@ describe('FleetTab quick actions', () => {
       vehicle(1, '51C-1', { current_driver: an }),
       vehicle(2, '51C-2'),
       vehicle(3, '51C-3', { status: 'maintenance' }),
+      vehicle(4, '51C-4', { status: 'not_ready' }),
     ]);
     api.getFleetDriversApi.mockResolvedValue([]);
     render(<FleetTab />);
@@ -316,10 +317,18 @@ describe('FleetTab quick actions', () => {
     fireEvent.click(within(filters).getByRole('button', { name: /Hư \/ bảo dưỡng/ }));
     expect(screen.getByTestId('vehicle-3')).toBeInTheDocument();
     expect(screen.getByTestId('vehicle-3')).toHaveTextContent(f.quick.repaired);
-    // a filter with nothing in it is hidden, "Tất cả" always shows
-    expect(within(filters).queryByRole('button', { name: /Giấy tờ sắp hết hạn/ })).not.toBeInTheDocument();
+    // "Không sẵn sàng" is not a breakdown: it has its own chip
+    expect(screen.queryByTestId('vehicle-4')).not.toBeInTheDocument();
+    fireEvent.click(within(filters).getByRole('button', { name: /Không sẵn sàng/ }));
+    expect(screen.getAllByTestId(/^vehicle-\d+$/).map((r) => r.dataset.testid)).toEqual(['vehicle-4']);
+    // a filter with nothing in it still shows (greyed, 0), so every kind of filter is always there
+    const expiring = within(filters).getByRole('button', { name: /Giấy tờ sắp hết hạn/ });
+    expect(expiring).toHaveTextContent('0');
+    expect(expiring.className).toContain('opacity-50');
+    fireEvent.click(expiring);
+    expect(screen.getByText(f.filters.empty)).toBeInTheDocument();
     fireEvent.click(within(filters).getByRole('button', { name: /Tất cả/ }));
-    expect(screen.getAllByTestId(/^vehicle-/)).toHaveLength(3);
+    expect(screen.getAllByTestId(/^vehicle-\d+$/)).toHaveLength(4);
   });
 
   it('keeps edit and delete in the row menu', async () => {

@@ -42,7 +42,7 @@ import {
 } from './fleetUtils';
 
 type View = 'trailers' | 'history';
-type Filter = 'all' | 'hitched' | 'free' | 'down' | 'expiring';
+type Filter = 'all' | 'hitched' | 'free' | 'down' | 'notReady' | 'expiring';
 type HistoryFilter = { trailer_id?: number; label: string } | null;
 
 const VIEW_KEY = 'fleet.trailers.view';
@@ -179,7 +179,8 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     all: () => true,
     hitched: (r) => !!r.vehicle,
     free: (r) => isRunning(r.status) && !r.vehicle,
-    down: (r) => r.status === 'broken' || r.status === 'maintenance' || r.status === 'not_ready',
+    down: (r) => r.status === 'broken' || r.status === 'maintenance',
+    notReady: (r) => r.status === 'not_ready',
     expiring: (r) => r.status !== 'inactive' && docWarnings(docsOf(r), today).length > 0,
   }), [today]);
   const shown = useMemo(() => rows.filter((r) => tests[filter](r) && matches(query, r.plate, r.trailer_type, r.chassis_no,
@@ -619,10 +620,11 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
   const tone = {
     neutral: 'text-slate-600 dark:text-slate-300', green: 'text-emerald-700 dark:text-emerald-300', red: 'text-rose-700 dark:text-rose-300',
     amber: 'text-amber-800 dark:text-amber-300', sky: 'text-sky-700 dark:text-sky-300',
+    orange: 'text-orange-700 dark:text-orange-300',
   };
   const chips = ([
     ['all', R.filters.all, tone.neutral], ['hitched', R.filters.hitched, tone.green], ['free', R.filters.free, tone.sky],
-    ['down', R.filters.down, tone.red], ['expiring', R.filters.expiring, tone.amber],
+    ['down', R.filters.down, tone.red], ['notReady', t.fleet.vehicleStatus.not_ready, tone.orange], ['expiring', R.filters.expiring, tone.amber],
   ] as [Filter, string, string][]).map(([id, label, color]) => ({ id, label, color, count: rows.filter(tests[id]).length }));
   const tabs: { id: View; label: string; count?: number }[] = [
     { id: 'trailers', label: R.views.list, count: trailers?.length },
@@ -645,11 +647,12 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
         </div>
         {view === 'trailers' ? (
           <div role="group" aria-label={f.filters.label} className="flex flex-wrap items-center gap-1.5">
-            {trailers && chips.filter((c) => c.id === 'all' || c.count > 0 || filter === c.id).map((c) => (
+            {/* every chip shows, so each kind of filter is always there; an empty one is greyed */}
+            {trailers && chips.map((c) => (
               <button key={c.id} type="button" aria-pressed={filter === c.id} onClick={() => setFilter(c.id)}
                 className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold border transition-colors ${filter === c.id
                   ? 'border-primary-500 bg-primary-600 text-white'
-                  : `border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 ${c.color}`}`}>
+                  : `border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-600 ${c.color} ${c.count === 0 ? 'opacity-50' : ''}`}`}>
                 {c.label}
                 <span className={`min-w-[1.25rem] px-1 rounded-full text-[11px] ${filter === c.id ? 'bg-white/25' : 'bg-slate-100 dark:bg-slate-800'}`}>{c.count}</span>
               </button>
