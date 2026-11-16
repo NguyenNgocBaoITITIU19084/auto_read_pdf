@@ -162,3 +162,19 @@ describe('VehicleFormModal pick by clicking the box', () => {
     expect(screen.getByTestId('field-ownership_expiry')).not.toHaveAttribute('data-selected');
   });
 });
+
+describe('DriverFormModal own truck', () => {
+  it('offers tractors and rigid trucks in their own groups, and saves the one picked', async () => {
+    createDriver.mockReset().mockResolvedValue({ id: 7 });
+    const rigid: FleetVehicle = { ...truck, id: 10, plate: '51D-2', category: 'truck' };
+    render(<DriverFormModal isOpen driver={null} vehicles={[truck, rigid]} onClose={() => {}} onSaved={() => {}} />);
+    const v = translations.vi.fleet.views;
+    const groups = Array.from(document.querySelectorAll('optgroup')).map((g) => g.label);
+    expect(groups).toEqual([v.vehicles, v.trucks]);
+    const select = screen.getByLabelText(translations.vi.fleet.driverForm.homeVehicle) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText(/Họ tên/), { target: { value: 'An' } });
+    fireEvent.click(screen.getByText(translations.vi.common.save));
+    await waitFor(() => expect(createDriver).toHaveBeenCalledWith(expect.objectContaining({ home_vehicle_id: 10 })));
+  });
+});

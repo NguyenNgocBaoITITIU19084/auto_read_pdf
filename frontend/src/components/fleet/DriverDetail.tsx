@@ -16,7 +16,7 @@ import { daysLeftText } from '../common/ReminderViews';
 import { DocumentTile, DriverSection, FieldBox, PaperRow } from './DriverPapers';
 import type { DetailAction } from './FleetDetailModal';
 import { FleetAvatar, photoProblem } from './FleetPhoto';
-import { PICK_INPUT, PickBox, PickLabel, boxTone, pickCard, type Selection } from './FieldPick';
+import { PickBox, PickLabel, boxTone, pickCard, pickInputClass, type Selection } from './FieldPick';
 import {
   DRIVER_LOCK_FREE_STATUSES, EXPIRY_WARN_DAYS, apiError, daysUntil, formatIsoDate, formatStampShort, licenseExpired, todayVnIso,
 } from './fleetUtils';
@@ -34,7 +34,7 @@ const EditBox: React.FC<{
 }> = ({ id, label, copyValue, picked, dirty, className = '', badge, children }) => (
   <PickBox id={id} label={label} copyValue={copyValue} picked={picked} dirty={dirty} className={className} testId={`driver-field-${id}`}>
     <div className="flex items-center gap-2 min-w-0">
-      {React.cloneElement(children, { 'aria-label': label, className: PICK_INPUT })}
+      {React.cloneElement(children, { 'aria-label': label, className: pickInputClass(children) })}
       {badge}
     </div>
   </PickBox>

@@ -572,3 +572,60 @@ def test_truck_documents_api():
     assert client.get(f"/api/v1/fleet/photos/{res.json()['insurance_front']}").status_code == 200
     assert client.delete(f"/api/v1/fleet/vehicles/{t['id']}/documents/insurance_front").json()["insurance_front"] == ""
     assert client.delete(f"/api/v1/fleet/vehicles/{t['id']}/documents/id_front").status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# A phone number / CCCD belongs to one driver only; a driver has one truck (tractor or rigid truck)
+# ---------------------------------------------------------------------------
+def test_driver_phone_and_id_number_are_unique():
+    a = _driver("An", phone="0909 123 456", id_number="079085001234")
+    # the same number written another way is still the same number
+    for phone in ("0909123456", "+84 909.123.456", "84909123456"):
+        with pytest.raises(fleet.FleetError) as err:
+            _driver("Bình", phone=phone)
+        assert err.value.status == 409 and "An" in err.value.message
+    with pytest.raises(fleet.FleetError) as err:
+        _driver("Bình", id_number="079 085 001 234")
+    assert err.value.status == 409 and "CCCD" in err.value.message
+    assert set(_drivers()) == {"An"}
+    # empty numbers never clash; a driver keeps their own number on save
+    b = _driver("Bình")
+    _driver("Cường")
+    fleet.update_driver(a, {"phone": "0909123456", "id_number": "079085001234"})
+    with pytest.raises(fleet.FleetError):
+        fleet.update_driver(b, {"phone": "0909-123-456"})
+    # a driver in the trash frees the number, and can't come back while someone else has it
+    fleet.delete_driver(a)
+    c = _driver("Dũng", phone="0909123456")
+    with pytest.raises(fleet.FleetError):
+        fleet.restore_from_trash("driver", [a])
+    fleet.update_driver(c, {"phone": "0911000000"})
+    assert fleet.restore_from_trash("driver", [a]) == 1
+
+
+def test_restoring_two_drivers_with_one_phone_is_refused():
+    a = _driver("An", phone="0909000001")
+    fleet.delete_driver(a)
+    b = _driver("Bình", phone="0909000001")
+    fleet.delete_driver(b)
+    with pytest.raises(fleet.FleetError):
+        fleet.restore_from_trash("driver", [a, b])
+    assert fleet.restore_from_trash("driver", [a]) == 1
+
+
+def test_api_refuses_a_duplicate_phone():
+    assert client.post("/api/v1/fleet/drivers", json={"name": "An", "phone": "0909"}).status_code < 300
+    res = client.post("/api/v1/fleet/drivers", json={"name": "Bình", "phone": "0909"})
+    assert res.status_code == 409 and "An" in res.json()["detail"]
+
+
+def test_a_driver_can_have_a_rigid_truck_but_only_one_truck():
+    tractor = _truck("51C-111.11")
+    truck = _truck("51D-222.22", category="truck")
+    a = _driver("An", home_vehicle_id=truck)
+    assert _drivers()["An"]["home_vehicle"]["category"] == "truck"
+    # a new home truck replaces the old one: never two
+    fleet.set_home_vehicle(a, tractor)
+    assert _drivers()["An"]["home_vehicle"]["id"] == tractor
+    assert _trucks()["51D-222.22"]["home_driver"] is None
+    assert [r[1] for r in _open_rows()] == ["51C-111.11"]

@@ -13,7 +13,8 @@ import {
   uploadFleetVehicleDocumentApi, deleteFleetVehicleDocumentApi,
 } from '../../services/api';
 import { DriverSection, FieldInputBox, NO_PAPER_CHANGES, PaperPicker, PaperRow, type PaperChoices } from './DriverPapers';
-import { PhotoPicker, type PhotoChoice } from './FleetPhoto';
+import { FleetAvatar, PhotoPicker, type PhotoChoice } from './FleetPhoto';
+import { VehiclePicker } from './VehiclePicker';
 import { FormBox } from './FieldPick';
 import { FieldCopyBar } from '../common/FieldCopyBar';
 import { useFieldSelection } from '../../hooks/useFieldSelection';
@@ -96,6 +97,22 @@ const vehicleOptionLabel = (v: FleetVehicle, t: ReturnType<typeof useApp>['t']) 
     v.home_driver ? tf(t.fleet.statusModal.homeOf, { name: v.home_driver.name }) : '']
     .filter(Boolean).join(' · ');
   return extra ? `${v.plate} (${extra})` : v.plate;
+};
+
+/** A vehicle picker's options, split into Đầu kéo / Xe tải groups when both kinds are on offer. */
+const VehicleOptions: React.FC<{ vehicles: FleetVehicle[]; label?: (v: FleetVehicle) => string }> = ({ vehicles, label }) => {
+  const { t } = useApp();
+  const text = label ?? ((v: FleetVehicle) => vehicleOptionLabel(v, t));
+  const tractors = vehicles.filter((v) => v.category !== 'truck');
+  const trucks = vehicles.filter((v) => v.category === 'truck');
+  const options = (list: FleetVehicle[]) => list.map((v) => <option key={v.id} value={v.id}>{text(v)}</option>);
+  if (!tractors.length || !trucks.length) return <>{options(vehicles)}</>;
+  return (
+    <>
+      <optgroup label={t.fleet.views.vehicles}>{options(tractors)}</optgroup>
+      <optgroup label={t.fleet.views.trucks}>{options(trucks)}</optgroup>
+    </>
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -411,12 +428,12 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
                 <FieldInputBox label={f.homeVehicle}>
                   <select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
                     <option value="">{f.noHome}</option>
-                    {unassigned.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v, t)}</option>)}
+                    <VehicleOptions vehicles={unassigned} />
                   </select>
                 </FieldInputBox>
               </div>
             )}
-            <p className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400">{f.statusHint}</p>
+            <p className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400">{f.oneVehicleHint} {f.statusHint}</p>
           </div>
         </div>
 
@@ -564,7 +581,7 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
             {plan === 'move' && (spares.length > 0 ? (
               <select aria-label={m.moveTo} className={`${INPUT} ml-6 w-[calc(100%-1.5rem)]`} value={spareId} onChange={(e) => setSpareId(e.target.value)}>
                 <option value="">{m.pickSpare}</option>
-                {spares.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v, t)}</option>)}
+                <VehicleOptions vehicles={spares} />
               </select>
             ) : (
               <p className="ml-6 text-xs text-slate-500">{m.noSpare}</p>
@@ -693,37 +710,47 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
     </label>
   );
 
+  const picked = choices.find((v) => String(v.id) === vehicleId) || null;
+  const taker = picked && mode === 'permanent'
+    ? [picked.home_driver, picked.current_driver].find((d) => d && d.id !== driver.id) || null : null;
+  const summary = mode === 'temporary'
+    ? (picked ? tf(m.summaryTemp, { name: driver.name, plate: picked.plate }) : m.summaryPick)
+    : picked && picked.id === driver.home_vehicle?.id ? tf(m.summarySame, { plate: picked.plate })
+      : picked ? [tf(m.summaryHome, { plate: picked.plate, name: driver.name }), taker ? tf(m.summaryTake, { other: taker.name }) : '']
+        .filter(Boolean).join(' ') : driver.home_vehicle ? tf(m.summaryNoHome, { name: driver.name }) : m.summaryPick;
+
   return (
-    <Modal isOpen onClose={onClose} title={tf(m.title, { name: driver.name })} maxWidth="max-w-lg">
-      <form onSubmit={submit} className="space-y-3" noValidate>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
-          <span>{driver.current_vehicle ? tf(m.current, { plate: driver.current_vehicle.plate }) : m.currentNone}</span>
-          <span>{driver.home_vehicle ? tf(m.home, { plate: driver.home_vehicle.plate }) : m.homeNone}</span>
+    <Modal isOpen onClose={onClose} title={tf(m.title, { name: driver.name })} maxWidth="max-w-xl">
+      <form onSubmit={submit} className="space-y-4" noValidate>
+        {/* who, and where they are now */}
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+          <FleetAvatar photo={driver.photo} kind="driver" name={driver.name} size="md" />
+          <div className="min-w-0 text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
+            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{driver.name}</p>
+            <p>{driver.current_vehicle ? tf(m.current, { plate: driver.current_vehicle.plate }) : m.currentNone}</p>
+            <p>{driver.home_vehicle ? tf(m.home, { plate: driver.home_vehicle.plate }) : m.homeNone}</p>
+          </div>
         </div>
         <div className="flex gap-2">
           {radio('temporary', m.temporary, m.temporaryHint, driver.status !== 'active')}
           {radio('permanent', m.permanent, m.permanentHint)}
         </div>
-        <Field label={t.fleet.cols.vehicle}>
-          <select aria-label={t.fleet.cols.vehicle} className={INPUT} value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
-            <option value="">{mode === 'temporary' ? m.pick : m.noHome}</option>
-            {choices.map((v) => (
-              <option key={v.id} value={v.id}>
-                {vehicleOptionLabel(v, t)}{!isRunning(v.status) ? ` — ${t.fleet.vehicleStatus[v.status]}` : ''}
-              </option>
-            ))}
-          </select>
-          {mode === 'temporary' && temporaryChoices.length === 0 && (
-            <p className="mt-1 text-[11px] text-slate-500">{t.fleet.statusModal.noSpare}</p>
-          )}
-        </Field>
+        <VehiclePicker key={mode} vehicles={choices} value={vehicleId} driverId={driver.id} label={m.vehicle}
+          onChange={(value) => { setVehicleId(value); setError(''); }}
+          noneLabel={mode === 'permanent' ? m.noHomeCard : undefined} />
+        <p data-testid="move-summary" className={`text-xs rounded-lg px-3 py-2 ${picked || (mode === 'permanent' && driver.home_vehicle)
+          ? (taker ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
+            : 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200')
+          : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400'}`}>
+          {summary}
+        </p>
         {mode === 'temporary' && (
           <Field label={m.reason}>
             <input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={m.reasonPh} />
           </Field>
         )}
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
-        <Footer onCancel={onClose} saving={saving}>
+        <Footer onCancel={onClose} saving={saving} disabled={mode === 'temporary' && !vehicleId}>
           {driver.current_vehicle && (
             <button type="button" onClick={getOff} disabled={saving}
               className="mr-auto h-9 px-3 text-sm font-semibold rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50">

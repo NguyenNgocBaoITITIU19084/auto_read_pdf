@@ -79,6 +79,13 @@ const INPUT_IN_BOX = 'min-w-0 flex-1 bg-transparent p-0 border-0 text-sm font-se
 export const PICK_INPUT = 'block max-w-full min-w-[3ch] [field-sizing:content] bg-transparent p-0 border-0 text-sm font-semibold '
   + 'text-slate-800 dark:text-slate-100 placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-0 '
   + 'disabled:opacity-70 cursor-text';
+/** A note (textarea) is the exception: it spans the box and keeps at least two lines, growing with its text. An
+ *  empty one sized to its content would shrink to a sliver with only its resize handle showing. */
+export const PICK_TEXTAREA = 'block w-full min-h-[3.25rem] [field-sizing:content] resize-y bg-transparent p-0 border-0 '
+  + 'text-sm font-semibold text-slate-800 dark:text-slate-100 placeholder:font-normal placeholder:text-slate-400 '
+  + 'focus:outline-none focus:ring-0 disabled:opacity-70 cursor-text';
+/** The class of a field inside a pickable box. */
+export const pickInputClass = (child: React.ReactElement) => (child.type === 'textarea' ? PICK_TEXTAREA : PICK_INPUT);
 
 /** A form box (an input, select or textarea): in an edit popup it can also be picked and copied like the booking
  *  details (`picked` given); in an add popup it is a plain labelled box. */
@@ -98,7 +105,7 @@ export const FormBox: React.FC<{
   }
   return (
     <PickBox id={id} label={required ? `${label} *` : label} copyValue={copyValue} picked={picked} className={className}>
-      {React.cloneElement(children, { 'aria-label': label, className: PICK_INPUT })}
+      {React.cloneElement(children, { 'aria-label': label, className: pickInputClass(children) })}
     </PickBox>
   );
 };

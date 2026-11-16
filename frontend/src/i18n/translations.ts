@@ -1439,6 +1439,7 @@ export const translations = {
         name: "Họ tên", phone: "Số điện thoại", idNumber: "Số CCCD", licenseNo: "Số bằng lái", licenseClass: "Hạng bằng",
         licenseClassPh: "VD: FC", licenseExpiry: "Hạn bằng lái", status: "Trạng thái", note: "Ghi chú",
         homeVehicle: "Xe cố định", noHome: "— Chưa gán xe —", nameRequired: "Cần nhập tên tài xế",
+        oneVehicleHint: "Mỗi tài xế chỉ gắn 1 xe (đầu kéo hoặc xe tải); số điện thoại và CCCD không được trùng với tài xế khác.",
         statusHint: "Nghỉ phép: tài xế xuống xe nhưng vẫn giữ xe cố định. Nghỉ việc: bỏ luôn xe cố định.",
       },
       statusModal: {
@@ -1464,6 +1465,13 @@ export const translations = {
         unassign: "Cho xuống xe", pickRequired: "Hãy chọn xe",
         forceTitle: "Xe đang thuộc người khác", forceConfirm: "Vẫn giao xe",
         forceMessage: "{message}. Giao xe cho {name}? Người kia sẽ không còn xe này.",
+        vehicle: "Chọn xe", search: "Tìm biển số, moóc, tên tài xế…", clearSearch: "Xóa tìm kiếm", noMatch: "Không có xe phù hợp.",
+        trailer: "Moóc {plate}", noTrailer: "Chưa gắn moóc", free: "Xe trống", ownTruck: "Xe cố định của tài xế này",
+        ownerOf: "Xe cố định của {name}", drivenBy: "{name} đang lái", noHomeCard: "Không giao xe cố định",
+        summaryTemp: "{name} sẽ lái tạm xe {plate}.", summaryHome: "Xe {plate} sẽ là xe cố định của {name}.",
+        summaryNoHome: "{name} sẽ không còn xe cố định.", summaryTake: "{other} sẽ không còn xe này.",
+        summaryPick: "Bấm chọn một xe ở danh sách trên.",
+        summarySame: "Xe {plate} đang là xe cố định của tài xế này — không đổi gì.",
       },
       photo: {
         label: "Ảnh", choose: "Chọn ảnh", change: "Đổi ảnh", remove: "Xóa ảnh", drop: "Kéo thả ảnh vào đây hoặc bấm để chọn",
@@ -3199,6 +3207,7 @@ export const translations = {
         name: "Full name", phone: "Phone", idNumber: "ID card number", licenseNo: "Licence number", licenseClass: "Licence class",
         licenseClassPh: "e.g. FC", licenseExpiry: "Licence valid until", status: "Status", note: "Note",
         homeVehicle: "Own truck", noHome: "— No truck —", nameRequired: "Enter the driver's name",
+        oneVehicleHint: "Each driver has one truck (tractor or rigid truck); phone and ID card number must not match another driver's.",
         statusHint: "On leave: gets off the truck but keeps it. Left the company: also gives up their own truck.",
       },
       statusModal: {
@@ -3224,6 +3233,13 @@ export const translations = {
         unassign: "Get off the truck", pickRequired: "Pick a truck",
         forceTitle: "Truck belongs to someone else", forceConfirm: "Assign anyway",
         forceMessage: "{message}. Give it to {name}? The other driver loses this truck.",
+        vehicle: "Pick a truck", search: "Search plate, trailer, driver…", clearSearch: "Clear search", noMatch: "No truck matches.",
+        trailer: "Trailer {plate}", noTrailer: "No trailer", free: "Free", ownTruck: "This driver's own truck",
+        ownerOf: "{name}'s own truck", drivenBy: "{name} is driving", noHomeCard: "No own truck",
+        summaryTemp: "{name} will drive {plate} for now.", summaryHome: "{plate} becomes {name}'s own truck.",
+        summaryNoHome: "{name} will have no own truck.", summaryTake: "{other} loses this truck.",
+        summaryPick: "Pick a truck from the list above.",
+        summarySame: "{plate} is already this driver's own truck — nothing changes.",
       },
       photo: {
         label: "Photo", choose: "Choose photo", change: "Change photo", remove: "Remove photo", drop: "Drop a photo here or click to choose",

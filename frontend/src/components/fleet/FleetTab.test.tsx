@@ -191,10 +191,35 @@ describe('FleetTab', () => {
     render(<FleetTab screen="drivers" />);
     const row = await screen.findByTestId('driver-1');
     fireEvent.click(within(row).getByText(f.actions.move));
-    fireEvent.change(screen.getByLabelText(f.cols.vehicle), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('radio', { name: '51C-1' }));
+    expect(screen.getByTestId('move-summary')).toHaveTextContent('Bình sẽ không còn xe này');
     fireEvent.click(screen.getByText(translations.vi.common.save));
     await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenLastCalledWith(1, 1, true));
     expect(confirmMock.mock.calls[0][0].message).toContain('xe cố định của Bình');
+  });
+
+  it('picks a temporary truck from cards, filtered to rigid trucks and searched by plate', async () => {
+    const home = vehicle(1, '51C-1');
+    api.getFleetVehiclesApi.mockResolvedValue([
+      home, vehicle(2, '51C-2'), vehicle(3, '51D-3', { category: 'truck', body_type: 'Thùng kín' }),
+      vehicle(4, '51D-4', { category: 'truck' }), vehicle(5, '51C-5'), vehicle(6, '51C-6'),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '', reason: '' } })]);
+    api.moveDriverTemporaryApi.mockResolvedValue({ ...driver(1, an.name), current_vehicle: { plate: '51D-3' } });
+    render(<FleetTab screen="drivers" />);
+    const row = await screen.findByTestId('driver-1');
+    fireEvent.click(within(row).getByText(f.actions.move));
+    const save = screen.getByText(translations.vi.common.save).closest('button')!;
+    expect(save).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /^Xe tải/ }));
+    expect(screen.queryByRole('radio', { name: '51C-2' })).toBeNull();
+    fireEvent.change(screen.getByLabelText(f.moveModal.search), { target: { value: '51d3' } });
+    expect(within(screen.getByRole('radiogroup', { name: f.moveModal.vehicle })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['51D-3']);
+    fireEvent.click(screen.getByRole('radio', { name: '51D-3' }));
+    expect(screen.getByTestId('move-summary')).toHaveTextContent(`${an.name} sẽ lái tạm xe 51D-3`);
+    fireEvent.click(save);
+    await waitFor(() => expect(api.moveDriverTemporaryApi).toHaveBeenCalledWith(1, 3, ''));
   });
 
   it('shows the assignment history of one truck', async () => {
@@ -592,6 +617,15 @@ describe('FleetTab driver details', () => {
     expect(screen.getByTestId('fleet-detail')).toBeInTheDocument();
     fireEvent.click(within(detail).getByText(D.discard));
     expect(within(detail).getByLabelText(F.phone)).toHaveValue('0909');
+  });
+
+  it('an empty note is a full-width box of two lines, not a sliver sized to no text', async () => {
+    const detail = await open();
+    const note = within(detail).getByLabelText(F.note);
+    expect(note.tagName).toBe('TEXTAREA');
+    expect(note.className.split(' ')).toContain('w-full');
+    expect(note.className).toContain('min-h-');
+    expect(within(detail).getByLabelText(F.phone).className.split(' ')).not.toContain('w-full');
   });
 
   it('picks boxes and copies them together like the booking details, or one at once', async () => {

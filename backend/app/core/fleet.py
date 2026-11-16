@@ -765,14 +765,43 @@ def _clean_driver(data: dict, partial: bool) -> dict:
     return out
 
 
+def phone_key(value) -> str:
+    """A phone number as compared for uniqueness: digits only, +84 / 84 read as a leading 0."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("84") and len(digits) >= 11:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def id_number_key(value) -> str:
+    """A CCCD / CMND number as compared for uniqueness: letters and digits only, upper case."""
+    return re.sub(r"[^0-9A-Za-z]", "", str(value or "")).upper()
+
+
+def _check_driver_unique(conn, phone: str, id_number: str, exclude_id: int | None = None) -> None:
+    """Two drivers (outside the trash) never share a phone number or a CCCD (409 naming who has it)."""
+    want = {"phone": phone_key(phone), "id_number": id_number_key(id_number)}
+    if not any(want.values()):
+        return
+    for row in conn.execute("SELECT id, name, phone, id_number FROM fleet_drivers WHERE deleted_at IS NULL;"):
+        if row[0] == exclude_id:
+            continue
+        if want["phone"] and phone_key(row[2]) == want["phone"]:
+            raise FleetError(f"Số điện thoại {phone} đã thuộc về tài xế {row[1]}", 409)
+        if want["id_number"] and id_number_key(row[3]) == want["id_number"]:
+            raise FleetError(f"Số CCCD {id_number} đã thuộc về tài xế {row[1]}", 409)
+
+
 def create_driver(data: dict) -> int:
-    """A new driver; one whose licence has already expired starts as not_ready (forced), whatever was picked."""
+    """A new driver; one whose licence has already expired starts as not_ready (forced), whatever was picked.
+    The phone number and the CCCD may not be another driver's."""
     fields = _clean_driver(data, partial=False)
     forced = int(license_expired(fields) and fields["status"] not in DRIVER_LOCK_FREE_STATUSES)
     if forced:
         fields["status"] = "not_ready"
     stamp = _now()
     with _conn() as conn:
+        _check_driver_unique(conn, fields["phone"], fields["id_number"])
         cur = conn.execute(
             "INSERT INTO fleet_drivers (name, phone, id_number, license_no, license_class, license_expiry, status, "
             "status_forced, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
@@ -799,6 +828,8 @@ def update_driver(driver_id: int, data: dict) -> None:
     stamp = _now()
     with _conn() as conn:
         before = _driver(conn, driver_id)
+        if "phone" in fields or "id_number" in fields:
+            _check_driver_unique(conn, fields.get("phone", ""), fields.get("id_number", ""), exclude_id=driver_id)
         if fields.get("status", before["status"]) == before["status"]:
             fields.pop("status", None)
         else:
@@ -908,6 +939,20 @@ def restore_from_trash(kind: str, ids) -> int:
         return 0
     stamp = _now()
     with _conn() as conn:
+        if kind == "driver":
+            # one coming back may not take a phone number / CCCD another driver has now (or one restored with it)
+            seen: dict[str, str] = {}
+            for driver_id, name, phone, id_number in conn.execute(
+                    f"SELECT id, name, phone, id_number FROM fleet_drivers WHERE deleted_at IS NOT NULL "
+                    f"AND id IN ({','.join('?' * len(clean))});", clean).fetchall():
+                _check_driver_unique(conn, phone, id_number, exclude_id=driver_id)
+                for key, label, value in (("p" + phone_key(phone), "Số điện thoại", phone),
+                                          ("i" + id_number_key(id_number), "Số CCCD", id_number)):
+                    if len(key) == 1:
+                        continue
+                    if key in seen:
+                        raise FleetError(f"{label} {value} trùng giữa {seen[key]} và {name}", 409)
+                    seen[key] = name
         cur = conn.execute(f"UPDATE {table} SET deleted_at = NULL, updated_at = ? WHERE deleted_at IS NOT NULL "
                            f"AND {which} AND id IN ({','.join('?' * len(clean))});", (stamp, *clean))
         restored = max(cur.rowcount, 0)
