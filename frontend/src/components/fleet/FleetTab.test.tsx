@@ -35,6 +35,7 @@ const api = {
   deleteFleetDriverApi: vi.fn(),
   uploadFleetVehicleDocumentApi: vi.fn(),
   createFleetVehicleApi: vi.fn(),
+  updateFleetVehicleApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -61,7 +62,7 @@ vi.mock('../../services/api', () => ({
   deleteFleetVehicleApi: (...a: unknown[]) => api.deleteFleetVehicleApi(...a),
   deleteFleetDriverApi: (...a: unknown[]) => api.deleteFleetDriverApi(...a),
   createFleetVehicleApi: (...a: unknown[]) => api.createFleetVehicleApi(...a),
-  updateFleetVehicleApi: vi.fn(),
+  updateFleetVehicleApi: (...a: unknown[]) => api.updateFleetVehicleApi(...a),
   createFleetDriverApi: vi.fn(),
   updateFleetDriverApi: (...a: unknown[]) => api.updateFleetDriverApi(...a),
   unassignDriverApi: vi.fn(),
@@ -920,5 +921,60 @@ describe('FleetTab licence lock', () => {
     fireEvent.change(within(detail).getByLabelText(translations.vi.fleet.driverForm.licenseExpiry), { target: { value: '2099-01-01' } });
     expect(within(detail).queryByTestId('licence-lock-hint')).not.toBeInTheDocument();
     expect([...status.options].find((o) => o.value === 'active')!.disabled).toBe(false);
+  });
+});
+
+describe('FleetTab notes', () => {
+  it.each([
+    ['vehicles', 'Đầu kéo'], ['trucks', 'Xe tải'], ['drivers', 'Tài xế'],
+  ] as const)('hovering the note mark on the %s tab shows the note', async (screenName, _tab) => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-1', { note: 'Dữ liệu mẫu\nđổi lốp 12/2026' }),
+      vehicle(2, '51D-2', { category: 'truck', note: 'Thùng mới sơn' }),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { note: 'Chỉ chạy nội thành' })]);
+    render(<FleetTab screen={screenName} />);
+    const row = await screen.findByTestId(screenName === 'drivers' ? 'driver-1' : screenName === 'trucks' ? 'vehicle-2' : 'vehicle-1');
+    fireEvent.mouseEnter(within(row).getByTestId('note-icon').parentElement!);
+    const card = await screen.findByRole('tooltip');
+    expect(card).toHaveTextContent(f.cols.note);
+    expect(card).toHaveTextContent(screenName === 'drivers' ? 'Chỉ chạy nội thành'
+      : screenName === 'trucks' ? 'Thùng mới sơn' : 'đổi lốp 12/2026');
+    fireEvent.mouseLeave(within(row).getByTestId('note-icon').parentElement!);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+  });
+});
+
+describe('FleetTab quick notes', () => {
+  it('a truck with no note: hovering the faint mark opens a form that saves the note', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.updateFleetVehicleApi.mockResolvedValue(vehicle(1, '51C-1', { note: 'Thay nhớt 20/11' }));
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    fireEvent.mouseEnter(within(row).getByTestId('note-add').parentElement!);
+    const form = await screen.findByRole('dialog', { name: f.list.noteAdd });
+    const box = within(form).getByPlaceholderText('Nhập ghi chú cho 51C-1...');
+    fireEvent.change(box, { target: { value: 'Thay nhớt 20/11' } });
+    expect(within(form).getByText('15/1000')).toBeInTheDocument();
+    fireEvent.keyDown(box, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(api.updateFleetVehicleApi).toHaveBeenCalledWith(1, { note: 'Thay nhớt 20/11' }));
+    expect(addToast).toHaveBeenCalledWith('Đã lưu ghi chú cho 51C-1', 'success');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: f.list.noteAdd })).not.toBeInTheDocument());
+    expect(api.getFleetVehiclesApi).toHaveBeenCalledTimes(2);                 // reloaded
+  });
+
+  it('a driver: the error stays in the form when saving fails', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
+    api.updateFleetDriverApi.mockRejectedValue({ response: { status: 404, data: { detail: 'Không tìm thấy tài xế' } } });
+    render(<FleetTab screen="drivers" />);
+    const row = await screen.findByTestId('driver-1');
+    fireEvent.mouseEnter(within(row).getByTestId('note-add').parentElement!);
+    const form = await screen.findByRole('dialog', { name: f.list.noteAdd });
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Nghỉ thứ 7' } });
+    fireEvent.click(within(form).getByText(translations.vi.booking.form.save));
+    expect(await within(form).findByText('Không tìm thấy tài xế')).toBeInTheDocument();
+    expect(api.updateFleetDriverApi).toHaveBeenCalledWith(1, { note: 'Nghỉ thứ 7' });
   });
 });

@@ -29,6 +29,8 @@ interface NoteHoverProps {
   /** When set and there is no note, hovering opens a small form to add one. Rejects with an error message on failure. */
   onSave?: (note: string) => Promise<void>;
   addLabels?: NoteQuickAddLabels;
+  /** longest note the quick-add form takes (the booking's by default) */
+  maxLength?: number;
 }
 
 const CARD_W = 300;
@@ -41,7 +43,7 @@ const HIDE_DELAY = 200;
  * Rendered in a portal with fixed positioning so the table's overflow never clips it.
  */
 export const NoteHover: React.FC<NoteHoverProps> = ({
-  note, title, children, className = '', delay = 250, onSave, addLabels,
+  note, title, children, className = '', delay = 250, onSave, addLabels, maxLength = NOTE_MAX_LEN,
 }) => {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -117,7 +119,7 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
   const submit = async () => {
     const text = draft.trim();
     if (!text || saving || !onSave) return;
-    if (text.length > NOTE_MAX_LEN) return;
+    if (text.length > maxLength) return;
     setSaving(true);
     setError('');
     try {
@@ -192,14 +194,14 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
               <div className="mt-1.5 flex items-center justify-between gap-2">
                 <span className="text-[10px] text-slate-400">
                   {addLabels.hint}
-                  <span className={`ml-1.5 tabular-nums ${len > NOTE_MAX_LEN ? 'text-rose-600 dark:text-rose-400' : ''}`}>
-                    {len}/{NOTE_MAX_LEN}
+                  <span className={`ml-1.5 tabular-nums ${len > maxLength ? 'text-rose-600 dark:text-rose-400' : ''}`}>
+                    {len}/{maxLength}
                   </span>
                 </span>
                 <button
                   type="button"
                   onClick={submit}
-                  disabled={saving || !len || len > NOTE_MAX_LEN}
+                  disabled={saving || !len || len > maxLength}
                   className="inline-flex items-center gap-1 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-2.5 py-1 text-[11px] transition-colors"
                 >
                   {saving && <Loader2 className="w-3 h-3 animate-spin" />}

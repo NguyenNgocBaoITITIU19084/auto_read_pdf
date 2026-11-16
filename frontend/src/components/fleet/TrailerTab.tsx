@@ -144,6 +144,17 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
     loadTrashCount();
   }, [loadTrashCount]);
 
+  /** The quick note form of a trailer with no note (like the booking table's) */
+  const saveNote = (r: FleetTrailer) => async (note: string) => {
+    try {
+      await updateFleetTrailerApi(r.id, { note });
+    } catch (err) {
+      throw apiError(err, f.toast.error);
+    }
+    addToast(tf(f.list.noteSaved, { name: r.plate }), 'success');
+    reload();
+  };
+
   const reload = useCallback(() => {
     void load();
     if (view === 'history') void loadHistory();
@@ -430,7 +441,7 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
           <div className="flex items-center gap-3">
             <FleetAvatar photo={r.photo} kind="trailer" name={r.plate} size="wide" onClick={openPhoto(r.photo, r.plate)} />
             <div className="min-w-0">
-              <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{r.plate}<NoteIcon note={r.note} /></div>
+              <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{r.plate}<NoteIcon note={r.note} name={r.plate} onSave={saveNote(r)} /></div>
               {sub && <div className={`${MUTED} truncate max-w-[16rem]`}>{sub}</div>}
             </div>
           </div>

@@ -9,7 +9,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
   deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, returnDriverHomeApi,
-  setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi, type FleetTrashCount,
+  setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi, updateFleetVehicleApi, type FleetTrashCount,
 } from '../../services/api';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { BulkActionBar, type BulkAction } from '../common/BulkActionBar';
@@ -426,6 +426,18 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   };
 
   /** "Đã sửa xong": running again, and its own driver back on it from a temporary truck, in one step. */
+  /** The quick note form of a row with no note (like the booking table's): saved at once; an error stays in the form. */
+  const saveNote = (kind: 'vehicle' | 'driver', id: number, name: string) => async (note: string) => {
+    try {
+      if (kind === 'vehicle') await updateFleetVehicleApi(id, { note });
+      else await updateFleetDriverApi(id, { note });
+    } catch (err) {
+      throw apiError(err, f.toast.error);
+    }
+    addToast(tf(L.noteSaved, { name }), 'success');
+    reload();
+  };
+
   const markRepaired = async (v: FleetVehicle) => {
     setBusyId(`v${v.id}`);
     try {
@@ -717,7 +729,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
           <div className="flex items-center gap-3">
             <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wide" onClick={openPhoto(v.photo, v.plate)} />
             <div className="min-w-0">
-              <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{v.plate}<NoteIcon note={v.note} /></div>
+              <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{v.plate}<NoteIcon note={v.note} name={v.plate} onSave={saveNote('vehicle', v.id, v.plate)} /></div>
               {sub && <div className={`${MUTED} truncate max-w-[16rem]`}>{sub}</div>}
             </div>
           </div>
@@ -788,7 +800,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         <div className="flex items-center gap-3">
           <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="md" onClick={openPhoto(d.photo, d.name)} />
           <div className="min-w-0">
-            <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{d.name}<NoteIcon note={d.note} /></div>
+            <div className="font-bold text-[15px] text-slate-900 dark:text-slate-100 whitespace-nowrap">{d.name}<NoteIcon note={d.note} name={d.name} onSave={saveNote('driver', d.id, d.name)} /></div>
             {d.phone && <div className={MUTED}>{d.phone}</div>}
           </div>
         </div>

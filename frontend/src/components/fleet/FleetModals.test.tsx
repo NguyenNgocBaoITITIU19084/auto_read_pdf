@@ -5,7 +5,7 @@ import { translations } from '../../i18n/translations';
 import type { FleetVehicle } from '../../types';
 
 const addToast = vi.fn();
-vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi }) }));
+vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
 vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
 vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => vi.fn() }));
 

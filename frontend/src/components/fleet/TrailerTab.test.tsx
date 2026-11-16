@@ -6,7 +6,7 @@ import type { FleetTrailer, FleetVehicle } from '../../types';
 
 const addToast = vi.fn();
 const confirmMock = vi.fn();
-vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi }) }));
+vi.mock('../../context/AppContext', () => ({ useApp: () => ({ t: translations.vi, addToast }) }));
 vi.mock('../../context/ToastContext', () => ({ useToastActions: () => ({ addToast }) }));
 vi.mock('../../hooks/useConfirm', () => ({ useConfirm: () => confirmMock }));
 vi.mock('../common/ExportModal', () => ({ ExportModal: () => null }));
@@ -270,5 +270,30 @@ describe('TrailerTab form copy', () => {
     fireEvent.click(screen.getByText(translations.vi.common.fieldCopy.copyLabeled));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(
       `${R.form.plate}: 51R-1\n${R.form.vehicle}: 51C-1\n${R.form.chassis}: RL4-1`));
+  });
+});
+
+describe('TrailerTab notes', () => {
+  it('hovering the note mark shows the note', async () => {
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1', { note: 'Sàn hơi cong' })]);
+    render(<TrailerTab />);
+    const row = await screen.findByTestId('trailer-1');
+    fireEvent.mouseEnter(within(row).getByTestId('note-icon').parentElement!);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Sàn hơi cong');
+  });
+});
+
+describe('TrailerTab quick notes', () => {
+  it('a trailer with no note: the faint mark opens a form that saves the note', async () => {
+    api.getFleetTrailersApi.mockResolvedValue([trailer(1, '51R-1')]);
+    api.updateFleetTrailerApi.mockResolvedValue(trailer(1, '51R-1', { note: 'Thay lốp' }));
+    render(<TrailerTab />);
+    const row = await screen.findByTestId('trailer-1');
+    fireEvent.mouseEnter(within(row).getByTestId('note-add').parentElement!);
+    const form = await screen.findByRole('dialog');
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Thay lốp' } });
+    fireEvent.click(within(form).getByText(translations.vi.booking.form.save));
+    await waitFor(() => expect(api.updateFleetTrailerApi).toHaveBeenCalledWith(1, { note: 'Thay lốp' }));
+    expect(addToast).toHaveBeenCalledWith('Đã lưu ghi chú cho 51R-1', 'success');
   });
 });

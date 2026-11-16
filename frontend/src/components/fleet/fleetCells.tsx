@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { tf } from '../../services/i18nFormat';
 import type { DriverStatus, FleetDocumentKind, VehicleStatus } from '../../types';
 import { daysLeftText } from '../common/ReminderViews';
+import { NoteHover } from '../booking/NoteHover';
 import { EXPIRY_WARN_DAYS, daysUntil, formatIsoDate } from './fleetUtils';
 
 /** Table pieces shared by the fleet tabs (tractors, drivers, trailers): status badges, document and date cells. */
@@ -129,10 +130,30 @@ export const DateCell: React.FC<{ iso: string; today: string; muted?: boolean }>
   );
 };
 
-export const NoteIcon: React.FC<{ note: string }> = ({ note }) => {
+/** Longest note the fleet keeps (the server cuts the rest) */
+export const FLEET_NOTE_MAX = 1000;
+
+/** The note mark next to a row's name, like the booking table's: hovering it shows the note in a card; with no note
+ *  and `onSave` given, a faint mark whose card is a quick form to add one (Ctrl/⌘ + Enter saves, Esc closes). */
+export const NoteIcon: React.FC<{ note: string; name?: string; onSave?: (note: string) => Promise<void> }> = ({ note, name = '', onSave }) => {
   const { t } = useApp();
-  if (!note.trim()) return null;
-  const label = tf(t.fleet.list.noteTitle, { note });
-  return <StickyNote aria-label={label} className="inline w-3.5 h-3.5 ml-1.5 text-slate-400"><title>{label}</title></StickyNote>;
+  const text = note.trim();
+  if (!text && !onSave) return null;
+  const L = t.fleet.list;
+  return (
+    <NoteHover note={text} title={text ? t.fleet.cols.note : L.noteAdd} delay={120} className="inline-flex align-middle ml-1.5"
+      onSave={onSave} maxLength={FLEET_NOTE_MAX} addLabels={{
+        title: L.noteAdd, placeholder: tf(L.notePh, { name }), hint: t.booking.noteQuick.hint,
+        save: t.booking.form.save, saving: t.booking.form.saving,
+      }}>
+      {text ? (
+        <StickyNote data-testid="note-icon" aria-label={tf(L.noteTitle, { note: text })}
+          className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 cursor-help" />
+      ) : (
+        <StickyNote data-testid="note-add" aria-label={L.noteAdd}
+          className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 hover:text-amber-400 dark:hover:text-amber-500 transition-colors cursor-pointer" />
+      )}
+    </NoteHover>
+  );
 };
 
