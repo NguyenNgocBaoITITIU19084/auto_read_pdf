@@ -660,7 +660,7 @@ describe('FleetTab truck details', () => {
     const detail = screen.getByTestId('fleet-detail');
     expect(await within(screen.getByTestId('field-trailer')).findByText("Sàn 40' · 32 tấn")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('pick-trailer'));
-    fireEvent.click(screen.getByTestId('pick-plate'));
+    fireEvent.click(screen.getByTestId('field-plate'));                   // a click on the box picks it, like a booking
     fireEvent.click(screen.getByTestId('pick-driver'));
     expect(screen.getByTestId('field-plate')).toHaveAttribute('data-selected', 'true');
     fireEvent.click(within(detail).getByText(translations.vi.common.fieldCopy.copyLabeled));

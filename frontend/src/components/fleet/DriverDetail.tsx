@@ -16,7 +16,7 @@ import { daysLeftText } from '../common/ReminderViews';
 import { DocumentTile, DriverSection, FieldBox, PaperRow } from './DriverPapers';
 import type { DetailAction } from './FleetDetailModal';
 import { FleetAvatar, photoProblem } from './FleetPhoto';
-import { PickBox, PickToggle, boxTone, type Selection } from './FieldPick';
+import { PickBox, PickToggle, boxTone, pickOnClick, type Selection } from './FieldPick';
 import {
   DRIVER_LOCK_FREE_STATUSES, EXPIRY_WARN_DAYS, apiError, daysUntil, formatIsoDate, formatStampShort, licenseExpired, todayVnIso,
 } from './fleetUtils';
@@ -224,8 +224,8 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
             )}
             {isDirty('status') && <p className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{F.statusHint}</p>}
           </div>
-          <div data-testid="driver-current-vehicle"
-            className={`self-start min-w-[13rem] rounded-xl border p-3 transition-colors ${boxTone(picked.selected.has('vehicle'), false)}`}>
+          <div data-testid="driver-current-vehicle" {...pickOnClick(picked, 'vehicle', !current)}
+            className={`self-start min-w-[13rem] rounded-xl border p-3 transition-colors ${boxTone(picked.selected.has('vehicle'), false)} ${current ? 'cursor-pointer' : ''}`}>
             <div className="mb-1.5"><PickToggle id="vehicle" label={D.currentVehicle} picked={picked} disabled={!current} /></div>
             {current ? (
               <div className="flex items-center gap-2.5">

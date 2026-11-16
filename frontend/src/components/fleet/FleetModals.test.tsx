@@ -146,3 +146,19 @@ describe('VehicleFormModal copy', () => {
     expect(screen.queryByText(translations.vi.common.fieldCopy.copyLabeled)).not.toBeInTheDocument();
   });
 });
+
+describe('VehicleFormModal pick by clicking the box', () => {
+  it('a click on a box picks it (again unpicks), a click into its input only edits', () => {
+    render(<VehicleFormModal isOpen vehicle={{ ...truck, vehicle_type: 'Hino' }} onClose={() => {}} onSaved={() => {}} />);
+    const box = screen.getByTestId('field-vehicle_type');
+    fireEvent.click(box);
+    expect(box).toHaveAttribute('data-selected', 'true');
+    expect(screen.getByTestId('pick-vehicle_type')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(box);
+    expect(box).not.toHaveAttribute('data-selected');
+    fireEvent.click(screen.getByLabelText(translations.vi.fleet.vehicleForm.type));
+    expect(box).not.toHaveAttribute('data-selected');
+    fireEvent.click(screen.getByTestId('field-ownership_expiry'));          // an empty box has nothing to pick
+    expect(screen.getByTestId('field-ownership_expiry')).not.toHaveAttribute('data-selected');
+  });
+});

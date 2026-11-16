@@ -55,6 +55,18 @@ export const CopyButton: React.FC<{ value: string; label: string }> = ({ value, 
   );
 };
 
+/** A click anywhere on a box picks it (or unpicks it), like the booking details: its inputs, buttons and links keep
+ *  their own clicks, and a drag or double click that selects text does not pick (it offers "copy this part"). The
+ *  tick stays the box's keyboard control, so the box itself takes only the click. */
+export const pickOnClick = (picked: Selection, id: string, disabled: boolean) => {
+  if (disabled) return {};
+  const { onClick, 'data-field-key': key, 'data-part': part } = picked.cardProps(id) as {
+    onClick: (e: React.MouseEvent) => void; 'data-field-key': string; 'data-part'?: string;
+  };
+  return { onClick, 'data-field-key': key, 'data-part': part };
+};
+const CLICKABLE = 'cursor-pointer select-text hover:border-primary-300 dark:hover:border-primary-600';
+
 /** A box: its pick tick and name, its copy button, then its content (an input to edit, or a value to read). */
 export const PickBox: React.FC<{
   id: string; label: string; copyValue: string; picked: Selection; dirty?: boolean; className?: string; testId?: string;
@@ -64,9 +76,9 @@ export const PickBox: React.FC<{
   const empty = !copyValue.trim();
   const selected = picked.selected.has(id);
   return (
-    <div data-testid={testId ?? `field-${id}`} data-selected={selected || undefined}
+    <div data-testid={testId ?? `field-${id}`} data-selected={selected || undefined} {...pickOnClick(picked, id, empty)}
       className={`flex flex-col px-2.5 py-1.5 rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-primary-500/30 ${
-        boxTone(selected, dirty)} ${className}`}>
+        boxTone(selected, dirty)} ${empty ? '' : CLICKABLE} ${className}`}>
       <div className="flex items-center justify-between gap-2">
         <PickToggle id={id} label={label} picked={picked} disabled={empty} />
         {!empty && <CopyButton value={copyValue} label={label} />}
