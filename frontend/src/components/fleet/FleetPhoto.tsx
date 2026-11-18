@@ -45,12 +45,12 @@ interface AvatarProps {
   kind: 'vehicle' | 'driver' | 'trailer';
   name: string;
   /** xs/sm/md are square (people); wide/wideSm are landscape (trucks) */
-  size?: 'xs' | 'sm' | 'md' | 'xl' | 'wide' | 'wideSm';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'wide' | 'wideLg' | 'wideSm';
   onClick?: () => void;
 }
 
 const SIZES = {
-  xs: 'w-6 h-6 text-[9px]', sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', xl: 'w-28 h-28 text-3xl', wide: 'w-[4.5rem] h-12 text-xs', wideSm: 'w-12 h-8 text-[10px]',
+  xs: 'w-6 h-6 text-[9px]', sm: 'w-10 h-10 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-14 h-14 text-base', xl: 'w-28 h-28 text-3xl', wide: 'w-[4.5rem] h-12 text-xs', wideLg: 'w-24 h-16 text-xs', wideSm: 'w-12 h-8 text-[10px]',
 };
 
 /** A truck's / driver's photo in a table, or a placeholder; with onClick it opens the photo. */

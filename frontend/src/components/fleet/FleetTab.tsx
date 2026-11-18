@@ -616,7 +616,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'vehicle', id: v.id }) },
         ...(main ? [{ key: 'main', label: main.label, icon: isRunning(v.status) ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
         // each truck one assigned driver: give it to one, or change who has it
-        ...(v.status !== 'inactive' ? [v.home_driver
+        // someone driving it now (take it back first, "Thu hồi xe") or it cannot run: it cannot be given away
+        ...(isRunning(v.status) && !v.current_driver ? [v.home_driver
           ? { key: 'driver', label: f.actions.changeDriver, icon: ArrowLeftRight, onClick: () => setDriverFor(v) }
           : { key: 'driver', label: f.actions.assign, icon: KeyRound, onClick: () => setDriverFor(v) }] : []),
         ...(v.home_driver
@@ -863,18 +864,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         onChange: setCol(setDriverCols, 'truck'), format: (v) => T.truckState[v as keyof typeof T.truckState] ?? v },
       render: (d) => {
         const c = d.current_vehicle;
-        const home = d.home_vehicle;
-        const homeLine = home ? (!isRunning(home.status)
-          ? tf(L.homeWithStatus, { plate: home.plate, status: f.vehicleStatus[home.status].toLowerCase() })
-          : tf(L.tempHome, { plate: home.plate })) : '';
-        if (!c) {
-          return (
-            <div className={MUTED}>
-              <div className="text-sm text-slate-400 dark:text-slate-500">{f.noVehicle}</div>
-              {homeLine}
-            </div>
-          );
-        }
+        // no truck now: just "Chưa có xe", no plate of a truck they are not on
+        if (!c) return <div className="text-sm text-slate-400 dark:text-slate-500">{f.noVehicle}</div>;
         return (
           <div className="flex items-center gap-2.5">
             <FleetAvatar photo={c.photo} kind="vehicle" name={c.plate} size="wideSm" onClick={openPhoto(c.photo, c.plate)} />
@@ -884,7 +875,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
                 {c.category === 'truck' && <Chip tone={TRUCK_CHIP}>{f.truckChip}</Chip>}
                 {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
               </div>
-              <div className={MUTED}>{c.kind === 'temporary' ? homeLine : c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
+              <div className={MUTED}>{c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
             </div>
           </div>
         );

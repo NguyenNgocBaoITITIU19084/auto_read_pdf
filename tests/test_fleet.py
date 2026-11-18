@@ -80,6 +80,10 @@ def test_a_truck_is_one_drivers_home_unless_forced():
     with pytest.raises(fleet.FleetError) as e:
         fleet.set_home_vehicle(b, t)
     assert e.value.status == 409 and "An" in e.value.message
+    with pytest.raises(fleet.FleetError) as e:       # An drives it now: not even forced
+        fleet.set_home_vehicle(b, t, force=True)
+    assert e.value.status == 409 and "thu hồi" in e.value.message
+    fleet.unassign(a)                                # off the truck, still An's own truck
     fleet.set_home_vehicle(b, t, force=True)
     ds = _drivers()
     assert ds["An"]["home_vehicle"] is None and ds["An"]["current_vehicle"] is None
@@ -654,3 +658,15 @@ def test_revoke_route():
     res = TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""})
     assert res.status_code == 200 and res.json()["home_vehicle"] is None
     assert TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""}).status_code == 400
+
+
+@pytest.mark.parametrize("status,label", [("not_ready", "không sẵn sàng"), ("broken", "hư hỏng"),
+                                          ("maintenance", "bảo dưỡng"), ("inactive", "ngưng hoạt động")])
+def test_a_truck_that_cannot_run_cannot_be_given(status, label):
+    t = _truck("51C-1")
+    fleet.set_vehicle_status(t, status)
+    a = _driver("An")
+    with pytest.raises(fleet.FleetError) as e:
+        fleet.set_home_vehicle(a, t)
+    assert e.value.status == 409 and label in e.value.message
+    assert _drivers()["An"]["home_vehicle"] is None

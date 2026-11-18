@@ -220,6 +220,40 @@ describe('FleetTab', () => {
     await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenCalledWith(1, 2));
   });
 
+  it('a truck someone else drives cannot be picked, and no card says whose own truck it is', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-1', { current_driver: { id: 2, name: 'Bình', phone: '', photo: '', kind: 'primary', since: '', reason: '' },
+        home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
+      vehicle(2, '51C-2'),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.click(within(await screen.findByTestId('driver-1')).getByText(f.actions.assign));
+    const picks = within(screen.getByRole('radiogroup', { name: f.moveModal.vehicle })).getAllByRole('radio');
+    expect(picks.map((r) => r.getAttribute('aria-label'))).toEqual(['51C-2', '51C-1']);   // locked last
+    expect(screen.getByRole('radio', { name: '51C-1' })).toBeDisabled();
+    expect(screen.getByText('Bình đang lái')).toBeInTheDocument();
+    expect(screen.queryByText('Xe cố định của Bình')).toBeNull();
+  });
+
+  it('a truck that cannot run (not ready, broken, maintenance) cannot be picked', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { status: 'not_ready' }), vehicle(3, '51C-3', { status: 'broken' }),
+      vehicle(4, '51C-4', { status: 'maintenance' }), vehicle(2, '51C-2')]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.click(within(await screen.findByTestId('driver-1')).getByText(f.actions.assign));
+    for (const plate of ['51C-1', '51C-3', '51C-4']) expect(screen.getByRole('radio', { name: plate })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '51C-2' })).toBeEnabled();
+  });
+
+  it.each(['not_ready', 'broken', 'maintenance'] as const)('right-click a %s truck → no "Giao xe"', async (status) => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { status })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
+    expect(screen.queryByRole('menuitem', { name: f.actions.assign })).toBeNull();
+  });
+
   it('a driver who has a truck gets "Đổi xe"', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
@@ -858,6 +892,18 @@ describe('FleetTab quick status from the row menu', () => {
     expect(screen.getByTestId('driver-summary')).toHaveTextContent('Xe 51C-1 sẽ là xe cố định của Bình. Bình sẽ rời xe 51C-2.');
     fireEvent.click(save);
     await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenCalledWith(2, 1));
+  });
+
+  it('right-click a truck someone drives now → no "Giao xe" / "Đổi tài xế", only "Thu hồi xe"', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', {
+      current_driver: { id: 2, name: 'Bình', phone: '', photo: '', kind: 'primary', since: '', reason: '' },
+      home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } })]);
+    api.getFleetDriversApi.mockResolvedValue([driver(2, 'Bình')]);
+    render(<FleetTab />);
+    fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
+    expect(screen.queryByRole('menuitem', { name: f.actions.assign })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: f.actions.changeDriver })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: f.actions.revoke })).toBeInTheDocument();
   });
 
   it('right-click a truck with a driver → "Đổi tài xế", or unassign it', async () => {

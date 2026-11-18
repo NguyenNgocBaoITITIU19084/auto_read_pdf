@@ -115,28 +115,25 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
 
   const card = (d: FleetDriver) => {
     const on = String(d.id) === driverId;
-    const home = d.id !== ownerId ? d.home_vehicle : null;
-    const driving = d.current_vehicle && d.current_vehicle.id !== vehicle.id && d.current_vehicle.id !== d.home_vehicle?.id
-      ? d.current_vehicle : null;
+    const driving = d.current_vehicle && d.current_vehicle.id !== vehicle.id ? d.current_vehicle : null;
     return (
       <button key={d.id} type="button" role="radio" aria-checked={on} aria-label={d.name}
         onClick={() => { setDriverId(String(d.id)); setError(''); }}
-        className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors ${on
-          ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40 ring-1 ring-primary-500'
-          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
-        <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="md" />
+        className={`relative w-full min-h-[5.5rem] flex items-center gap-3.5 p-3 pr-10 rounded-xl border-2 text-left transition-all ${on
+          ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40 shadow-sm'
+          : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
+        <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="lg" />
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-bold text-slate-800 dark:text-slate-100">{d.name}</span>
+          <span className="block text-base font-bold tracking-tight text-slate-800 dark:text-slate-100">{d.name}</span>
           <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">{d.phone || ' '}</span>
-          <span className="mt-1 flex flex-wrap gap-1">
+          <span className="mt-1.5 flex flex-wrap gap-1">
             {d.id === ownerId && tag(m.thisTruck, 'sky')}
-            {home && tag(tf(m.ownerOf, { plate: home.plate }), 'amber')}
             {driving && tag(tf(m.driving, { plate: driving.plate }), 'amber')}
             {!d.home_vehicle && !d.current_vehicle && tag(m.noTruck, 'emerald')}
             {d.status !== 'active' && tag(t.fleet.driverStatus[d.status], 'rose')}
           </span>
         </span>
-        <span className={`ml-auto shrink-0 w-5 h-5 rounded-full border flex items-center justify-center ${on
+        <span className={`absolute top-2.5 right-2.5 shrink-0 w-5 h-5 rounded-full border flex items-center justify-center ${on
           ? 'bg-primary-600 border-primary-600 text-white' : 'border-slate-300 dark:border-slate-600'}`}>
           {on && <Check className="w-3.5 h-3.5" />}
         </span>
@@ -152,23 +149,28 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
   const warn = !!picked && !same && (!!old || !!owner);
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(owner ? m.changeTitle : m.assignTitle, { plate: vehicle.plate })} maxWidth="max-w-xl">
-      <form onSubmit={submit} className="space-y-4" noValidate>
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-          <FleetAvatar photo={vehicle.photo} kind="vehicle" name={vehicle.plate} size="wide" />
-          <div className="min-w-0 text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{vehicle.plate}</p>
-            <p>{owner ? tf(m.current, { name: owner.name }) : m.currentNone}</p>
+    <Modal isOpen onClose={onClose} title={tf(owner ? m.changeTitle : m.assignTitle, { plate: vehicle.plate })} maxWidth="max-w-4xl">
+      <form onSubmit={submit} className="space-y-5" noValidate>
+        <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
+          <FleetAvatar photo={vehicle.photo} kind="vehicle" name={vehicle.plate} size="wideLg" />
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-bold text-slate-800 dark:text-slate-100">{vehicle.plate}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {[vehicle.category === 'truck' ? vehicle.body_type : vehicle.trailer_plate, vehicle.vehicle_type].filter(Boolean).join(' · ')}
+            </p>
           </div>
+          <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+            {owner ? tf(m.current, { name: owner.name }) : m.currentNone}
+          </span>
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400">{m.hint}</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">{m.hint}</p>
         <div>
-          <span className="block mb-2 text-xs font-semibold text-slate-600 dark:text-slate-300">{m.pick}</span>
+          <span className="block mb-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200">{m.pick}</span>
           {drivers.length > 4 && (
-            <div className="relative mb-2">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={m.search} aria-label={m.search}
-                className="w-full h-9 pl-8 pr-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm" />
+                className="w-full h-10 pl-9 pr-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm" />
               {query && (
                 <button type="button" onClick={() => setQuery('')} aria-label={m.clearSearch}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -177,14 +179,15 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
               )}
             </div>
           )}
-          <div role="radiogroup" aria-label={m.pick} className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+          <div role="radiogroup" aria-label={m.pick} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {shown.map(card)}
             {shown.length === 0 && (
-              <p className="py-6 text-center text-xs text-slate-500">{drivers.length ? m.noMatch : m.noDrivers}</p>
+              <p className="sm:col-span-2 py-8 text-center text-sm text-slate-500">{drivers.length ? m.noMatch : m.noDrivers}</p>
             )}
           </div>
         </div>
-        <p data-testid="driver-summary" className={`text-xs rounded-lg px-3 py-2 ${picked && !same
+        <div className="sticky -bottom-5 z-10 -mx-6 -mb-5 px-6 pt-3 pb-5 space-y-3 bg-white dark:bg-slate-900 shadow-[0_-10px_16px_-14px_rgba(15,23,42,0.35)]">
+        <p data-testid="driver-summary" className={`text-sm rounded-xl px-4 py-3 ${picked && !same
           ? (warn ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
             : 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200')
           : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400'}`}>
@@ -199,6 +202,7 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
             </button>
           )}
         </Footer>
+        </div>
       </form>
     </Modal>
   );

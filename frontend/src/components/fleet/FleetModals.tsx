@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Clock, KeyRound, Loader2, Truck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
@@ -623,8 +623,9 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
 
   useEffect(() => {
     if (!driver) return;
-    setMode(driver.home_vehicle && driver.status === 'active' ? 'temporary' : 'permanent');
-    setVehicleId(driver.home_vehicle && driver.status !== 'active' ? String(driver.home_vehicle.id) : '');
+    const assign = needsTruck(driver);
+    setMode(driver.home_vehicle && driver.status === 'active' && !assign ? 'temporary' : 'permanent');
+    setVehicleId(driver.home_vehicle && driver.status !== 'active' && !assign ? String(driver.home_vehicle.id) : '');
     setReason('');
     setError('');
   }, [driver]);
@@ -696,18 +697,22 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
   };
 
   const radio = (value: 'temporary' | 'permanent', label: string, hint: string, disabled = false) => (
-    <label className={`flex-1 flex gap-2 p-2.5 rounded-lg border cursor-pointer ${mode === value
-      ? 'border-primary-400 bg-primary-50/60 dark:bg-primary-950/30 dark:border-primary-700'
-      : 'border-slate-200 dark:border-slate-700'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
-      <input type="radio" name="mode" checked={mode === value} disabled={disabled}
+    <label className={`flex-1 flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-colors ${mode === value
+      ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40'
+      : 'border-slate-200 dark:border-slate-700 hover:border-primary-300'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+      <span className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${mode === value
+        ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+        {value === 'temporary' ? <Clock className="w-4 h-4" /> : <KeyRound className="w-4 h-4" />}
+      </span>
+      <input type="radio" name="mode" className="sr-only" checked={mode === value} disabled={disabled}
         onChange={() => {
           setMode(value);
           setVehicleId(value === 'permanent' && driver.home_vehicle ? String(driver.home_vehicle.id) : '');
           setError('');
         }} />
       <span>
-        <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">{label}</span>
-        <span className="block text-[11px] text-slate-500 dark:text-slate-400">{hint}</span>
+        <span className="block text-sm font-bold text-slate-800 dark:text-slate-100">{label}</span>
+        <span className="block mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{hint}</span>
       </span>
     </label>
   );
@@ -715,28 +720,33 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
   const picked = choices.find((v) => String(v.id) === vehicleId) || null;
   const taker = picked && mode === 'permanent'
     ? [picked.home_driver, picked.current_driver].find((d) => d && d.id !== driver.id) || null : null;
-  const summary = mode === 'temporary'
+  const summary = assigning && !picked ? m.summaryPick : mode === 'temporary'
     ? (picked ? tf(m.summaryTemp, { name: driver.name, plate: picked.plate }) : m.summaryPick)
     : picked && picked.id === driver.home_vehicle?.id ? tf(m.summarySame, { plate: picked.plate })
       : picked ? [tf(m.summaryHome, { plate: picked.plate, name: driver.name }), taker ? tf(m.summaryTake, { other: taker.name }) : '']
         .filter(Boolean).join(' ') : driver.home_vehicle ? tf(m.summaryNoHome, { name: driver.name }) : m.summaryPick;
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(assigning ? m.assignTitle : m.title, { name: driver.name })} maxWidth="max-w-xl">
-      <form onSubmit={submit} className="space-y-4" noValidate>
+    <Modal isOpen onClose={onClose} title={tf(assigning ? m.assignTitle : m.title, { name: driver.name })} maxWidth="max-w-4xl">
+      <form onSubmit={submit} className="space-y-5" noValidate>
         {/* who, and where they are now */}
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-          <FleetAvatar photo={driver.photo} kind="driver" name={driver.name} size="md" />
-          <div className="min-w-0 text-xs text-slate-600 dark:text-slate-300 space-y-0.5">
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{driver.name}</p>
-            <p>{driver.current_vehicle ? tf(m.current, { plate: driver.current_vehicle.plate }) : m.currentNone}</p>
-            <p>{driver.home_vehicle ? tf(m.home, { plate: driver.home_vehicle.plate }) : m.homeNone}</p>
+        <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
+          <FleetAvatar photo={driver.photo} kind="driver" name={driver.name} size="lg" />
+          <div className="min-w-0 flex-1">
+            <p className="text-base font-bold text-slate-800 dark:text-slate-100">{driver.name}</p>
+            {driver.phone && <p className="text-xs text-slate-500 dark:text-slate-400">{driver.phone}</p>}
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+              <Truck className="w-3.5 h-3.5 text-slate-400" />
+              {driver.current_vehicle ? tf(m.current, { plate: driver.current_vehicle.plate }) : m.currentNone}
+            </span>
           </div>
         </div>
         {assigning ? (
-          <p className="text-xs text-slate-500 dark:text-slate-400">{m.assignHint}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{m.assignHint}</p>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-3">
             {radio('temporary', m.temporary, m.temporaryHint, driver.status !== 'active')}
             {radio('permanent', m.permanent, m.permanentHint)}
           </div>
@@ -744,7 +754,9 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
         <VehiclePicker key={mode} vehicles={choices} value={vehicleId} driverId={driver.id} label={m.vehicle}
           onChange={(value) => { setVehicleId(value); setError(''); }}
           noneLabel={mode === 'permanent' && !assigning ? m.noHomeCard : undefined} />
-        <p data-testid="move-summary" className={`text-xs rounded-lg px-3 py-2 ${picked || (mode === 'permanent' && driver.home_vehicle)
+        {/* what saving does, and the buttons: always in view under the list */}
+        <div className="sticky -bottom-5 z-10 -mx-6 -mb-5 px-6 pt-3 pb-5 space-y-3 bg-white dark:bg-slate-900 shadow-[0_-10px_16px_-14px_rgba(15,23,42,0.35)]">
+        <p data-testid="move-summary" className={`text-sm rounded-xl px-4 py-3 ${picked || (mode === 'permanent' && driver.home_vehicle && !assigning)
           ? (taker ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
             : 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200')
           : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400'}`}>
@@ -764,6 +776,7 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
             </button>
           )}
         </Footer>
+        </div>
       </form>
     </Modal>
   );

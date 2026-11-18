@@ -36,10 +36,13 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
     truck: vehicles.filter((v) => v.category === 'truck').length,
   }), [vehicles]);
 
+  // cannot be given to this driver: someone else drives it now (take it back first), or it cannot run
+  // (Không sẵn sàng / Hư hỏng / Bảo dưỡng / Ngưng hoạt động)
+  const locked = (v: FleetVehicle) => (!!v.current_driver && v.current_driver.id !== driverId) || !isRunning(v.status);
   const rank = (v: FleetVehicle) => {
+    if (locked(v)) return 3;
     if (driverId !== undefined && v.home_driver?.id === driverId) return 0;
-    const taken = [v.home_driver, v.current_driver].some((d) => d && d.id !== driverId);
-    return taken ? 2 : 1;
+    return v.home_driver && v.home_driver.id !== driverId ? 2 : 1;
   };
 
   const shown = useMemo(() => {
@@ -61,14 +64,16 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
     </button>
   );
 
-  const card = (key: string, picked: boolean, body: React.ReactNode, aria: string) => (
-    <button key={key} type="button" role="radio" aria-checked={picked} aria-label={aria}
+  const card = (key: string, picked: boolean, body: React.ReactNode, aria: string, disabled = false) => (
+    <button key={key} type="button" role="radio" aria-checked={picked} aria-label={aria} disabled={disabled}
       onClick={() => onChange(key === 'none' ? '' : key)}
-      className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors ${picked
-        ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40 ring-1 ring-primary-500'
-        : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
+      className={`relative w-full min-h-[5.5rem] flex items-center gap-3.5 p-3 pr-10 rounded-xl border-2 text-left transition-all ${disabled
+        ? 'border-slate-200 dark:border-slate-800 opacity-50 cursor-not-allowed'
+        : picked
+          ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40 shadow-sm'
+          : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
       {body}
-      <span className={`ml-auto shrink-0 w-5 h-5 rounded-full border flex items-center justify-center ${picked
+      <span className={`absolute top-2.5 right-2.5 shrink-0 w-5 h-5 rounded-full border flex items-center justify-center ${picked
         ? 'bg-primary-600 border-primary-600 text-white' : 'border-slate-300 dark:border-slate-600'}`}>
         {picked && <Check className="w-3.5 h-3.5" />}
       </span>
@@ -94,20 +99,18 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
     const driving = v.current_driver && v.current_driver.id !== driverId ? v.current_driver : null;
     return (
       <>
-        <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wide" />
+        <FleetAvatar photo={v.photo} kind="vehicle" name={v.plate} size="wideLg" />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-sm font-bold text-slate-800 dark:text-slate-100">{v.plate}</span>
+            <span className="text-base font-bold tracking-tight text-slate-800 dark:text-slate-100">{v.plate}</span>
             {tag(isTruck ? t.fleet.views.trucks : t.fleet.views.vehicles, isTruck ? 'violet' : 'slate')}
           </span>
           <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">
             {[what, v.vehicle_type].filter(Boolean).join(' · ') || ' '}
           </span>
-          <span className="mt-1 flex flex-wrap gap-1">
-            {v.home_driver?.id === driverId && driverId !== undefined && tag(m.ownTruck, 'sky')}
-            {owner && tag(tf(m.ownerOf, { name: owner.name }), 'amber')}
-            {driving && tag(tf(m.drivenBy, { name: driving.name }), 'amber')}
-            {!owner && !driving && v.home_driver?.id !== driverId && tag(m.free, 'emerald')}
+          <span className="mt-1.5 flex flex-wrap gap-1">
+            {driving && tag(tf(m.drivenBy, { name: driving.name }), 'slate')}
+            {!owner && !driving && v.home_driver?.id !== driverId && isRunning(v.status) && tag(m.free, 'emerald')}
             {!isRunning(v.status) && tag(t.fleet.vehicleStatus[v.status], 'rose')}
           </span>
         </span>
@@ -117,8 +120,8 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-        <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</span>
+      <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{label}</span>
         {counts.tractor > 0 && counts.truck > 0 && (
           <div className="flex gap-1.5">
             {chip('all', t.common.all)}
@@ -128,10 +131,10 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
         )}
       </div>
       {vehicles.length > 4 && (
-        <div className="relative mb-2">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <div className="relative mb-3">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={m.search} aria-label={m.search}
-            className="w-full h-9 pl-8 pr-8 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm" />
+            className="w-full h-10 pl-9 pr-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm" />
           {query && (
             <button type="button" onClick={() => setQuery('')} aria-label={m.clearSearch}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
@@ -140,18 +143,18 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
           )}
         </div>
       )}
-      <div role="radiogroup" aria-label={label} className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+      <div role="radiogroup" aria-label={label} className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         {noneLabel && card('none', value === '', (
           <>
-            <span className="w-[4.5rem] h-12 shrink-0 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400">
+            <span className="w-24 h-16 shrink-0 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-slate-400">
               <Truck className="w-5 h-5" />
             </span>
             <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{noneLabel}</span>
           </>
         ), noneLabel)}
-        {shown.map((v) => card(String(v.id), value === String(v.id), vehicleBody(v), v.plate))}
+        {shown.map((v) => card(String(v.id), value === String(v.id), vehicleBody(v), v.plate, locked(v)))}
         {shown.length === 0 && (
-          <p className="py-6 text-center text-xs text-slate-500">{vehicles.length ? m.noMatch : t.fleet.statusModal.noSpare}</p>
+          <p className="sm:col-span-2 py-8 text-center text-sm text-slate-500">{vehicles.length ? m.noMatch : t.fleet.statusModal.noSpare}</p>
         )}
       </div>
     </div>

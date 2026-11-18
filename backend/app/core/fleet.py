@@ -448,8 +448,8 @@ def _settle_home(conn, driver: dict, stamp: str, reason: str = "") -> bool:
 def set_home_vehicle(driver_id: int, vehicle_id: int | None, force: bool = False) -> dict:
     """Make `vehicle_id` the driver's home truck (None: no home truck). The driver moves onto it when it can run.
 
-    Without `force` a truck that is another driver's home truck, or that someone else drives now, is refused (409,
-    naming them); with `force` that driver loses the truck (and gets off it)."""
+    A truck someone else drives now is always refused (409: take it back first). Without `force` a truck that is
+    another driver's home truck is refused too (409, naming them); with `force` that driver loses it."""
     stamp = _now()
     with _conn() as conn:
         driver = _driver(conn, driver_id)
@@ -463,17 +463,19 @@ def set_home_vehicle(driver_id: int, vehicle_id: int | None, force: bool = False
         vehicle = _vehicle(conn, vehicle_id)
         if driver["status"] == "left":
             raise FleetError(f"{driver['name']} đã nghỉ việc, không gán xe được")
+        # only a truck that can run is given: not "Không sẵn sàng", "Hư hỏng", "Bảo dưỡng" or "Ngưng hoạt động"
+        if vehicle["status"] not in RUNNING_STATUSES and driver.get("home_vehicle_id") != vehicle_id:
+            raise FleetError(f"Xe {vehicle['plate']} đang {VEHICLE_STATUS_LABELS[vehicle['status']].lower()}: không giao được", 409)
+        # a truck someone else is driving now cannot be given away, not even forced: take it back first
+        on_vehicle = _open_by_vehicle(conn, vehicle_id)
+        if on_vehicle and on_vehicle["driver_id"] != driver_id:
+            raise FleetError(f"Xe {vehicle['plate']} đang do {on_vehicle['driver_name']} lái: thu hồi xe trước khi giao", 409)
         other_home = _home_driver_of(conn, vehicle_id)
         if other_home and other_home["id"] != driver_id:
             if not force:
                 raise FleetError(f"Xe {vehicle['plate']} đang là xe cố định của {other_home['name']}", 409)
             conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE id = ?;",
                          (stamp, other_home["id"]))
-        on_vehicle = _open_by_vehicle(conn, vehicle_id)
-        if on_vehicle and on_vehicle["driver_id"] != driver_id:
-            if not force:
-                raise FleetError(f"Xe {vehicle['plate']} đang do {on_vehicle['driver_name']} lái", 409)
-            _close(conn, on_vehicle, f"Xe giao cố định cho {driver['name']}", stamp)
         conn.execute("UPDATE fleet_drivers SET home_vehicle_id = ?, updated_at = ? WHERE id = ?;",
                      (vehicle_id, stamp, driver_id))
         driver["home_vehicle_id"] = vehicle_id
