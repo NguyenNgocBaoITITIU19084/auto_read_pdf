@@ -25,9 +25,7 @@ const api = {
   trashList: vi.fn(),
   trashRestore: vi.fn(),
   setFleetVehicleStatusApi: vi.fn(),
-  returnDriverHomeApi: vi.fn(),
-  setDriverHomeVehicleApi: vi.fn(),
-  moveDriverTemporaryApi: vi.fn(),
+  assignDriverVehicleApi: vi.fn(),
   deleteFleetVehicleApi: vi.fn(),
   uploadFleetDriverDocumentApi: vi.fn(),
   deleteFleetDriverDocumentApi: vi.fn(),
@@ -58,9 +56,7 @@ vi.mock('../../services/api', () => ({
     restore: (ids: number[]) => api.trashRestore('driver', ids), deleteNow: async () => 0,
   },
   setFleetVehicleStatusApi: (...a: unknown[]) => api.setFleetVehicleStatusApi(...a),
-  returnDriverHomeApi: (...a: unknown[]) => api.returnDriverHomeApi(...a),
-  setDriverHomeVehicleApi: (...a: unknown[]) => api.setDriverHomeVehicleApi(...a),
-  moveDriverTemporaryApi: (...a: unknown[]) => api.moveDriverTemporaryApi(...a),
+  assignDriverVehicleApi: (...a: unknown[]) => api.assignDriverVehicleApi(...a),
   deleteFleetVehicleApi: (...a: unknown[]) => api.deleteFleetVehicleApi(...a),
   deleteFleetDriverApi: (...a: unknown[]) => api.deleteFleetDriverApi(...a),
   createFleetVehicleApi: (...a: unknown[]) => api.createFleetVehicleApi(...a),
@@ -88,15 +84,18 @@ const f = translations.vi.fleet;
 
 const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
   id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
-  created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null, ...extra,
+  created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', current_driver: null, ...extra,
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
   id, name, phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active', status_forced: 0, note: '', photo: '',
   license_front: '', license_back: '', id_front: '', id_back: '',
-  created_at: '', updated_at: '', home_vehicle: null, current_vehicle: null, ...extra,
+  created_at: '', updated_at: '', current_vehicle: null, ...extra,
 });
 
-const an = { id: 1, name: 'Nguyễn Văn An', phone: '0909', photo: '', kind: 'primary' as const, since: '', reason: '' };
+const driving = (id: number, plate: string): NonNullable<FleetDriver['current_vehicle']> =>
+  ({ id, plate, trailer_plate: '', photo: '', category: 'tractor', since: '', reason: '' });
+
+const an = { id: 1, name: 'Nguyễn Văn An', phone: '0909', photo: '', since: '', reason: '' };
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
@@ -114,7 +113,6 @@ describe('FleetTab', () => {
   it('lists trucks with their driver, flags documents about to expire and searches without accents', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([
       vehicle(1, '51C-123.45', { trailer_plate: '51R-001.11', current_driver: an,
-        home_driver: { id: 1, name: an.name, status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-123.45' },
         registration_expiry: '2000-01-01' }),
       vehicle(2, '51C-999.99', { status: 'broken' }),
     ]);
@@ -143,7 +141,7 @@ describe('FleetTab', () => {
     ]);
     api.getFleetDriversApi.mockResolvedValue([]);
     api.setFleetVehicleStatusApi.mockResolvedValue({
-      vehicle_id: 1, status: 'broken', moved_driver: { id: 1, name: an.name, to_vehicle_id: 2, to_plate: '51C-2' }, home_driver_away: null,
+      vehicle_id: 1, status: 'broken', moved_driver: { id: 1, name: an.name, to_vehicle_id: 2, to_plate: '51C-2' },
     });
     render(<FleetTab />);
     const row = await screen.findByTestId('vehicle-1');
@@ -159,71 +157,49 @@ describe('FleetTab', () => {
     fireEvent.change(screen.getByPlaceholderText(f.statusModal.reasonPh), { target: { value: 'Hư hộp số' } });
     fireEvent.click(screen.getByText(translations.vi.common.save));
     await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'broken', 'Hư hộp số', 2));
-    expect(addToast).toHaveBeenCalledWith(`${an.name} chuyển sang lái tạm xe 51C-2`, 'success');
+    expect(addToast).toHaveBeenCalledWith(`${an.name} chuyển sang xe 51C-2`, 'success');
   });
 
-  it('offers to bring a driver back once their own truck runs again', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([
-      vehicle(1, '51C-1', { home_driver: { id: 1, name: an.name, status: 'active', photo: '', driving_vehicle_id: 2, driving_plate: '51C-2' } }),
-      vehicle(2, '51C-2', { current_driver: { ...an, kind: 'temporary' } }),
-    ]);
-    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, {
-      home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
-      current_vehicle: { id: 2, plate: '51C-2', trailer_plate: '', photo: '', category: 'tractor', kind: 'temporary', since: '', reason: '' },
-    })]);
-    api.returnDriverHomeApi.mockResolvedValue(driver(1, an.name, {
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '', reason: '' },
-    }));
-    render(<FleetTab />);
-    const banner = await screen.findByRole('status');
-    expect(banner).toHaveTextContent('Xe 51C-1 đã chạy lại');
-    fireEvent.click(within(banner).getByText(f.actions.returnHome));
-    await waitFor(() => expect(api.returnDriverHomeApi).toHaveBeenCalledWith(1));
-    expect(addToast).toHaveBeenCalledWith(`${an.name} đã trở về xe 51C-1`, 'success');
+  it('nothing on screen talks about an own truck, a temporary truck or going back to one', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1'), vehicle(2, '51C-2', { current_driver: an })]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { current_vehicle: driving(2, '51C-2') }), driver(2, 'Bình')]);
+    const { container } = render(<FleetTab screen="drivers" />);
+    await screen.findByTestId('driver-1');
+    expect(screen.queryByRole('status')).toBeNull();                       // no "back to own truck" banner
+    expect(container.textContent).not.toMatch(/cố định|xe gốc|lái tạm|Đang lái tạm/i);
+    expect(screen.queryByText(f.actions.returnHome)).toBeNull();
   });
 
-  it('asks before taking a truck that is someone else\'s own truck', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([
-      vehicle(1, '51C-1', { home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
-    ]);
-    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
-    api.setDriverHomeVehicleApi
-      .mockRejectedValueOnce({ response: { status: 409, data: { detail: 'Xe 51C-1 đang là xe cố định của Bình' } } })
-      .mockResolvedValueOnce(driver(1, an.name));
-    confirmMock.mockResolvedValue(true);
-    render(<FleetTab screen="drivers" />);
-    const row = await screen.findByTestId('driver-1');
-    fireEvent.click(within(row).getByText(f.actions.assign));
-    fireEvent.click(screen.getByRole('radio', { name: '51C-1' }));
-    expect(screen.getByTestId('move-summary')).toHaveTextContent('Bình sẽ không còn xe này');
-    fireEvent.click(screen.getByText(translations.vi.common.save));
-    await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenLastCalledWith(1, 1, true));
-    expect(confirmMock.mock.calls[0][0].message).toContain('xe cố định của Bình');
-  });
-
-  it('a driver with no truck gets "Giao xe": one truck for good, picked before saving', async () => {
+  it('a working driver with no truck gets "Giao xe": a pick is needed, then it is given', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1'), vehicle(2, '51C-2')]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
-    api.setDriverHomeVehicleApi.mockResolvedValue(driver(1, an.name));
+    api.assignDriverVehicleApi.mockResolvedValue(driver(1, an.name, { current_vehicle: driving(2, '51C-2') }));
     render(<FleetTab screen="drivers" />);
     const row = await screen.findByTestId('driver-1');
     expect(within(row).queryByText(f.actions.move)).toBeNull();
     fireEvent.click(within(row).getByText(f.actions.assign));
     expect(screen.getByText(`Giao xe cho ${an.name}`)).toBeInTheDocument();
-    expect(screen.queryByText(f.moveModal.temporary)).toBeNull();
-    expect(screen.queryByRole('radio', { name: f.moveModal.noHomeCard })).toBeNull();
     const save = screen.getByText(translations.vi.common.save).closest('button')!;
     expect(save).toBeDisabled();
     fireEvent.click(screen.getByRole('radio', { name: '51C-2' }));
-    expect(screen.getByTestId('move-summary')).toHaveTextContent(`Xe 51C-2 sẽ là xe cố định của ${an.name}`);
+    expect(screen.getByTestId('move-summary')).toHaveTextContent(`${an.name} sẽ lái xe 51C-2.`);
     fireEvent.click(save);
-    await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenCalledWith(1, 2));
+    await waitFor(() => expect(api.assignDriverVehicleApi).toHaveBeenCalledWith(1, 2, ''));
+    expect(addToast).toHaveBeenCalledWith(`Đã giao xe 51C-2 cho ${an.name}`, 'success');
   });
 
-  it('a truck someone else drives cannot be picked, and no card says whose own truck it is', async () => {
+  it.each(['leave', 'not_ready', 'left'] as const)('a driver who is %s gets neither "Giao xe" nor "Đổi xe"', async (status) => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { status })]);
+    render(<FleetTab screen="drivers" />);
+    const row = await screen.findByTestId('driver-1');
+    expect(within(row).queryByText(f.actions.assign)).toBeNull();
+    expect(within(row).queryByText(f.actions.move)).toBeNull();
+  });
+
+  it('a truck someone else drives cannot be picked', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([
-      vehicle(1, '51C-1', { current_driver: { id: 2, name: 'Bình', phone: '', photo: '', kind: 'primary', since: '', reason: '' },
-        home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
+      vehicle(1, '51C-1', { current_driver: { id: 2, name: 'Bình', phone: '', photo: '', since: '', reason: '' } }),
       vehicle(2, '51C-2'),
     ]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
@@ -233,7 +209,6 @@ describe('FleetTab', () => {
     expect(picks.map((r) => r.getAttribute('aria-label'))).toEqual(['51C-2', '51C-1']);   // locked last
     expect(screen.getByRole('radio', { name: '51C-1' })).toBeDisabled();
     expect(screen.getByText('Bình đang lái')).toBeInTheDocument();
-    expect(screen.queryByText('Xe cố định của Bình')).toBeNull();
   });
 
   it('a truck that cannot run (not ready, broken, maintenance) cannot be picked', async () => {
@@ -254,29 +229,19 @@ describe('FleetTab', () => {
     expect(screen.queryByRole('menuitem', { name: f.actions.assign })).toBeNull();
   });
 
-  it('a driver who has a truck gets "Đổi xe"', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
-    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '', reason: '' } })]);
+  it('"Đổi xe" moves a driver to a free truck, filtered to rigid trucks and searched by plate', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51C-1', { current_driver: an }), vehicle(2, '51C-2'), vehicle(3, '51D-3', { category: 'truck', body_type: 'Thùng kín' }),
+      vehicle(4, '51D-4', { category: 'truck' }), vehicle(5, '51C-5'), vehicle(6, '51C-6'),
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { current_vehicle: driving(1, '51C-1') })]);
+    api.assignDriverVehicleApi.mockResolvedValue(driver(1, an.name, { current_vehicle: driving(3, '51D-3') }));
     render(<FleetTab screen="drivers" />);
     const row = await screen.findByTestId('driver-1');
     expect(within(row).queryByText(f.actions.assign)).toBeNull();
     fireEvent.click(within(row).getByText(f.actions.move));
-    expect(screen.getByText(f.moveModal.temporary)).toBeInTheDocument();
-  });
-
-  it('picks a temporary truck from cards, filtered to rigid trucks and searched by plate', async () => {
-    const home = vehicle(1, '51C-1');
-    api.getFleetVehiclesApi.mockResolvedValue([
-      home, vehicle(2, '51C-2'), vehicle(3, '51D-3', { category: 'truck', body_type: 'Thùng kín' }),
-      vehicle(4, '51D-4', { category: 'truck' }), vehicle(5, '51C-5'), vehicle(6, '51C-6'),
-    ]);
-    api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '', reason: '' } })]);
-    api.moveDriverTemporaryApi.mockResolvedValue({ ...driver(1, an.name), current_vehicle: { plate: '51D-3' } });
-    render(<FleetTab screen="drivers" />);
-    const row = await screen.findByTestId('driver-1');
-    fireEvent.click(within(row).getByText(f.actions.move));
+    expect(screen.getByText(`Đổi xe cho ${an.name}`)).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '51C-1' })).toBeNull();        // the truck they drive is not offered
     const save = screen.getByText(translations.vi.common.save).closest('button')!;
     expect(save).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: /^Xe tải/ }));
@@ -284,17 +249,16 @@ describe('FleetTab', () => {
     fireEvent.change(screen.getByLabelText(f.moveModal.search), { target: { value: '51d3' } });
     expect(within(screen.getByRole('radiogroup', { name: f.moveModal.vehicle })).getAllByRole('radio').map((r) => r.getAttribute('aria-label'))).toEqual(['51D-3']);
     fireEvent.click(screen.getByRole('radio', { name: '51D-3' }));
-    expect(screen.getByTestId('move-summary')).toHaveTextContent(`${an.name} sẽ lái tạm xe 51D-3`);
+    expect(screen.getByTestId('move-summary')).toHaveTextContent(`${an.name} sẽ rời xe 51C-1 và lái xe 51D-3.`);
     fireEvent.click(save);
-    await waitFor(() => expect(api.moveDriverTemporaryApi).toHaveBeenCalledWith(1, 3, ''));
+    await waitFor(() => expect(api.assignDriverVehicleApi).toHaveBeenCalledWith(1, 3, ''));
   });
 
   it('shows the assignment history of one truck', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
     api.getFleetDriversApi.mockResolvedValue([]);
     api.getFleetHistoryPageApi.mockResolvedValue({ total: 1, items: [{
-      id: 5, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'temporary',
-      home_vehicle_plate: '51C-9', reason: 'Xe gốc hư', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '',
+      id: 5, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', reason: 'Xe gốc hư', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '',
     }] });
     render(<FleetTab />);
     const row = await screen.findByTestId('vehicle-1');
@@ -302,7 +266,6 @@ describe('FleetTab', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: f.menu.history }));
     expect(await screen.findByText('15/11/2026 08:00')).toBeInTheDocument();
     expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(expect.objectContaining({ vehicle_id: 1, limit: 25, offset: 0 }));
-    expect(screen.getByText('Xe gốc: 51C-9')).toBeInTheDocument();
     expect(screen.getByText('Đang xem lịch sử của: 51C-1')).toBeInTheDocument();
   });
 });
@@ -346,24 +309,17 @@ describe('FleetTab photos', () => {
 });
 
 describe('FleetTab quick actions', () => {
-  it('marks a broken truck repaired in one tap and brings its driver back', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([
-      vehicle(1, '51C-1', { status: 'broken',
-        home_driver: { id: 1, name: an.name, status: 'active', photo: '', driving_vehicle_id: 2, driving_plate: '51C-2' } }),
-      vehicle(2, '51C-2', { current_driver: { ...an, kind: 'temporary' } }),
-    ]);
+  it('marks a broken truck repaired in one tap; nobody is put back on it', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { status: 'broken' }), vehicle(2, '51C-2', { current_driver: { ...an } })]);
     api.getFleetDriversApi.mockResolvedValue([]);
-    api.setFleetVehicleStatusApi.mockResolvedValue({
-      vehicle_id: 1, status: 'active', moved_driver: null, home_driver_away: null,
-      returned_driver: { id: 1, name: an.name, from_plate: '51C-2', plate: '51C-1' },
-    });
+    api.setFleetVehicleStatusApi.mockResolvedValue({ vehicle_id: 1, status: 'active', moved_driver: null });
     render(<FleetTab />);
     const row = await screen.findByTestId('vehicle-1');
-    expect(within(row).getByText(`Xe của ${an.name} · đang lái tạm 51C-2`)).toBeInTheDocument();
+    expect(within(row).getByText(f.noDriver)).toBeInTheDocument();
     expect(within(row).queryByText(f.quick.report)).not.toBeInTheDocument();
     fireEvent.click(within(row).getByText(f.quick.repaired));
-    await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'active', '', null, true));
-    expect(addToast).toHaveBeenCalledWith(`Xe 51C-1 đã chạy lại — ${an.name} đã về lại xe của mình`, 'success');
+    await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'active'));
+    expect(addToast).toHaveBeenCalledWith('Xe 51C-1 đã chạy lại', 'success');
   });
 
   it('filters trucks with the quick filter chips', async () => {
@@ -421,13 +377,12 @@ describe('FleetTab row interactions', () => {
   const setup = async () => {
     api.getFleetVehiclesApi.mockResolvedValue([
       vehicle(1, '51C-1', { trailer_plate: '51R-1', registration_expiry: '2031-01-15', note: 'Xe mới',
-        current_driver: an, home_driver: { id: 1, name: an.name, status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
+        current_driver: an, }),
     ]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, { phone: '0909', license_class: 'FC',
-      home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '51R-1', photo: '', category: 'tractor', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' } })]);
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '51R-1', photo: '', category: 'tractor', since: '2026-11-15 08:00:00', reason: '' } })]);
     api.getFleetHistoryApi.mockResolvedValue([{
-      id: 3, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary', home_vehicle_plate: '',
+      id: 3, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1',
       reason: 'Gán xe cố định', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '',
     }]);
     render(<FleetTab />);
@@ -535,7 +490,7 @@ describe('FleetTab sort, column filters and pages', () => {
     api.getFleetVehiclesApi.mockResolvedValue([]);
     api.getFleetDriversApi.mockResolvedValue([]);
     api.getFleetHistoryPageApi.mockResolvedValue({ total: 60, items: [{
-      id: 1, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary', home_vehicle_plate: '',
+      id: 1, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1',
       reason: '', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '' }] });
     render(<FleetTab />);
     await screen.findByText(an.name);
@@ -544,10 +499,9 @@ describe('FleetTab sort, column filters and pages', () => {
       expect.objectContaining({ sort_by: 'driver_name', sort_dir: 'asc', offset: 0 })));
     fireEvent.click(screen.getByRole('button', { name: '2' }));
     await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 25, limit: 25 })));
-    fireEvent.click(screen.getByTitle(`Lọc theo ${f.cols.vehicle}`));
-    fireEvent.click(await screen.findByLabelText(f.kind.temporary));
-    await waitFor(() => expect(api.getFleetHistoryPageApi).toHaveBeenLastCalledWith(
-      expect.objectContaining({ kinds: ['temporary'], offset: 0 })));
+    // no "own truck / temporary" filter any more
+    expect(screen.queryByTitle(`Lọc theo ${f.cols.vehicle}`)).toBeNull();
+    expect(api.getFleetHistoryPageApi.mock.calls.every(([q]) => q.kinds === undefined)).toBe(true);
   });
 });
 
@@ -609,7 +563,7 @@ describe('FleetTab Excel export', () => {
     api.getFleetVehiclesApi.mockResolvedValue([
       ...Array.from({ length: 30 }, (_, i) => vehicle(i + 1, `51C-${String(i + 1).padStart(3, '0')}`)),
       vehicle(99, '51D-999', { status: 'broken', trailer_plate: '51R-9', registration_expiry: '2031-05-01',
-        current_driver: { ...an, kind: 'temporary' } }),
+        current_driver: { ...an } }),
     ]);
     api.getFleetDriversApi.mockResolvedValue([]);
     render(<FleetTab />);
@@ -621,9 +575,9 @@ describe('FleetTab Excel export', () => {
     expect(props.tab).toBe('fleet_vehicle');
     expect(props.filenamePrefix).toBe('doi_xe');
     expect(props.allColumns.map((c: { key: string }) => c.key)).toEqual(
-      ['STT', 'plate', 'status', 'driver', 'docs', 'trailer', 'type', 'home', 'ownership', 'registration', 'insurance', 'note', 'created']);
+      ['STT', 'plate', 'status', 'driver', 'docs', 'trailer', 'type', 'ownership', 'registration', 'insurance', 'note', 'created']);
     expect(props.data).toEqual([expect.objectContaining({
-      STT: 1, plate: '51D-999', status: 'Hư hỏng', driver: `${an.name} (lái tạm)`, trailer: '51R-9',
+      STT: 1, plate: '51D-999', status: 'Hư hỏng', driver: an.name, trailer: '51R-9',
       registration: '01/05/2031', docs: 'Còn hạn', type: '—', note: '—' })]);
   });
 
@@ -631,8 +585,7 @@ describe('FleetTab Excel export', () => {
     localStorage.setItem('fleet.view', 'history');
     api.getFleetVehiclesApi.mockResolvedValue([]);
     api.getFleetDriversApi.mockResolvedValue([]);
-    const row = (id: number) => ({ id, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', kind: 'primary',
-      home_vehicle_plate: '', reason: '', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '' });
+    const row = (id: number) => ({ id, driver_id: 1, vehicle_id: 1, driver_name: an.name, vehicle_plate: '51C-1', reason: '', started_at: '2026-11-15 08:00:00', ended_at: null, end_reason: '' });
     api.getFleetHistoryPageApi.mockImplementation(async (p: { limit: number; offset: number }) => (
       p.limit === 1000
         ? { total: 1200, items: Array.from({ length: Math.min(1000, 1200 - p.offset) }, (_, i) => row(p.offset + i)) }
@@ -657,8 +610,7 @@ describe('FleetTab driver details', () => {
     api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', {
       phone: '0909', license_class: 'FC', license_no: '790123', id_number: '079091006789',
       license_front: 'driver_1_license_front_0a1b2c3d.jpg',
-      home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '2026-11-15 08:00:00', reason: '' },
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', since: '2026-11-15 08:00:00', reason: '' },
     })]);
     api.getFleetHistoryApi.mockResolvedValue([]);
     render(<FleetTab screen="drivers" />);
@@ -766,7 +718,7 @@ describe('FleetTab truck details', () => {
 
   it('picks boxes with one click each and copies them together, or one at once', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { trailer_plate: '51R-1', vehicle_type: 'Hino',
-      current_driver: { id: 2, name: 'An', phone: '0909', photo: '', kind: 'primary', since: '', reason: '' } })]);
+      current_driver: { id: 2, name: 'An', phone: '0909', photo: '', since: '', reason: '' } })]);
     api.getFleetDriversApi.mockResolvedValue([]);
     api.getFleetHistoryApi.mockResolvedValue([]);
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -821,7 +773,7 @@ describe('FleetTab multi-select', () => {
     fireEvent.click(within(bar).getByRole('button', { name: B.status }));
     fireEvent.click(within(screen.getByTestId('fleet-status-picker')).getByText(f.vehicleStatus.maintenance));
     await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledTimes(3));
-    expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'maintenance', '', null, false);
+    expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'maintenance');
     expect(addToast).toHaveBeenCalledWith('Đã đổi trạng thái 3 mục', 'success');
   });
 
@@ -867,72 +819,63 @@ describe('FleetTab quick status from the row menu', () => {
     fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
     expect(screen.getByRole('menuitem', { name: f.vehicleStatus.active })).toBeDisabled();
     fireEvent.click(screen.getByRole('menuitem', { name: f.vehicleStatus.maintenance }));
-    await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'maintenance', '', null, false));
+    await waitFor(() => expect(api.setFleetVehicleStatusApi).toHaveBeenCalledWith(1, 'maintenance'));
     expect(addToast).toHaveBeenCalledWith(`51C-1: ${f.vehicleStatus.maintenance}`, 'success');
     expect(addToast).toHaveBeenCalledWith('An đã xuống xe', 'info');
   });
 
-  it('right-click a free truck → "Giao xe" picks a driver; one who has another truck leaves it', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1'), vehicle(2, '51C-2')]);
+  it('right-click a free truck → "Giao xe" picks a working driver; one on another truck leaves it', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1'), vehicle(2, '51C-2', { current_driver: { ...an, id: 2, name: 'Bình' } })]);
     api.getFleetDriversApi.mockResolvedValue([
       driver(1, 'An'),
-      driver(2, 'Bình', { home_vehicle: { id: 2, plate: '51C-2', status: 'active', category: 'tractor' } }),
+      driver(2, 'Bình', { current_vehicle: driving(2, '51C-2') }),
+      driver(3, 'Cường', { status: 'leave' }),
     ]);
-    api.setDriverHomeVehicleApi.mockResolvedValue({});
+    api.assignDriverVehicleApi.mockResolvedValue({});
     render(<FleetTab />);
     fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
     expect(screen.queryByRole('menuitem', { name: f.actions.changeDriver })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: f.actions.revoke })).toBeNull();     // nobody on it
     fireEvent.click(screen.getByRole('menuitem', { name: f.actions.assign }));
     expect(screen.getByText('Giao xe 51C-1 cho tài xế')).toBeInTheDocument();
     const picks = within(screen.getByRole('radiogroup', { name: f.driverModal.pick })).getAllByRole('radio');
-    expect(picks.map((r) => r.getAttribute('aria-label'))).toEqual(['An', 'Bình']);   // no truck first
+    expect(picks.map((r) => r.getAttribute('aria-label'))).toEqual(['An', 'Bình', 'Cường']);   // no truck first, not at work last
+    expect(screen.getByRole('radio', { name: 'Cường' })).toBeDisabled();
     const save = screen.getByText(translations.vi.common.save).closest('button')!;
     expect(save).toBeDisabled();
     fireEvent.click(screen.getByRole('radio', { name: 'Bình' }));
-    expect(screen.getByTestId('driver-summary')).toHaveTextContent('Xe 51C-1 sẽ là xe cố định của Bình. Bình sẽ rời xe 51C-2.');
+    expect(screen.getByTestId('driver-summary')).toHaveTextContent('Bình sẽ lái xe 51C-1. Bình sẽ rời xe 51C-2.');
     fireEvent.click(save);
-    await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenCalledWith(2, 1));
+    await waitFor(() => expect(api.assignDriverVehicleApi).toHaveBeenCalledWith(2, 1));
+    expect(addToast).toHaveBeenCalledWith('Đã giao xe 51C-1 cho Bình', 'success');
   });
 
-  it('right-click a truck someone drives now → no "Giao xe" / "Đổi tài xế", only "Thu hồi xe"', async () => {
+  it('right-click a truck someone drives now → no "Giao xe", only "Thu hồi xe", which gets them off', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', {
-      current_driver: { id: 2, name: 'Bình', phone: '', photo: '', kind: 'primary', since: '', reason: '' },
-      home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } })]);
-    api.getFleetDriversApi.mockResolvedValue([driver(2, 'Bình')]);
+      current_driver: { id: 2, name: 'Bình', phone: '', photo: '', since: '', reason: '' } })]);
+    api.getFleetDriversApi.mockResolvedValue([driver(2, 'Bình', { current_vehicle: driving(1, '51C-1') })]);
+    api.revokeDriverVehicleApi.mockResolvedValue({});
+    confirmMock.mockResolvedValue(true);
     render(<FleetTab />);
     fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
     expect(screen.queryByRole('menuitem', { name: f.actions.assign })).toBeNull();
     expect(screen.queryByRole('menuitem', { name: f.actions.changeDriver })).toBeNull();
-    expect(screen.getByRole('menuitem', { name: f.actions.revoke })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('menuitem', { name: f.actions.revoke }));
+    await waitFor(() => expect(api.revokeDriverVehicleApi).toHaveBeenCalledWith(2));
+    expect(confirmMock.mock.calls[0][0].message).toBe('Bình sẽ xuống xe 51C-1 đang lái. Xe sẽ trống để giao cho tài xế khác.');
   });
 
-  it('right-click a truck with a driver → "Đổi tài xế", or unassign it', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([
-      vehicle(1, '51C-1', { home_driver: { id: 2, name: 'Bình', status: 'active', photo: '', driving_vehicle_id: 1, driving_plate: '51C-1' } }),
-    ]);
-    api.getFleetDriversApi.mockResolvedValue([driver(2, 'Bình', { home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' } })]);
-    api.setDriverHomeVehicleApi.mockResolvedValue({});
-    render(<FleetTab />);
-    fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
-    fireEvent.click(screen.getByRole('menuitem', { name: f.actions.changeDriver }));
-    expect(screen.getByText('Đổi tài xế xe 51C-1')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Bình' }));
-    expect(screen.getByText(translations.vi.common.save).closest('button')).toBeDisabled();   // same driver: nothing to do
-    fireEvent.click(screen.getByText(f.driverModal.unassign));
-    await waitFor(() => expect(api.setDriverHomeVehicleApi).toHaveBeenCalledWith(2, null));
-  });
-
-  it('right-click a driver → "Thu hồi xe" asks, then takes their own truck back', async () => {
+  it('right-click a driver → "Thu hồi xe" asks, then gets them off their truck', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
-    api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', { home_vehicle: { id: 1, plate: '51C-1', status: 'active', category: 'tractor' },
-      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', kind: 'primary', since: '', reason: '' } })]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', { current_vehicle: driving(1, '51C-1') })]);
     api.revokeDriverVehicleApi.mockResolvedValue({});
     confirmMock.mockResolvedValue(true);
     render(<FleetTab screen="drivers" />);
     fireEvent.contextMenu(await screen.findByTestId('driver-1'), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: f.actions.move })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('menuitem', { name: f.actions.revoke }));
     await waitFor(() => expect(api.revokeDriverVehicleApi).toHaveBeenCalledWith(1));
-    expect(confirmMock.mock.calls[0][0].message).toContain('An sẽ không còn xe cố định 51C-1');
+    expect(confirmMock.mock.calls[0][0].message).toContain('An sẽ xuống xe 51C-1 đang lái');
     expect(addToast).toHaveBeenCalledWith('Đã thu hồi xe của An', 'success');
   });
 
@@ -942,20 +885,7 @@ describe('FleetTab quick status from the row menu', () => {
     render(<FleetTab screen="drivers" />);
     fireEvent.contextMenu(await screen.findByTestId('driver-1'), { clientX: 10, clientY: 10 });
     expect(screen.queryByRole('menuitem', { name: f.actions.revoke })).toBeNull();
-  });
-
-  it('right-click a truck driven only for now → "Thu hồi xe" gets that driver off and leaves their own truck', async () => {
-    api.getFleetVehiclesApi.mockResolvedValue([vehicle(2, '51C-2', {
-      current_driver: { id: 1, name: 'An', phone: '', photo: '', kind: 'temporary', since: '', reason: '' } })]);
-    api.getFleetDriversApi.mockResolvedValue([driver(1, 'An', { home_vehicle: { id: 1, plate: '51C-1', status: 'broken', category: 'tractor' },
-      current_vehicle: { id: 2, plate: '51C-2', trailer_plate: '', photo: '', category: 'tractor', kind: 'temporary', since: '', reason: '' } })]);
-    api.unassignDriverApi.mockResolvedValue({});
-    confirmMock.mockResolvedValue(true);
-    render(<FleetTab />);
-    fireEvent.contextMenu(await screen.findByTestId('vehicle-2'), { clientX: 10, clientY: 10 });
-    fireEvent.click(screen.getByRole('menuitem', { name: f.actions.revoke }));
-    await waitFor(() => expect(api.unassignDriverApi).toHaveBeenCalledWith(1, f.actions.revoke));
-    expect(api.revokeDriverVehicleApi).not.toHaveBeenCalled();
+    expect(screen.getByRole('menuitem', { name: f.actions.assign })).toBeInTheDocument();
   });
 
   it('on a row of a selection it changes every selected driver', async () => {
@@ -1048,7 +978,7 @@ describe('FleetTab trucks (xe tải)', () => {
   it('marks a driver on a truck in the drivers tab', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([tractor, lorry]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name, {
-      current_vehicle: { id: 2, plate: '51D-2', trailer_plate: '', photo: '', category: 'truck', kind: 'primary', since: '', reason: '' },
+      current_vehicle: { id: 2, plate: '51D-2', trailer_plate: '', photo: '', category: 'truck', since: '', reason: '' },
     })]);
     render(<FleetTab screen="drivers" />);
     const row = await screen.findByTestId('driver-1');

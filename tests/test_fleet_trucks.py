@@ -62,18 +62,18 @@ def test_a_truck_never_pulls_a_trailer():
 def test_a_driver_can_move_between_a_tractor_and_a_truck():
     tractor = fleet.create_vehicle({"plate": "51C-1"})
     truck = fleet.create_vehicle({"plate": "51D-2", "category": "truck"})
-    an = fleet.create_driver({"name": "An", "home_vehicle_id": tractor})
+    an = fleet.create_driver({"name": "An"})
+    fleet.assign_vehicle(an, tractor)
     fleet.set_vehicle_status(tractor, "broken", move_to_vehicle_id=truck)
     d = next(x for x in fleet.list_drivers() if x["id"] == an)
     assert d["current_vehicle"]["plate"] == "51D-2" and d["current_vehicle"]["category"] == "truck"
-    assert d["home_vehicle"]["category"] == "tractor"
 
 
 def test_history_by_category():
     tractor = fleet.create_vehicle({"plate": "51C-1"})
     truck = fleet.create_vehicle({"plate": "51D-2", "category": "truck"})
-    fleet.create_driver({"name": "An", "home_vehicle_id": tractor})
-    fleet.create_driver({"name": "Bình", "home_vehicle_id": truck})
+    fleet.assign_vehicle(fleet.create_driver({"name": "An"}), tractor)
+    fleet.assign_vehicle(fleet.create_driver({"name": "Bình"}), truck)
     plates = lambda **kw: {r["vehicle_plate"] for r in fleet.history_page(**kw)["items"]}
     assert plates() == {"51C-1", "51D-2"}
     assert plates(category="tractor") == {"51C-1"}

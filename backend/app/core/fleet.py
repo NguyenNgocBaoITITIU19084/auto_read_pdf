@@ -7,11 +7,11 @@ alike; the category is set when the truck is made and does not change.
 
 Fleet data is the company's, not a collection's: nothing here is scoped by collection.
 
-A driver has a home truck (xe gốc, `fleet_drivers.home_vehicle_id`, at most one driver per truck) and drives at most
-one truck at a time. Who drives what is the open row (ended_at IS NULL) of `fleet_assignments`; closed rows are the
-history. A row is "primary" (the driver on their home truck) or "temporary" (on another truck while theirs is broken,
-in maintenance, ...); a temporary driver goes back with return_home(). Partial unique indexes keep one open row per
+A driver drives at most one truck at a time, and a truck has at most one driver. Who drives what is the open row
+(ended_at IS NULL) of `fleet_assignments`; closed rows are the history. Partial unique indexes keep one open row per
 driver and per truck, so every move closes the old row before it opens the new one, inside one transaction.
+(There is no "own truck" any more: `fleet_drivers.home_vehicle_id` and the `kind` / `home_vehicle_plate` columns of
+old assignment rows are left in the database, unused.)
 
 History rows keep the driver's name and the plate as they were, so deleting a driver or a truck keeps its history.
 """
@@ -271,42 +271,22 @@ def _open_by_vehicle(conn, vehicle_id: int) -> dict | None:
     return rows[0] if rows else None
 
 
-def _home_driver_of(conn, vehicle_id: int) -> dict | None:
-    rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE home_vehicle_id = ? AND deleted_at IS NULL;", (vehicle_id,))
-    return rows[0] if rows else None
-
-
 def list_vehicles() -> list[dict]:
-    """Every truck with its home driver and whoever drives it now (kind "primary" or "temporary")."""
+    """Every truck with whoever drives it now."""
     with _conn() as conn:
         vehicles = _rows(conn, "SELECT * FROM fleet_vehicles WHERE deleted_at IS NULL;")
-        homes = {r["home_vehicle_id"]: r for r in _rows(
-            conn, "SELECT id, name, status, photo, home_vehicle_id FROM fleet_drivers "
-                  "WHERE home_vehicle_id IS NOT NULL AND deleted_at IS NULL;")}
         current = {r["vehicle_id"]: r for r in _rows(conn, """
-            SELECT a.vehicle_id, a.driver_id, a.kind, a.started_at, a.reason, d.name, d.phone, d.photo
+            SELECT a.vehicle_id, a.driver_id, a.started_at, a.reason, d.name, d.phone, d.photo
             FROM fleet_assignments a JOIN fleet_drivers d ON d.id = a.driver_id
             WHERE a.ended_at IS NULL;""")}
-        # where each home driver is right now, to show "the home driver is away on another truck"
-        away = {r["driver_id"]: r for r in _rows(conn, """
-            SELECT a.driver_id, v.id AS vehicle_id, v.plate FROM fleet_assignments a
-            JOIN fleet_vehicles v ON v.id = a.vehicle_id WHERE a.ended_at IS NULL;""")}
     out = []
     for v in vehicles:
-        h = homes.get(v["id"])
         c = current.get(v["id"])
         item = {k: v[k] for k in ("id", "plate", "category", "trailer_plate", "vehicle_type", "body_type", "payload",
                                   "ownership_expiry", "registration_expiry", "status_forced",
                                   "insurance_expiry", "status", "note", "photo", *VEHICLE_DOCUMENTS,
                                   "created_at", "updated_at")}
-        item["home_driver"] = None
-        if h:
-            where = away.get(h["id"])
-            item["home_driver"] = {"id": h["id"], "name": h["name"], "status": h["status"], "photo": h["photo"],
-                                   "driving_vehicle_id": where["vehicle_id"] if where else None,
-                                   "driving_plate": where["plate"] if where else ""}
         item["current_driver"] = ({"id": c["driver_id"], "name": c["name"], "phone": c["phone"], "photo": c["photo"],
-                                   "kind": c["kind"],
                                    "since": c["started_at"], "reason": c["reason"]} if c else None)
         out.append(item)
     out.sort(key=lambda r: plate_key(r["plate"]))
@@ -314,15 +294,11 @@ def list_vehicles() -> list[dict]:
 
 
 def list_drivers() -> list[dict]:
-    """Every driver with their home truck and the truck they drive now."""
+    """Every driver with the truck they drive now."""
     with _conn() as conn:
-        drivers = _rows(conn, """
-            SELECT d.*, hv.plate AS home_plate, hv.status AS home_status, hv.category AS home_category
-            FROM fleet_drivers d LEFT JOIN fleet_vehicles hv ON hv.id = d.home_vehicle_id
-            WHERE d.deleted_at IS NULL;""")
+        drivers = _rows(conn, "SELECT * FROM fleet_drivers WHERE deleted_at IS NULL;")
         current = {r["driver_id"]: r for r in _rows(conn, """
-            SELECT a.driver_id, a.vehicle_id, a.kind, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo,
-                   v.category
+            SELECT a.driver_id, a.vehicle_id, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo, v.category
             FROM fleet_assignments a JOIN fleet_vehicles v ON v.id = a.vehicle_id
             WHERE a.ended_at IS NULL;""")}
     out = []
@@ -331,11 +307,9 @@ def list_drivers() -> list[dict]:
         item = {k: d[k] for k in ("id", "name", "phone", "id_number", "license_no", "license_class",
                                   "license_expiry", "status", "status_forced", "note", "photo", *DRIVER_DOCUMENTS,
                                   "created_at", "updated_at")}
-        item["home_vehicle"] = ({"id": d["home_vehicle_id"], "plate": d["home_plate"], "status": d["home_status"],
-                                 "category": d["home_category"]} if d["home_vehicle_id"] else None)
         item["current_vehicle"] = ({"id": c["vehicle_id"], "plate": c["plate"], "trailer_plate": c["trailer_plate"],
                                     "photo": c["photo"], "category": c["category"],
-                                    "kind": c["kind"], "since": c["started_at"], "reason": c["reason"]} if c else None)
+                                    "since": c["started_at"], "reason": c["reason"]} if c else None)
         out.append(item)
     out.sort(key=lambda r: (DRIVER_STATUSES.index(r["status"]) if r["status"] in DRIVER_STATUSES else 9,
                             r["name"].casefold()))
@@ -423,122 +397,43 @@ def _close(conn, row: dict | None, end_reason: str, stamp: str) -> None:
                      (stamp, _text(end_reason), row["id"]))
 
 
-def _open(conn, driver: dict, vehicle: dict, kind: str, reason: str, stamp: str) -> None:
-    home_plate = ""
-    if kind == "temporary" and driver.get("home_vehicle_id"):
-        row = conn.execute("SELECT plate FROM fleet_vehicles WHERE id = ?;", (driver["home_vehicle_id"],)).fetchone()
-        home_plate = row[0] if row else ""
+def _open(conn, driver: dict, vehicle: dict, reason: str, stamp: str) -> None:
     conn.execute(
         "INSERT INTO fleet_assignments (driver_id, vehicle_id, driver_name, vehicle_plate, kind, home_vehicle_plate, "
-        "reason, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
-        (driver["id"], vehicle["id"], driver["name"], vehicle["plate"], kind, home_plate, _text(reason), stamp))
+        "reason, started_at) VALUES (?, ?, ?, ?, 'primary', '', ?, ?);",
+        (driver["id"], vehicle["id"], driver["name"], vehicle["plate"], _text(reason), stamp))
 
 
-def _settle_home(conn, driver: dict, stamp: str, reason: str = "") -> bool:
-    """Put an idle, working driver back on their home truck when it can run and nobody else is on it."""
-    if driver["status"] != "active" or not driver.get("home_vehicle_id") or _open_by_driver(conn, driver["id"]):
-        return False
-    vehicle = _vehicle(conn, driver["home_vehicle_id"])
-    if vehicle["status"] not in RUNNING_STATUSES or _open_by_vehicle(conn, vehicle["id"]):
-        return False
-    _open(conn, driver, vehicle, "primary", reason, stamp)
-    return True
+def _check_free_running(conn, vehicle: dict, driver_id: int | None = None) -> None:
+    """A truck a driver can be put on: it can run, and nobody else drives it (409 otherwise)."""
+    if vehicle["status"] not in RUNNING_STATUSES:
+        raise FleetError(f"Xe {vehicle['plate']} đang {VEHICLE_STATUS_LABELS[vehicle['status']].lower()}: không giao được",
+                         409)
+    on_vehicle = _open_by_vehicle(conn, vehicle["id"])
+    if on_vehicle and on_vehicle["driver_id"] != driver_id:
+        raise FleetError(f"Xe {vehicle['plate']} đang do {on_vehicle['driver_name']} lái: thu hồi xe trước khi giao", 409)
 
 
-def set_home_vehicle(driver_id: int, vehicle_id: int | None, force: bool = False) -> dict:
-    """Make `vehicle_id` the driver's home truck (None: no home truck). The driver moves onto it when it can run.
-
-    A truck someone else drives now is always refused (409: take it back first). Without `force` a truck that is
-    another driver's home truck is refused too (409, naming them); with `force` that driver loses it."""
+def assign_vehicle(driver_id: int, vehicle_id: int, reason: str = "") -> dict:
+    """Giao xe / Đổi xe: put a working driver on a free truck that can run. A driver on another truck leaves it."""
     stamp = _now()
     with _conn() as conn:
         driver = _driver(conn, driver_id)
+        vehicle = _vehicle(conn, vehicle_id)
+        if driver["status"] != "active":
+            raise FleetError(f"{driver['name']} đang {DRIVER_STATUS_LABELS.get(driver['status'], driver['status']).lower()}:"
+                             " không giao xe được", 409)
+        _check_free_running(conn, vehicle, driver_id)
         current = _open_by_driver(conn, driver_id)
-        if vehicle_id is None:
-            conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE id = ?;",
-                         (stamp, driver_id))
-            if current and current["kind"] == "primary":
-                _close(conn, current, "Bỏ gán xe cố định", stamp)
-            return {"driver_id": driver_id, "vehicle_id": None}
-        vehicle = _vehicle(conn, vehicle_id)
-        if driver["status"] == "left":
-            raise FleetError(f"{driver['name']} đã nghỉ việc, không gán xe được")
-        # only a truck that can run is given: not "Không sẵn sàng", "Hư hỏng", "Bảo dưỡng" or "Ngưng hoạt động"
-        if vehicle["status"] not in RUNNING_STATUSES and driver.get("home_vehicle_id") != vehicle_id:
-            raise FleetError(f"Xe {vehicle['plate']} đang {VEHICLE_STATUS_LABELS[vehicle['status']].lower()}: không giao được", 409)
-        # a truck someone else is driving now cannot be given away, not even forced: take it back first
-        on_vehicle = _open_by_vehicle(conn, vehicle_id)
-        if on_vehicle and on_vehicle["driver_id"] != driver_id:
-            raise FleetError(f"Xe {vehicle['plate']} đang do {on_vehicle['driver_name']} lái: thu hồi xe trước khi giao", 409)
-        other_home = _home_driver_of(conn, vehicle_id)
-        if other_home and other_home["id"] != driver_id:
-            if not force:
-                raise FleetError(f"Xe {vehicle['plate']} đang là xe cố định của {other_home['name']}", 409)
-            conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE id = ?;",
-                         (stamp, other_home["id"]))
-        conn.execute("UPDATE fleet_drivers SET home_vehicle_id = ?, updated_at = ? WHERE id = ?;",
-                     (vehicle_id, stamp, driver_id))
-        driver["home_vehicle_id"] = vehicle_id
         if current and current["vehicle_id"] == vehicle_id:
-            if current["kind"] != "primary":
-                conn.execute("UPDATE fleet_assignments SET kind = 'primary', home_vehicle_plate = '' WHERE id = ?;",
-                             (current["id"],))
-        elif current and current["kind"] == "primary":
-            # their old home truck is no longer theirs: get off it (a temporary move stays as it is)
-            _close(conn, current, f"Đổi xe cố định sang {vehicle['plate']}", stamp)
-            current = None
-        if not current:
-            _settle_home(conn, driver, stamp, "Gán xe cố định")
-    return {"driver_id": driver_id, "vehicle_id": vehicle_id}
-
-
-def move_temporary(driver_id: int, vehicle_id: int, reason: str = "") -> dict:
-    """The driver takes another truck for now (their own is broken, in maintenance, ...)."""
-    stamp = _now()
-    with _conn() as conn:
-        driver = _driver(conn, driver_id)
-        vehicle = _vehicle(conn, vehicle_id)
-        if driver["status"] != "active":
-            raise FleetError(f"{driver['name']} đang {DRIVER_STATUS_LABELS.get(driver['status'], driver['status']).lower()}")
-        if driver.get("home_vehicle_id") == vehicle_id:
-            raise FleetError(f"Xe {vehicle['plate']} là xe gốc của {driver['name']}: dùng \"Trả về xe gốc\"")
-        if vehicle["status"] not in RUNNING_STATUSES:
-            raise FleetError(f"Xe {vehicle['plate']} đang {VEHICLE_STATUS_LABELS[vehicle['status']].lower()}", 409)
-        on_vehicle = _open_by_vehicle(conn, vehicle_id)
-        if on_vehicle and on_vehicle["driver_id"] != driver_id:
-            raise FleetError(f"Xe {vehicle['plate']} đang do {on_vehicle['driver_name']} lái", 409)
-        if on_vehicle:
             return {"driver_id": driver_id, "vehicle_id": vehicle_id}
-        _close(conn, _open_by_driver(conn, driver_id), f"Chuyển tạm sang xe {vehicle['plate']}", stamp)
-        _open(conn, driver, vehicle, "temporary", reason, stamp)
+        _close(conn, current, f"Đổi sang xe {vehicle['plate']}", stamp)
+        _open(conn, driver, vehicle, reason or "Giao xe", stamp)
     return {"driver_id": driver_id, "vehicle_id": vehicle_id}
-
-
-def return_home(driver_id: int) -> dict:
-    """A driver on a temporary truck goes back to their home truck."""
-    stamp = _now()
-    with _conn() as conn:
-        driver = _driver(conn, driver_id)
-        if not driver.get("home_vehicle_id"):
-            raise FleetError(f"{driver['name']} chưa có xe cố định")
-        if driver["status"] != "active":
-            raise FleetError(f"{driver['name']} đang {DRIVER_STATUS_LABELS.get(driver['status'], driver['status']).lower()}")
-        home = _vehicle(conn, driver["home_vehicle_id"])
-        if home["status"] not in RUNNING_STATUSES:
-            raise FleetError(f"Xe gốc {home['plate']} vẫn đang {VEHICLE_STATUS_LABELS[home['status']].lower()}", 409)
-        on_home = _open_by_vehicle(conn, home["id"])
-        if on_home and on_home["driver_id"] != driver_id:
-            raise FleetError(f"Xe gốc {home['plate']} đang do {on_home['driver_name']} lái tạm, hãy chuyển người đó trước",
-                             409)
-        if on_home:
-            return {"driver_id": driver_id, "vehicle_id": home["id"]}
-        _close(conn, _open_by_driver(conn, driver_id), f"Trả về xe gốc {home['plate']}", stamp)
-        _open(conn, driver, home, "primary", "Trả về xe gốc", stamp)
-    return {"driver_id": driver_id, "vehicle_id": home["id"]}
 
 
 def unassign(driver_id: int, reason: str = "") -> dict:
-    """The driver gets off whatever truck they drive (their home truck stays theirs)."""
+    """The driver gets off whatever truck they drive."""
     stamp = _now()
     with _conn() as conn:
         _driver(conn, driver_id)
@@ -547,33 +442,29 @@ def unassign(driver_id: int, reason: str = "") -> dict:
 
 
 def revoke_vehicle(driver_id: int, reason: str = "") -> dict:
-    """Thu hồi xe: the driver gives up their home truck and gets off whatever truck they drive, both at once. The
-    truck is then free for "Giao xe" to someone else."""
+    """Thu hồi xe: the driver gets off the truck they drive; it is then free for "Giao xe" to someone else."""
     stamp = _now()
     with _conn() as conn:
         driver = _driver(conn, driver_id)
-        if not driver.get("home_vehicle_id") and not _open_by_driver(conn, driver_id):
+        current = _open_by_driver(conn, driver_id)
+        if not current:
             raise FleetError(f"{driver['name']} chưa có xe để thu hồi")
-        conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE id = ?;", (stamp, driver_id))
-        _close(conn, _open_by_driver(conn, driver_id), reason or "Thu hồi xe", stamp)
+        _close(conn, current, reason or "Thu hồi xe", stamp)
     return {"driver_id": driver_id, "vehicle_id": None}
 
 
 def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_vehicle_id: int | None = None,
-                       bring_home_driver: bool = False, forced: bool = False) -> dict:
-    """Change a truck's status in one step with what it means for its driver:
-    - not running any more (not_ready / broken / maintenance / inactive): the driver on it moves to
-      `move_to_vehicle_id` for now, or gets off it when none is given;
-    - running again: its home driver, when idle, gets back on it. A home driver away on a temporary truck comes back
-      too with `bring_home_driver` ("Đã sửa xong") as long as nobody else is on the truck; otherwise they are left
-      there and reported as `home_driver_away`, for the user to bring back with return_home().
+                       forced: bool = False) -> dict:
+    """Change a truck's status in one step with what it means for its driver: when it stops running (not_ready /
+    broken / maintenance / inactive) the driver on it moves to `move_to_vehicle_id`, or gets off it when none is
+    given. Running again changes nobody: give it to a driver with assign_vehicle().
     While its papers are expired only not_ready / inactive can be picked (409 otherwise). `forced`: the change is the
     paper lock's own (see enforce_papers), remembered so renewed papers bring it back to "ready".
-    Returns {"vehicle_id", "status", "moved_driver", "home_driver_away", "returned_driver"}."""
+    Returns {"vehicle_id", "status", "moved_driver"}."""
     if status not in VEHICLE_STATUSES:
         raise FleetError(f"Trạng thái xe không hợp lệ: {status}")
     stamp = _now()
-    moved, away, returned = None, None, None
+    moved = None
     with _conn() as conn:
         vehicle = _vehicle(conn, vehicle_id)
         if not forced:
@@ -588,11 +479,7 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
             if move_to_vehicle_id == vehicle_id:
                 raise FleetError("Hãy chọn một xe khác")
             target = _vehicle(conn, move_to_vehicle_id)
-            if target["status"] not in RUNNING_STATUSES:
-                raise FleetError(f"Xe {target['plate']} đang {VEHICLE_STATUS_LABELS[target['status']].lower()}", 409)
-            busy = _open_by_vehicle(conn, move_to_vehicle_id)
-            if busy:
-                raise FleetError(f"Xe {target['plate']} đang do {busy['driver_name']} lái", 409)
+            _check_free_running(conn, target)
         # a change by hand clears the "forced" mark; the same status again keeps it
         flag = 1 if forced else (vehicle.get("status_forced") or 0) if status == vehicle["status"] else 0
         conn.execute("UPDATE fleet_vehicles SET status = ?, status_forced = ?, updated_at = ? WHERE id = ?;",
@@ -603,24 +490,10 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
             driver = _driver(conn, on_vehicle["driver_id"])
             _close(conn, on_vehicle, why, stamp)
             if target:
-                kind = "primary" if driver.get("home_vehicle_id") == target["id"] else "temporary"
-                _open(conn, driver, target, kind, why, stamp)
+                _open(conn, driver, target, why, stamp)
             moved = {"id": driver["id"], "name": driver["name"], "to_vehicle_id": target["id"] if target else None,
                      "to_plate": target["plate"] if target else ""}
-        if status in RUNNING_STATUSES:
-            home = _home_driver_of(conn, vehicle_id)
-            if home and not _settle_home(conn, home, stamp, f"Xe {vehicle['plate']} chạy lại"):
-                where = _open_by_driver(conn, home["id"])
-                if where and where["vehicle_id"] != vehicle_id and home["status"] == "active":
-                    if bring_home_driver and not _open_by_vehicle(conn, vehicle_id):
-                        _close(conn, where, f"Trả về xe gốc {vehicle['plate']}", stamp)
-                        _open(conn, home, vehicle, "primary", f"Xe {vehicle['plate']} sửa xong", stamp)
-                        returned = {"id": home["id"], "name": home["name"], "from_plate": where["vehicle_plate"],
-                                    "plate": vehicle["plate"]}
-                    else:
-                        away = {"id": home["id"], "name": home["name"], "plate": where["vehicle_plate"]}
-    return {"vehicle_id": vehicle_id, "status": status, "moved_driver": moved, "home_driver_away": away,
-            "returned_driver": returned}
+    return {"vehicle_id": vehicle_id, "status": status, "moved_driver": moved}
 
 
 # ---------------------------------------------------------------------------
@@ -743,16 +616,14 @@ def update_vehicle(vehicle_id: int, data: dict) -> None:
 
 
 def delete_vehicle(vehicle_id: int) -> None:
-    """Move a truck to the trash. Its driver gets off it, its home driver loses it and its trailer comes off (a free
-    trailer again); the history keeps its plate."""
+    """Move a truck to the trash. Its driver gets off it and its trailer comes off (a free trailer again); the history
+    keeps its plate."""
     from backend.app.core.fleet_trailers import release_vehicle
     stamp = _now()
     with _conn() as conn:
         vehicle = _vehicle(conn, vehicle_id)
         _close(conn, _open_by_vehicle(conn, vehicle_id), f"Xóa xe {vehicle['plate']}", stamp)
         release_vehicle(conn, vehicle, f"Xóa xe {vehicle['plate']}", stamp)
-        conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE home_vehicle_id = ?;",
-                     (stamp, vehicle_id))
         conn.execute("UPDATE fleet_vehicles SET deleted_at = ? WHERE id = ?;", (stamp, vehicle_id))
 
 
@@ -823,20 +694,12 @@ def create_driver(data: dict) -> int:
             (fields["name"], fields["phone"], fields["id_number"], fields["license_no"], fields["license_class"],
              fields["license_expiry"], fields["status"], forced, fields["note"], stamp, stamp))
         driver_id = cur.lastrowid
-    vehicle_id = data.get("home_vehicle_id")
-    if vehicle_id:
-        try:
-            set_home_vehicle(driver_id, int(vehicle_id))
-        except FleetError:
-            with _conn() as conn:
-                conn.execute("DELETE FROM fleet_drivers WHERE id = ?;", (driver_id,))
-            raise
     return driver_id
 
 
 def update_driver(driver_id: int, data: dict) -> None:
-    """Edit a driver. Going on leave or not ready gets them off their truck; quitting also gives up their home truck;
-    coming back to work puts them on their home truck when it is free and running. A status other than the stored one
+    """Edit a driver. Any status but "active" (leave, not ready, quit) gets them off their truck; coming back to work
+    puts them on none (give them one with assign_vehicle). A status other than the stored one
     is a change by hand: refused while the licence is expired (unless not_ready / leave / left), and it clears the
     "forced" mark. The new licence date then locks or frees them (see enforce_driver_papers)."""
     fields = _clean_driver({k: v for k, v in data.items() if k in _DRIVER_FIELDS}, partial=True)
@@ -866,20 +729,16 @@ def update_driver(driver_id: int, data: dict) -> None:
             label = DRIVER_STATUS_LABELS[status]
             if status != "active":
                 _close(conn, _open_by_driver(conn, driver_id), label, stamp)
-            if status == "left":
-                conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL WHERE id = ?;", (driver_id,))
-            if status == "active":
-                _settle_home(conn, _driver(conn, driver_id), stamp, "Đi làm lại")
     enforce_driver_papers(driver_id)
 
 
 def delete_driver(driver_id: int) -> None:
-    """Move a driver to the trash: off their truck and without an own truck (it is free for someone else)."""
+    """Move a driver to the trash: off their truck (it is free for someone else)."""
     stamp = _now()
     with _conn() as conn:
         driver = _driver(conn, driver_id)
         _close(conn, _open_by_driver(conn, driver_id), f"Xóa tài xế {driver['name']}", stamp)
-        conn.execute("UPDATE fleet_drivers SET deleted_at = ?, home_vehicle_id = NULL WHERE id = ?;", (stamp, driver_id))
+        conn.execute("UPDATE fleet_drivers SET deleted_at = ? WHERE id = ?;", (stamp, driver_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1179,7 +1038,7 @@ def _paper_move(row: dict, today: date | None = None) -> tuple[str, str] | None:
 
 def enforce_vehicle_papers(vehicle_id: int, today: date | None = None) -> str | None:
     """Apply the paper lock to one truck, through set_vehicle_status so its driver moves as for any other change
-    (forced to not_ready: the driver gets off; back to ready: its home driver gets back on). Returns the new status
+    (forced to not_ready: the driver gets off; back to ready: nobody is put on it). Returns the new status
     when it changed."""
     with _conn() as conn:
         rows = _rows(conn, "SELECT * FROM fleet_vehicles WHERE id = ? AND deleted_at IS NULL;", (vehicle_id,))
@@ -1188,7 +1047,7 @@ def enforce_vehicle_papers(vehicle_id: int, today: date | None = None) -> str | 
         return None
     status, reason = move
     if status == "ready":
-        set_vehicle_status(vehicle_id, "ready", reason, bring_home_driver=True)
+        set_vehicle_status(vehicle_id, "ready", reason)
     else:
         set_vehicle_status(vehicle_id, "not_ready", reason, forced=True)
     logger.info(f"Paper lock: vehicle {rows[0]['plate']} -> {status} ({reason})")
@@ -1204,9 +1063,9 @@ def license_expired(row: dict, today: date | None = None) -> bool:
 
 
 def enforce_driver_papers(driver_id: int, today: date | None = None) -> str | None:
-    """The licence lock on one driver: an expired licence makes a working driver not_ready (off their truck, home
-    truck kept); a renewed one brings a driver it had forced back to work (and onto their home truck when it can
-    run). Someone on leave or who quit is left alone. Returns the new status when it changed."""
+    """The licence lock on one driver: an expired licence makes a working driver not_ready (off their truck); a renewed
+    one brings a driver it had forced back to work (on no truck: give them one with assign_vehicle). Someone on leave
+    or who quit is left alone. Returns the new status when it changed."""
     stamp = _now()
     with _conn() as conn:
         rows = _rows(conn, "SELECT * FROM fleet_drivers WHERE id = ? AND deleted_at IS NULL;", (driver_id,))
@@ -1222,7 +1081,6 @@ def enforce_driver_papers(driver_id: int, today: date | None = None) -> str | No
         elif not expired and driver["status"] == "not_ready" and driver["status_forced"]:
             conn.execute("UPDATE fleet_drivers SET status = 'active', status_forced = 0, updated_at = ? WHERE id = ?;",
                          (stamp, driver_id))
-            _settle_home(conn, {**driver, "status": "active"}, stamp, "Bằng lái đã gia hạn")
             status = "active"
         else:
             return None

@@ -188,7 +188,6 @@ const VehicleDetailModal: React.FC<{
             {box('driver', c ? (
               <Person photo={c.photo} name={c.name} lines={[
                 c.phone,
-                c.kind === 'temporary' ? f.kind.temporary : null,
                 c.since ? tf(D.since, { time: formatStampShort(c.since) }) : null,
               ]} />
             ) : <div className="text-sm text-slate-400">{f.noDriver}</div>, isTruck ? 'sm:col-span-2' : '')}
@@ -251,7 +250,6 @@ const VehicleDetailModal: React.FC<{
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${row.ended_at ? 'bg-slate-300 dark:bg-slate-600' : 'bg-emerald-500'}`} />
                   <span className="min-w-0">
                     <span className="font-semibold text-slate-800 dark:text-slate-100">{row.driver_name}</span>
-                    {row.kind === 'temporary' && <span className="ml-1.5 text-xs text-sky-700 dark:text-sky-300">{f.kind.temporary}</span>}
                     <span className="block text-xs text-slate-500 dark:text-slate-400 tabular-nums">
                       {formatStampShort(row.started_at)} → {row.ended_at ? formatStampShort(row.ended_at) : f.stillOpen}
                       {(row.end_reason || row.reason) && ` · ${row.end_reason || row.reason}`}

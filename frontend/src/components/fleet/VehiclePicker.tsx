@@ -15,7 +15,7 @@ interface Props {
   onChange: (value: string) => void;
   /** a first card for "no vehicle" (its label), when that is a choice */
   noneLabel?: string;
-  /** the driver being moved: their own truck / the one they drive now are marked as such, not as someone else's */
+  /** the driver being moved: the truck they drive now is not marked as someone else's */
   driverId?: number;
   label: string;
 }
@@ -39,19 +39,14 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
   // cannot be given to this driver: someone else drives it now (take it back first), or it cannot run
   // (Không sẵn sàng / Hư hỏng / Bảo dưỡng / Ngưng hoạt động)
   const locked = (v: FleetVehicle) => (!!v.current_driver && v.current_driver.id !== driverId) || !isRunning(v.status);
-  const rank = (v: FleetVehicle) => {
-    if (locked(v)) return 3;
-    if (driverId !== undefined && v.home_driver?.id === driverId) return 0;
-    return v.home_driver && v.home_driver.id !== driverId ? 2 : 1;
-  };
+  const rank = (v: FleetVehicle) => (locked(v) ? 1 : 0);
 
   const shown = useMemo(() => {
     const q = norm(query);
     return vehicles
       .filter((v) => filter === 'all' || (filter === 'truck') === (v.category === 'truck'))
-      .filter((v) => !q || [v.plate, v.trailer_plate, v.vehicle_type, v.body_type, v.home_driver?.name || '',
-        v.current_driver?.name || ''].some((s) => norm(s).includes(q)))
-      // this driver's own truck first, then free ones, then the rest; by plate within each
+      .filter((v) => !q || [v.plate, v.trailer_plate, v.vehicle_type, v.body_type, v.current_driver?.name || ''].some((s) => norm(s).includes(q)))
+      // free trucks first, then the ones that cannot be picked; by plate within each
       .sort((a, b) => rank(a) - rank(b) || a.plate.localeCompare(b.plate));
   }, [vehicles, filter, query, driverId]);
 
@@ -95,7 +90,6 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
   const vehicleBody = (v: FleetVehicle) => {
     const isTruck = v.category === 'truck';
     const what = isTruck ? [v.body_type, v.payload].filter(Boolean).join(' · ') : (v.trailer_plate ? tf(m.trailer, { plate: v.trailer_plate }) : m.noTrailer);
-    const owner = v.home_driver && v.home_driver.id !== driverId ? v.home_driver : null;
     const driving = v.current_driver && v.current_driver.id !== driverId ? v.current_driver : null;
     return (
       <>
@@ -110,7 +104,7 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
           </span>
           <span className="mt-1.5 flex flex-wrap gap-1">
             {driving && tag(tf(m.drivenBy, { name: driving.name }), 'slate')}
-            {!owner && !driving && v.home_driver?.id !== driverId && isRunning(v.status) && tag(m.free, 'emerald')}
+            {!driving && isRunning(v.status) && tag(m.free, 'emerald')}
             {!isRunning(v.status) && tag(t.fleet.vehicleStatus[v.status], 'rose')}
           </span>
         </span>

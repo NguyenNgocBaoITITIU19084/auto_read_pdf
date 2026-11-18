@@ -41,12 +41,13 @@ def _t(plate):
 def test_six_statuses_and_two_of_them_run():
     assert fleet.VEHICLE_STATUSES == ("ready", "active", "not_ready", "broken", "maintenance", "inactive")
     v = fleet.create_vehicle({"plate": "51C-1", "status": "ready"})
-    a = fleet.create_driver({"name": "An", "home_vehicle_id": v})
-    assert _d("An")["current_vehicle"]["id"] == v           # "ready" runs: the home driver is on it
+    a = fleet.create_driver({"name": "An"})
+    fleet.assign_vehicle(a, v)
+    assert _d("An")["current_vehicle"]["id"] == v           # "ready" runs: a driver can be put on it
     fleet.set_vehicle_status(v, "not_ready", "Chờ giấy tờ")
     assert _d("An")["current_vehicle"] is None              # not ready: the driver gets off
     fleet.set_vehicle_status(v, "active")
-    assert _d("An")["current_vehicle"]["id"] == v and a
+    assert _d("An")["current_vehicle"] is None              # running again puts nobody back
 
 
 def test_a_new_one_with_an_expired_paper_starts_not_ready():
@@ -76,7 +77,7 @@ def test_while_expired_only_not_ready_or_inactive_can_be_picked():
 
 def test_papers_running_out_lock_it_and_take_the_driver_off():
     v = fleet.create_vehicle({"plate": "51C-1", "insurance_expiry": SOON})
-    fleet.create_driver({"name": "An", "home_vehicle_id": v})
+    fleet.assign_vehicle(fleet.create_driver({"name": "An"}), v)
     assert fleet.enforce_papers() == 0
     assert fleet.enforce_papers(TODAY + timedelta(days=10)) == 1
     assert (_v("51C-1")["status"], _v("51C-1")["status_forced"]) == ("not_ready", 1)
@@ -85,12 +86,15 @@ def test_papers_running_out_lock_it_and_take_the_driver_off():
     assert closed["ended_at"] and "Bảo hiểm hết hạn" in closed["end_reason"]
 
 
-def test_renewed_papers_bring_it_back_to_ready_with_its_driver():
+def test_renewed_papers_bring_it_back_to_ready_and_it_can_be_given_again():
     v = fleet.create_vehicle({"plate": "51C-1", "registration_expiry": PAST})
-    fleet.create_driver({"name": "An", "home_vehicle_id": v})
-    assert _d("An")["current_vehicle"] is None
+    a = fleet.create_driver({"name": "An"})
+    with pytest.raises(fleet.FleetError):
+        fleet.assign_vehicle(a, v)                          # locked: not ready
     fleet.update_vehicle(v, {"registration_expiry": LATER})
     assert (_v("51C-1")["status"], _v("51C-1")["status_forced"]) == ("ready", 0)
+    assert _d("An")["current_vehicle"] is None
+    fleet.assign_vehicle(a, v)
     assert _d("An")["current_vehicle"]["id"] == v
 
 
@@ -159,16 +163,17 @@ def test_a_new_driver_with_an_expired_licence_starts_not_ready():
 
 def test_a_licence_running_out_takes_the_driver_off_and_renewing_brings_them_back():
     v = fleet.create_vehicle({"plate": "51C-1"})
-    a = fleet.create_driver({"name": "An", "license_expiry": SOON, "home_vehicle_id": v})
+    a = fleet.create_driver({"name": "An", "license_expiry": SOON})
+    fleet.assign_vehicle(a, v)
     assert _d("An")["current_vehicle"]["id"] == v
     assert fleet.enforce_papers(TODAY + timedelta(days=10)) == 1
     assert (_d("An")["status"], _d("An")["status_forced"]) == ("not_ready", 1)
-    assert _d("An")["current_vehicle"] is None and _d("An")["home_vehicle"]["id"] == v     # keeps their own truck
+    assert _d("An")["current_vehicle"] is None
     closed = fleet.history_page(driver_id=a)["items"][0]
     assert closed["end_reason"] == "Bằng lái hết hạn"
     fleet.update_driver(a, {"license_expiry": LATER})
     assert (_d("An")["status"], _d("An")["status_forced"]) == ("active", 0)
-    assert _d("An")["current_vehicle"]["id"] == v
+    assert _d("An")["current_vehicle"] is None              # back to work, on no truck until given one
 
 
 def test_while_the_licence_is_expired_only_not_ready_leave_or_left():

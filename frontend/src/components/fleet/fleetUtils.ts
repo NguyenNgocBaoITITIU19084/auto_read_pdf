@@ -92,22 +92,14 @@ export function freeVehicles(vehicles: FleetVehicle[], except?: number | null): 
   return vehicles.filter((v) => isRunning(v.status) && !v.current_driver && v.id !== except);
 }
 
-/** Home trucks running again while their driver is still away on a temporary truck: they can go back. */
-export function awayHomeDrivers(vehicles: FleetVehicle[]): FleetVehicle[] {
-  return vehicles.filter((v) => isRunning(v.status) && !v.current_driver && v.home_driver?.status === 'active'
-    && v.home_driver.driving_vehicle_id !== null && v.home_driver.driving_vehicle_id !== v.id);
-}
-
-/** A driver who can be put back on their home truck right now. */
-export function canReturnHome(d: FleetDriver, vehicles: FleetVehicle[]): boolean {
-  if (d.status !== 'active' || !d.home_vehicle || d.current_vehicle?.id === d.home_vehicle.id) return false;
-  const home = vehicles.find((v) => v.id === d.home_vehicle!.id);
-  return !!home && isRunning(home.status) && !home.current_driver;
-}
-
-/** A working driver not on any truck now ("Chưa có xe"): "Giao xe" instead of "Đổi xe". */
+/** A working driver on no truck now ("Chưa có xe"): "Giao xe". Only a working driver can be given a truck. */
 export function needsTruck(d: FleetDriver): boolean {
-  return d.status !== 'left' && !d.current_vehicle;
+  return d.status === 'active' && !d.current_vehicle;
+}
+
+/** A working driver on a truck: "Đổi xe" (move to another free truck). */
+export function canChangeTruck(d: FleetDriver): boolean {
+  return d.status === 'active' && !!d.current_vehicle;
 }
 
 /** Expiring or expired documents of running trucks and working drivers. */

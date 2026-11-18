@@ -2,14 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Search, X } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
-import { useConfirm } from '../../hooks/useConfirm';
 import { Modal } from '../common/Modal';
 import { tf } from '../../services/i18nFormat';
-import { setDriverHomeVehicleApi } from '../../services/api';
+import { assignDriverVehicleApi } from '../../services/api';
 import type { FleetDriver, FleetVehicle } from '../../types';
 import { FleetAvatar } from './FleetPhoto';
 import { Footer } from './FleetModals';
-import { apiError, isConflict } from './fleetUtils';
+import { apiError } from './fleetUtils';
 
 interface Props {
   vehicle: FleetVehicle | null;
@@ -21,14 +20,12 @@ interface Props {
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd')
   .replace(/[^a-z0-9]/g, '');
 
-/** From a truck: give it to a driver for good ("Giao xe"), or hand it to another driver ("Đổi tài xế").
- *  Each driver has one truck, so a driver who owns another truck leaves it. */
+/** From a free truck that can run: give it to a working driver ("Giao xe"). Each driver drives one truck, so a
+ *  driver on another truck leaves it. */
 export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose, onSaved }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
-  const confirm = useConfirm();
   const m = t.fleet.driverModal;
-  const mm = t.fleet.moveModal;
   const [driverId, setDriverId] = useState('');
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
@@ -40,21 +37,18 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
     setError('');
   }, [vehicle]);
 
-  const ownerId = vehicle?.home_driver?.id ?? null;
   const shown = useMemo(() => {
     const q = norm(query);
-    // this truck's driver first, then drivers with no truck, then the rest; by name within each
-    const rank = (d: FleetDriver) => (d.id === ownerId ? 0 : !d.home_vehicle && !d.current_vehicle ? 1 : 2);
+    // working drivers on no truck first, then working ones on another truck, then those not at work; by name
+    const rank = (d: FleetDriver) => (d.status !== 'active' ? 2 : d.current_vehicle ? 1 : 0);
     return drivers
       .filter((d) => d.status !== 'left')
-      .filter((d) => !q || [d.name, d.phone, d.home_vehicle?.plate || '', d.current_vehicle?.plate || ''].some((s) => norm(s).includes(q)))
+      .filter((d) => !q || [d.name, d.phone, d.current_vehicle?.plate || ''].some((s) => norm(s).includes(q)))
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'vi'));
-  }, [drivers, query, ownerId]);
+  }, [drivers, query]);
 
   if (!vehicle) return null;
-  const owner = vehicle.home_driver;
   const picked = drivers.find((d) => String(d.id) === driverId) || null;
-  const same = !!picked && picked.id === ownerId;
 
   const done = () => {
     onSaved();
@@ -63,38 +57,12 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!picked || same) return;
+    if (!picked) return;
     setSaving(true);
     setError('');
     try {
-      try {
-        await setDriverHomeVehicleApi(picked.id, vehicle.id);
-      } catch (err) {
-        if (!isConflict(err)) throw err;
-        const ok = await confirm({
-          title: mm.forceTitle,
-          message: tf(mm.forceMessage, { message: apiError(err, ''), name: picked.name }),
-          confirmText: mm.forceConfirm,
-          danger: true,
-        });
-        if (!ok) return;
-        await setDriverHomeVehicleApi(picked.id, vehicle.id, true);
-      }
-      addToast(t.fleet.toast.saved, 'success');
-      done();
-    } catch (err) {
-      setError(apiError(err, t.fleet.toast.error));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const unassign = async () => {
-    if (!owner) return;
-    setSaving(true);
-    try {
-      await setDriverHomeVehicleApi(owner.id, null);
-      addToast(tf(m.unassigned, { plate: vehicle.plate }), 'success');
+      await assignDriverVehicleApi(picked.id, vehicle.id);
+      addToast(tf(t.fleet.toast.assigned, { name: picked.name, plate: vehicle.plate }), 'success');
       done();
     } catch (err) {
       setError(apiError(err, t.fleet.toast.error));
@@ -115,21 +83,23 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
 
   const card = (d: FleetDriver) => {
     const on = String(d.id) === driverId;
-    const driving = d.current_vehicle && d.current_vehicle.id !== vehicle.id ? d.current_vehicle : null;
+    const driving = d.current_vehicle;
+    const off = d.status !== 'active';     // on leave / not ready: cannot be given a truck
     return (
-      <button key={d.id} type="button" role="radio" aria-checked={on} aria-label={d.name}
+      <button key={d.id} type="button" role="radio" aria-checked={on} aria-label={d.name} disabled={off}
         onClick={() => { setDriverId(String(d.id)); setError(''); }}
-        className={`relative w-full min-h-[5.5rem] flex items-center gap-3.5 p-3 pr-10 rounded-xl border-2 text-left transition-all ${on
-          ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40 shadow-sm'
-          : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
+        className={`relative w-full min-h-[5.5rem] flex items-center gap-3.5 p-3 pr-10 rounded-xl border-2 text-left transition-all ${off
+          ? 'border-slate-200 dark:border-slate-800 opacity-50 cursor-not-allowed'
+          : on
+            ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40 shadow-sm'
+            : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 hover:bg-slate-50 dark:hover:bg-slate-800/60'}`}>
         <FleetAvatar photo={d.photo} kind="driver" name={d.name} size="lg" />
         <span className="min-w-0 flex-1">
           <span className="block text-base font-bold tracking-tight text-slate-800 dark:text-slate-100">{d.name}</span>
           <span className="block text-xs text-slate-500 dark:text-slate-400 truncate">{d.phone || ' '}</span>
           <span className="mt-1.5 flex flex-wrap gap-1">
-            {d.id === ownerId && tag(m.thisTruck, 'sky')}
             {driving && tag(tf(m.driving, { plate: driving.plate }), 'amber')}
-            {!d.home_vehicle && !d.current_vehicle && tag(m.noTruck, 'emerald')}
+            {!driving && !off && tag(m.noTruck, 'emerald')}
             {d.status !== 'active' && tag(t.fleet.driverStatus[d.status], 'rose')}
           </span>
         </span>
@@ -141,15 +111,14 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
     );
   };
 
-  const old = picked && !same ? picked.home_vehicle : null;
-  const summary = !picked ? m.summaryPick : same ? tf(m.summarySame, { name: picked.name })
+  const old = picked?.current_vehicle ?? null;
+  const summary = !picked ? m.summaryPick
     : [tf(m.summaryGive, { plate: vehicle.plate, name: picked.name }),
-      old ? tf(m.summaryLeave, { name: picked.name, old: old.plate }) : '',
-      owner ? tf(m.summaryTake, { other: owner.name }) : ''].filter(Boolean).join(' ');
-  const warn = !!picked && !same && (!!old || !!owner);
+      old ? tf(m.summaryLeave, { name: picked.name, old: old.plate }) : ''].filter(Boolean).join(' ');
+  const warn = !!old;
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(owner ? m.changeTitle : m.assignTitle, { plate: vehicle.plate })} maxWidth="max-w-4xl">
+    <Modal isOpen onClose={onClose} title={tf(m.assignTitle, { plate: vehicle.plate })} maxWidth="max-w-4xl">
       <form onSubmit={submit} className="space-y-5" noValidate>
         <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
           <FleetAvatar photo={vehicle.photo} kind="vehicle" name={vehicle.plate} size="wideLg" />
@@ -159,9 +128,6 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
               {[vehicle.category === 'truck' ? vehicle.body_type : vehicle.trailer_plate, vehicle.vehicle_type].filter(Boolean).join(' · ')}
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
-            {owner ? tf(m.current, { name: owner.name }) : m.currentNone}
-          </span>
         </div>
         <p className="text-sm text-slate-500 dark:text-slate-400">{m.hint}</p>
         <div>
@@ -187,21 +153,14 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
           </div>
         </div>
         <div className="sticky -bottom-5 z-10 -mx-6 -mb-5 px-6 pt-3 pb-5 space-y-3 bg-white dark:bg-slate-900 shadow-[0_-10px_16px_-14px_rgba(15,23,42,0.35)]">
-        <p data-testid="driver-summary" className={`text-sm rounded-xl px-4 py-3 ${picked && !same
+        <p data-testid="driver-summary" className={`text-sm rounded-xl px-4 py-3 ${picked
           ? (warn ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
             : 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200')
           : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400'}`}>
           {summary}
         </p>
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
-        <Footer onCancel={onClose} saving={saving} disabled={!picked || same}>
-          {owner && (
-            <button type="button" onClick={unassign} disabled={saving}
-              className="mr-auto h-9 px-3 text-sm font-semibold rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50">
-              {m.unassign}
-            </button>
-          )}
-        </Footer>
+        <Footer onCancel={onClose} saving={saving} disabled={!picked} />
         </div>
       </form>
     </Modal>

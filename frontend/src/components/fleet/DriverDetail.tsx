@@ -148,7 +148,7 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
   // an expired licence (as typed now): only not_ready / leave / left can be picked
   const licenceLocked = licenseExpired({ license_expiry: value('license_expiry') });
   const current = driver.current_vehicle;
-  const currentText = current ? [current.plate, current.kind === 'temporary' ? f.kind.temporary : ''].filter(Boolean).join(' · ') : '';
+  const currentText = current ? current.plate : '';
 
   // what the copy bar copies, in the order shown
   const entries: CopyEntry[] = [
@@ -231,8 +231,7 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
                 <div>
                   <div className="font-semibold text-slate-800 dark:text-slate-100">{current.plate}</div>
                   <div className="text-xs text-slate-500 dark:text-slate-400">
-                    {[current.kind === 'temporary' ? f.kind.temporary : '', current.since ? tf(D.since, { time: formatStampShort(current.since) }) : '']
-                      .filter(Boolean).join(' · ')}
+                    {current.since ? tf(D.since, { time: formatStampShort(current.since) }) : ''}
                   </div>
                 </div>
               </div>
@@ -283,7 +282,6 @@ export const DriverDetailModal: React.FC<Props> = ({ driver, onClose, onOpenPhot
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${h.ended_at ? 'bg-slate-300 dark:bg-slate-600' : 'bg-emerald-500'}`} />
                   <span className="min-w-0">
                     <span className="font-semibold text-slate-800 dark:text-slate-100">{h.vehicle_plate}</span>
-                    {h.kind === 'temporary' && <span className="ml-1.5 text-xs text-sky-700 dark:text-sky-300">{f.kind.temporary}</span>}
                     <span className="block text-xs text-slate-500 dark:text-slate-400 tabular-nums">
                       {formatStampShort(h.started_at)} → {h.ended_at ? formatStampShort(h.ended_at) : f.stillOpen}
                       {(h.end_reason || h.reason) && ` · ${h.end_reason || h.reason}`}

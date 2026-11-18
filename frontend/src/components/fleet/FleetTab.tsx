@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArchiveRestore, Lock, ArrowLeftRight, CheckCircle2, Copy, Eye, ListChecks, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
-  FileSpreadsheet, Info, KeyRound, LogOut, SlidersHorizontal, Trash2, Truck, Undo2, Wrench, X,
+  FileSpreadsheet, Info, KeyRound, LogOut, SlidersHorizontal, Trash2, Truck, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
 import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
-  deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, returnDriverHomeApi, revokeDriverVehicleApi, unassignDriverApi,
+  deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, revokeDriverVehicleApi,
   setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi, updateFleetVehicleApi, type FleetTrashCount,
 } from '../../services/api';
 import { useRowSelection } from '../../hooks/useRowSelection';
@@ -36,19 +36,20 @@ import { RowContextMenu, useRowContextMenu, type MenuGroup } from '../common/Row
 import { VehicleDriverModal } from './VehicleDriverModal';
 import { FleetDetailModal, type DetailAction, type FleetDetailTarget } from './FleetDetailModal';
 import {
-  Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, SttTd, SttTh, TD, TEMP_CHIP, TH, TRUCK_CHIP,
+  Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, SttTd, SttTh, TD, TH, TRUCK_CHIP,
   VEHICLE_TONE, sttOf,
   docState, docWarnings, fromControl, soonestDays, type DocState,
 } from './fleetCells';
 import {
-  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, awayHomeDrivers, licenseExpired, canReturnHome, needsTruck, expiredPapers, formatIsoDate, formatStampShort, isRunning, matches,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, licenseExpired, needsTruck, canChangeTruck, expiredPapers, formatIsoDate, formatStampShort, isRunning, matches,
   todayVnIso,
 } from './fleetUtils';
 
 type View = 'vehicles' | 'drivers' | 'history';
 type HistoryFilter = { driver_id?: number; vehicle_id?: number; label: string } | null;
 type VehicleFilter = 'all' | 'running' | 'down' | 'notReady' | 'free' | 'expiring';
-type DriverFilter = 'all' | 'idle' | 'temporary' | 'expiring';
+type DriverFilter = 'all' | 'idle' | 'expiring';
+const NO_OWN_TRUCK = { version: 1 };
 type RowRef = { kind: 'vehicle' | 'driver'; id: number };
 
 /** Which app tab this is: the tractor units (đầu kéo), the trucks (xe tải), or the drivers. Each also shows the
@@ -143,7 +144,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     try {
       setHistory(await getFleetHistoryPageApi({
         driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, category: historyCategory,
-        kinds: historyCols.vehicle_plate, states: historyCols.ended_at, q: historyQuery.trim() || undefined,
+        states: historyCols.ended_at, q: historyQuery.trim() || undefined,
         sort_by: historySort.sort?.key, sort_dir: historySort.sort?.dir,
         limit: historyPaging.pageSize, offset: (historyPaging.page - 1) * historyPaging.pageSize,
       }));
@@ -184,7 +185,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const vs = useMemo(() => (screen === 'drivers' ? allVs : allVs.filter((v) => (v.category || 'tractor') === category)),
     [allVs, screen, category]);
   const ds = drivers || [];
-  const away = useMemo(() => awayHomeDrivers(vs), [vs]);
 
   const vehicleDocs = (v: FleetVehicle): [FleetDocumentKind, string][] =>
     [['ownership', v.ownership_expiry], ['registration', v.registration_expiry], ['insurance', v.insurance_expiry]];
@@ -201,12 +201,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const driverTest: Record<DriverFilter, (d: FleetDriver) => boolean> = useMemo(() => ({
     all: () => true,
     idle: (d) => d.status === 'active' && !d.current_vehicle,
-    temporary: (d) => d.current_vehicle?.kind === 'temporary',
     expiring: (d) => d.status !== 'left' && docWarnings(driverDocs(d), today).length > 0,
   }), [today]);
 
   const shownVehicles = useMemo(() => vs.filter((v) => vehicleTest[vehicleFilter](v) && matches(query, v.plate, v.trailer_plate,
-    v.vehicle_type, v.body_type, v.payload, v.note, v.current_driver?.name, v.home_driver?.name)), [vs, query, vehicleFilter, vehicleTest]);
+    v.vehicle_type, v.body_type, v.payload, v.note, v.current_driver?.name)), [vs, query, vehicleFilter, vehicleTest]);
   const shownDrivers = useMemo(() => ds.filter((d) => driverTest[driverFilter](d) && matches(query, d.name, d.phone, d.id_number,
     d.license_no, d.note, d.current_vehicle?.plate)), [ds, query, driverFilter, driverTest]);
 
@@ -214,7 +213,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const vehicleValue: Record<string, (v: FleetVehicle) => string> = useMemo(() => ({
     plate: (v) => v.vehicle_type,
     status: (v) => v.status,
-    driver: (v) => (v.current_driver ? v.current_driver.kind : 'none'),
+    driver: (v) => (v.current_driver ? 'primary' : 'none'),
     docs: (v) => docState(vehicleDocs(v), today),
   }), [today]);
   const vehicleSortValue = useMemo(() => ({
@@ -226,7 +225,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     type: (v: FleetVehicle) => v.vehicle_type,
     body: (v: FleetVehicle) => v.body_type,
     payload: (v: FleetVehicle) => v.payload,
-    home: (v: FleetVehicle) => v.home_driver?.name ?? null,
     ownership: (v: FleetVehicle) => v.ownership_expiry,
     registration: (v: FleetVehicle) => v.registration_expiry,
     insurance: (v: FleetVehicle) => v.insurance_expiry,
@@ -235,7 +233,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   }), [today]);
   const driverValue: Record<string, (d: FleetDriver) => string> = useMemo(() => ({
     status: (d) => d.status,
-    truck: (d) => (d.current_vehicle ? d.current_vehicle.kind : 'none'),
+    truck: (d) => (d.current_vehicle ? 'primary' : 'none'),
     license: (d) => docState(driverDocs(d), today),
     license_class: (d) => d.license_class,
   }), [today]);
@@ -297,7 +295,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     ...(isTrucks
       ? [['body', C.body, true], ['payload', C.payload, false]] as [string, string, boolean][]
       : [['trailer', C.trailer, false]] as [string, string, boolean][]),
-    ['type', C.type, false], ['home', C.home, false], ['ownership', C.ownership, false], ['registration', C.registration, false],
+    ['type', C.type, false], ['ownership', C.ownership, false], ['registration', C.registration, false],
     ['insurance', C.insurance, false], ['note', C.note, false], ['created', C.created, false],
   ]), [L, C, isTrucks]);
   const driverDefaults = useMemo(() => defaults([
@@ -310,8 +308,9 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     ['started_at', f.cols.started, true], ['ended_at', f.cols.ended, true], ['driver_name', f.cols.name, true],
     ['vehicle_plate', f.cols.vehicle, true], ['reason', f.cols.reason, true], ['end_reason', f.cols.endReason, true],
   ]), [f.cols]);
-  const vehicleColumns = useColumnSettings({ storageKey: tableKeys.columns, defaultColumns: vehicleDefaults });
-  const driverColumns = useColumnSettings({ storageKey: 'fleet_drivers_table', defaultColumns: driverDefaults });
+  // v1: the own-truck columns ("Tài xế cố định" / "Xe cố định", key `home`) are gone; a saved column list drops them
+  const vehicleColumns = useColumnSettings({ storageKey: tableKeys.columns, defaultColumns: vehicleDefaults, migration: NO_OWN_TRUCK });
+  const driverColumns = useColumnSettings({ storageKey: 'fleet_drivers_table', defaultColumns: driverDefaults, migration: NO_OWN_TRUCK });
   const historyColumns = useColumnSettings({ storageKey: 'fleet_history_table', defaultColumns: historyDefaults });
   const [columnsOpen, setColumnsOpen] = useState(false);
   const activeColumns = view === 'vehicles' ? vehicleColumns : view === 'drivers' ? driverColumns : historyColumns;
@@ -340,17 +339,15 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     ...activeColumns.columns.map((c) => ({ key: c.key, label: c.label })),
   ], [activeColumns.columns, t.common.stt]);
 
-  const tempNote = (kind: 'primary' | 'temporary' | undefined) => (kind === 'temporary' ? ` (${f.kind.temporary.toLowerCase()})` : '');
   const vehicleText = (v: FleetVehicle): Record<string, string> => ({
     plate: v.plate,
     status: f.vehicleStatus[v.status],
-    driver: v.current_driver ? v.current_driver.name + tempNote(v.current_driver.kind) : '',
+    driver: v.current_driver ? v.current_driver.name : '',
     docs: T.docState[docState(vehicleDocs(v), today)],
     trailer: v.trailer_plate,
     body: v.body_type,
     payload: v.payload,
     type: v.vehicle_type,
-    home: v.home_driver?.name || '',
     ownership: formatIsoDate(v.ownership_expiry),
     registration: formatIsoDate(v.registration_expiry),
     insurance: formatIsoDate(v.insurance_expiry),
@@ -360,7 +357,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const driverText = (d: FleetDriver): Record<string, string> => ({
     name: d.name,
     status: f.driverStatus[d.status],
-    truck: d.current_vehicle ? d.current_vehicle.plate + tempNote(d.current_vehicle.kind) : '',
+    truck: d.current_vehicle ? d.current_vehicle.plate : '',
     license: [[d.license_class, d.license_no].filter(Boolean).join(' · '), T.docState[docState(driverDocs(d), today)]]
       .filter(Boolean).join(' — '),
     phone: d.phone,
@@ -375,8 +372,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     started_at: formatStampShort(h.started_at),
     ended_at: h.ended_at ? formatStampShort(h.ended_at) : f.stillOpen,
     driver_name: h.driver_name,
-    vehicle_plate: h.vehicle_plate + tempNote(h.kind)
-      + (h.kind === 'temporary' && h.home_vehicle_plate ? ` — ${tf(f.tempOf, { plate: h.home_vehicle_plate })}` : ''),
+    vehicle_plate: h.vehicle_plate,
     reason: h.reason,
     end_reason: h.end_reason,
   });
@@ -387,7 +383,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     const size = 1000;
     for (let offset = 0; ; offset += size) {
       const res = await getFleetHistoryPageApi({
-        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, category: historyCategory, kinds: historyCols.vehicle_plate,
+        driver_id: historyFilter?.driver_id, vehicle_id: historyFilter?.vehicle_id, category: historyCategory,
         states: historyCols.ended_at, q: historyQuery.trim() || undefined, sort_by: historySort.sort?.key,
         sort_dir: historySort.sort?.dir, limit: size, offset,
       });
@@ -413,36 +409,16 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     }
   };
 
-  const returnHome = async (driverId: number, name: string) => {
-    setBusyId(`d${driverId}`);
-    try {
-      const res = await returnDriverHomeApi(driverId);
-      addToast(tf(f.toast.returned, { name, plate: res.current_vehicle?.plate || '' }), 'success');
-      reload();
-    } catch (err) {
-      addToast(apiError(err, f.toast.error), 'error');
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  /** "Thu hồi xe" from a driver: no own truck, off any truck. From a truck only driven for now by someone else's
-   *  driver: that driver just gets off it and keeps their own truck. Asked first, saying who loses what. */
-  const revoke = async (driverId: number, onlyTemp = false) => {
+  /** "Thu hồi xe": the driver gets off the truck they drive, which is then free. Asked first. */
+  const revoke = async (driverId: number) => {
     const d = ds.find((x) => x.id === driverId);
-    if (!d) return;
+    if (!d?.current_vehicle) return;
     const R = f.revoke;
-    const cur = d.current_vehicle;
-    const lines = onlyTemp
-      ? [tf(R.temp, { name: d.name, plate: cur?.plate || '' })]
-      : [d.home_vehicle ? tf(R.home, { name: d.name, plate: d.home_vehicle.plate }) : '',
-        cur && cur.id !== d.home_vehicle?.id ? tf(R.driving, { name: d.name, plate: cur.plate }) : '', R.after];
-    if (!(await confirm({ title: tf(R.title, { name: d.name }), message: lines.filter(Boolean).join(' '),
-      confirmText: f.actions.revoke, danger: true }))) return;
+    const message = [tf(R.driving, { name: d.name, plate: d.current_vehicle.plate }), R.after].join(' ');
+    if (!(await confirm({ title: tf(R.title, { name: d.name }), message, confirmText: f.actions.revoke, danger: true }))) return;
     setBusyId(`d${driverId}`);
     try {
-      if (onlyTemp) await unassignDriverApi(driverId, f.actions.revoke);
-      else await revokeDriverVehicleApi(driverId);
+      await revokeDriverVehicleApi(driverId);
       addToast(tf(f.toast.revoked, { name: d.name }), 'success');
       reload();
     } catch (err) {
@@ -452,7 +428,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     }
   };
 
-  /** "Đã sửa xong": running again, and its own driver back on it from a temporary truck, in one step. */
   /** The quick note form of a row with no note (like the booking table's): saved at once; an error stays in the form. */
   const saveNote = (kind: 'vehicle' | 'driver', id: number, name: string) => async (note: string) => {
     try {
@@ -468,12 +443,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const markRepaired = async (v: FleetVehicle) => {
     setBusyId(`v${v.id}`);
     try {
-      const res = await setFleetVehicleStatusApi(v.id, 'active', '', null, true);
-      addToast(res.returned_driver ? tf(f.toast.repairedReturned, { plate: v.plate, name: res.returned_driver.name })
-        : tf(f.toast.repaired, { plate: v.plate }), 'success');
-      if (res.home_driver_away) {
-        addToast(tf(f.toast.homeAway, { name: res.home_driver_away.name, plate: res.home_driver_away.plate }), 'info');
-      }
+      await setFleetVehicleStatusApi(v.id, 'active');
+      addToast(tf(f.toast.repaired, { plate: v.plate }), 'success');
       reload();
     } catch (err) {
       addToast(apiError(err, f.toast.error), 'error');
@@ -530,7 +501,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     const off: string[] = [];
     const res = await runEach(todo, async (r) => {
       if (kind === 'driver') return updateFleetDriverApi(r.id, { status: status as DriverStatus });
-      const out = await setFleetVehicleStatusApi(r.id, status as VehicleStatus, '', null, isRunning(status as VehicleStatus));
+      const out = await setFleetVehicleStatusApi(r.id, status as VehicleStatus);
       if (out.moved_driver && !out.moved_driver.to_vehicle_id) off.push(out.moved_driver.name);
       return out;
     }, f.toast.error);
@@ -599,15 +570,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       : v.status === 'broken' || v.status === 'maintenance'
         ? { label: f.quick.repaired, icon: <CheckCircle2 className="w-4 h-4" />, onClick: () => void markRepaired(v), primary: true }
         : null;
-  const driverMain = (d: FleetDriver): DetailAction[] => {
-    const move = needsTruck(d)
-      ? { label: f.actions.assign, icon: <KeyRound className="w-4 h-4" />, onClick: () => setMoveFor(d) }
-      : { label: f.actions.move, icon: <ArrowLeftRight className="w-4 h-4" />, onClick: () => setMoveFor(d) };
-    if (canReturnHome(d, allVs)) {
-      return [move, { label: f.actions.returnHome, icon: <Undo2 className="w-4 h-4" />, onClick: () => void returnHome(d.id, d.name), primary: true }];
-    }
-    return d.status === 'left' ? [] : [{ ...move, primary: true }];
-  };
+  // a working driver on no truck: "Giao xe"; on one: "Đổi xe"; not at work: nothing
+  const driverMain = (d: FleetDriver): DetailAction[] =>
+    needsTruck(d) ? [{ label: f.actions.assign, icon: <KeyRound className="w-4 h-4" />, onClick: () => setMoveFor(d), primary: true }]
+      : canChangeTruck(d) ? [{ label: f.actions.move, icon: <ArrowLeftRight className="w-4 h-4" />, onClick: () => setMoveFor(d), primary: true }]
+        : [];
 
   const vehicleMenu = (v: FleetVehicle): MenuGroup[] => {
     const main = vehicleMain(v);
@@ -615,16 +582,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       { label: v.plate, items: [
         { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'vehicle', id: v.id }) },
         ...(main ? [{ key: 'main', label: main.label, icon: isRunning(v.status) ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
-        // each truck one assigned driver: give it to one, or change who has it
-        // someone driving it now (take it back first, "Thu hồi xe") or it cannot run: it cannot be given away
-        ...(isRunning(v.status) && !v.current_driver ? [v.home_driver
-          ? { key: 'driver', label: f.actions.changeDriver, icon: ArrowLeftRight, onClick: () => setDriverFor(v) }
-          : { key: 'driver', label: f.actions.assign, icon: KeyRound, onClick: () => setDriverFor(v) }] : []),
-        ...(v.home_driver
-          ? [{ key: 'revoke', label: f.actions.revoke, icon: LogOut, danger: true, onClick: () => void revoke(v.home_driver!.id) }]
-          : v.current_driver
-            ? [{ key: 'revoke', label: f.actions.revoke, icon: LogOut, danger: true, onClick: () => void revoke(v.current_driver!.id, true) }]
-            : []),
+        // a free truck that can run: give it to a driver; a driven one: take it back first ("Thu hồi xe")
+        ...(isRunning(v.status) && !v.current_driver
+          ? [{ key: 'driver', label: f.actions.assign, icon: KeyRound, onClick: () => setDriverFor(v) }] : []),
+        ...(v.current_driver
+          ? [{ key: 'revoke', label: f.actions.revoke, icon: LogOut, danger: true, onClick: () => void revoke(v.current_driver!.id) }]
+          : []),
       ] },
       statusGroup('vehicle', v),
       { items: [
@@ -637,12 +600,9 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const driverMenu = (d: FleetDriver): MenuGroup[] => [
     { label: d.name, items: [
       { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'driver', id: d.id }) },
-      ...(canReturnHome(d, allVs)
-        ? [{ key: 'home', label: f.actions.returnHome, icon: Undo2, onClick: () => void returnHome(d.id, d.name) }] : []),
-      ...(d.status !== 'left' ? [needsTruck(d)
-        ? { key: 'move', label: f.actions.assign, icon: KeyRound, onClick: () => setMoveFor(d) }
-        : { key: 'move', label: f.actions.move, icon: ArrowLeftRight, onClick: () => setMoveFor(d) }] : []),
-      ...(d.home_vehicle || d.current_vehicle
+      ...(needsTruck(d) ? [{ key: 'move', label: f.actions.assign, icon: KeyRound, onClick: () => setMoveFor(d) }]
+        : canChangeTruck(d) ? [{ key: 'move', label: f.actions.move, icon: ArrowLeftRight, onClick: () => setMoveFor(d) }] : []),
+      ...(d.current_vehicle
         ? [{ key: 'revoke', label: f.actions.revoke, icon: LogOut, danger: true, onClick: () => void revoke(d.id) }] : []),
     ] },
     statusGroup('driver', d),
@@ -735,7 +695,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       : view === 'drivers'
         ? ([
           ['all', f.filters.all, filterTone.neutral], ['idle', f.filters.idle, filterTone.neutral],
-          ['temporary', f.filters.temporary, filterTone.sky], ['expiring', f.filters.expiring, filterTone.amber],
+          ['expiring', f.filters.expiring, filterTone.amber],
         ] as [DriverFilter, string, string][]).map(([id, label, tone]) => ({
           id, label, tone, count: ds.filter(driverTest[id]).length, active: driverFilter === id, select: () => setDriverFilter(id),
         }))
@@ -790,11 +750,10 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       ),
     },
     driver: {
-      filter: { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'temporary', 'none']), value: vehicleCols.driver || [],
+      filter: { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'none']), value: vehicleCols.driver || [],
         onChange: setCol(setVehicleCols, 'driver'), format: (v) => T.driverState[v as keyof typeof T.driverState] ?? v },
       render: (v) => {
         const c = v.current_driver;
-        const h = v.home_driver;
         if (c) {
           return (
             <div className="flex items-center gap-2.5">
@@ -802,23 +761,13 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.name}</span>
-                  {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
                 </div>
                 {c.phone && <div className={MUTED}>{c.phone}</div>}
               </div>
             </div>
           );
         }
-        if (!h) return <span className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</span>;
-        return (
-          <div className={MUTED}>
-            <div className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</div>
-            {h.driving_vehicle_id && h.driving_vehicle_id !== v.id
-              ? <span className="text-sky-700 dark:text-sky-300">{tf(L.ownerAway, { name: h.name, plate: h.driving_plate })}</span>
-              : h.status !== 'active' ? tf(L.ownerStatus, { name: h.name, status: f.driverStatus[h.status].toLowerCase() })
-                : tf(L.owner, { name: h.name })}
-          </div>
-        );
+        return <span className="text-sm text-slate-400 dark:text-slate-500">{f.noDriver}</span>;
       },
     },
     docs: {
@@ -830,7 +779,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     body: { td: 'whitespace-nowrap', render: (v) => plainCell(v.body_type) },
     payload: { td: 'whitespace-nowrap', render: (v) => plainCell(v.payload) },
     type: { render: (v) => plainCell(v.vehicle_type) },
-    home: { render: (v) => plainCell(v.home_driver?.name || '') },
     ownership: { render: (v) => dateCell(v.ownership_expiry, v.status === 'inactive') },
     registration: { render: (v) => dateCell(v.registration_expiry, v.status === 'inactive') },
     insurance: { render: (v) => dateCell(v.insurance_expiry, v.status === 'inactive') },
@@ -860,7 +808,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       ),
     },
     truck: {
-      filter: { options: () => valueCounts(shownDrivers, driverValue.truck, ['primary', 'temporary', 'none']), value: driverCols.truck || [],
+      filter: { options: () => valueCounts(shownDrivers, driverValue.truck, ['primary', 'none']), value: driverCols.truck || [],
         onChange: setCol(setDriverCols, 'truck'), format: (v) => T.truckState[v as keyof typeof T.truckState] ?? v },
       render: (d) => {
         const c = d.current_vehicle;
@@ -873,7 +821,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.plate}</span>
                 {c.category === 'truck' && <Chip tone={TRUCK_CHIP}>{f.truckChip}</Chip>}
-                {c.kind === 'temporary' && <Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip>}
               </div>
               <div className={MUTED}>{c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
             </div>
@@ -921,15 +868,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     driver_name: { td: 'font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap', render: (h) => h.driver_name },
     vehicle_plate: {
       td: 'whitespace-nowrap',
-      filter: { options: fixed(['primary', 'temporary']), value: historyCols.vehicle_plate || [],
-        onChange: setCol(setHistoryCols, 'vehicle_plate'), format: (v) => f.kind[v as 'primary' | 'temporary'] ?? v },
-      render: (h) => (
-        <>
-          <span className="font-semibold text-slate-800 dark:text-slate-100">{h.vehicle_plate}</span>
-          {h.kind === 'temporary' && <span className="ml-1.5"><Chip tone={TEMP_CHIP}>{f.kind.temporary}</Chip></span>}
-          {h.kind === 'temporary' && h.home_vehicle_plate && <div className={MUTED}>{tf(f.tempOf, { plate: h.home_vehicle_plate })}</div>}
-        </>
-      ),
+      render: (h) => <span className="font-semibold text-slate-800 dark:text-slate-100">{h.vehicle_plate}</span>,
     },
     reason: { td: 'text-slate-600 dark:text-slate-300', render: (h) => h.reason || f.none },
     end_reason: { td: 'text-slate-600 dark:text-slate-300', render: (h) => h.end_reason || (h.ended_at ? f.none : '') },
@@ -1013,7 +952,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
           driverFilter !== 'all' || colFilterCount ? f.filters.empty : f.empty.search)}
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
           {pageDrivers.map((d, i) => {
-            const back = canReturnHome(d, allVs);
             return (
               <tr key={d.id} data-testid={`driver-${d.id}`} {...rowEvents({ kind: 'driver', id: d.id })}
                 className={`${ROW} ${rowTone(driverSel.isSelected(d.id), menu.state?.row.kind === 'driver' && menu.state.row.id === d.id)} ${d.status === 'left' ? 'opacity-60' : ''}`}>
@@ -1023,17 +961,12 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
                 {cells(driverColumns, driverSpecs, d)}
                 <td className={`${TD} text-right whitespace-nowrap w-0`}>
                   <div className="inline-flex items-center gap-1">
-                    {back ? (
-                      <button type="button" onClick={() => void returnHome(d.id, d.name)} disabled={busyId === `d${d.id}`}
-                        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-60">
-                        <Undo2 className="w-3.5 h-3.5" />{f.actions.returnHome}
-                      </button>
-                    ) : needsTruck(d) ? (
+                    {needsTruck(d) ? (
                       <button type="button" onClick={() => setMoveFor(d)}
                         className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white">
                         <KeyRound className="w-3.5 h-3.5" />{f.actions.assign}
                       </button>
-                    ) : d.status !== 'left' && (
+                    ) : canChangeTruck(d) && (
                       <button type="button" onClick={() => setMoveFor(d)}
                         className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-primary-400 hover:text-primary-700 dark:hover:text-primary-300">
                         <ArrowLeftRight className="w-3.5 h-3.5" />{f.actions.move}
@@ -1160,18 +1093,6 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         </div>
       </div>
 
-      {/* Needs a hand: home drivers who can go back to their truck */}
-      {away.map((v) => (
-        <div key={v.id} role="status"
-          className="flex flex-wrap items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-lg border border-sky-200 dark:border-sky-900/60 bg-sky-50 dark:bg-sky-950/30 text-sm text-sky-800 dark:text-sky-200 shrink-0">
-          <Undo2 className="w-4 h-4 shrink-0" />
-          <span className="mr-auto">{tf(f.awayBanner, { plate: v.plate, name: v.home_driver!.name, temp: v.home_driver!.driving_plate })}</span>
-          <button type="button" onClick={() => void returnHome(v.home_driver!.id, v.home_driver!.name)}
-            className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white">
-            {f.actions.returnHome}
-          </button>
-        </div>
-      ))}
 
       {failed ? (
         <div role="alert" className="flex items-center justify-between gap-2 p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/30 text-sm text-rose-700 dark:text-rose-300">

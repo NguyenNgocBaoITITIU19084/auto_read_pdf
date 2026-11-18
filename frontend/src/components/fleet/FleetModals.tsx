@@ -1,14 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Clock, KeyRound, Loader2, Truck } from 'lucide-react';
+import { Loader2, Truck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
-import { useConfirm } from '../../hooks/useConfirm';
 import { Modal } from '../common/Modal';
 import { tf } from '../../services/i18nFormat';
 import {
   createFleetDriverApi, createFleetVehicleApi, deleteFleetDriverPhotoApi, deleteFleetVehiclePhotoApi, getFleetTrailersApi,
-  moveDriverTemporaryApi,
-  setDriverHomeVehicleApi, setFleetVehicleStatusApi, unassignDriverApi, updateFleetDriverApi, updateFleetVehicleApi,
+  assignDriverVehicleApi, setFleetVehicleStatusApi, unassignDriverApi, updateFleetDriverApi, updateFleetVehicleApi,
   uploadFleetDriverPhotoApi, uploadFleetVehiclePhotoApi, uploadFleetDriverDocumentApi, deleteFleetDriverDocumentApi,
   uploadFleetVehicleDocumentApi, deleteFleetVehicleDocumentApi,
 } from '../../services/api';
@@ -24,7 +22,7 @@ import {
   type VehicleCategory, type VehicleDocument, type VehicleStatus,
 } from '../../types';
 import {
-  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, isConflict, isRunning, licenseExpired, needsTruck,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, isRunning, licenseExpired,
   type PaperExpiry,
 } from './fleetUtils';
 
@@ -93,9 +91,7 @@ export async function savePhoto(
 
 const vehicleOptionLabel = (v: FleetVehicle, t: ReturnType<typeof useApp>['t']) => {
   // a truck (xe tải) says so, since tractors and trucks share these pickers
-  const extra = [v.category === 'truck' ? t.fleet.truckChip : v.trailer_plate,
-    v.home_driver ? tf(t.fleet.statusModal.homeOf, { name: v.home_driver.name }) : '']
-    .filter(Boolean).join(' · ');
+  const extra = [v.category === 'truck' ? t.fleet.truckChip : v.trailer_plate].filter(Boolean).join(' · ');
   return extra ? `${v.plate} (${extra})` : v.plate;
 };
 
@@ -334,7 +330,6 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   const f = t.fleet.driverForm;
   const empty = { name: '', phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active' as DriverStatus, note: '' };
   const [form, setForm] = useState(empty);
-  const [homeId, setHomeId] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [photo, setPhoto] = useState<PhotoChoice>(NO_PHOTO_CHANGE);
@@ -344,7 +339,6 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   useEffect(() => {
     if (!isOpen) return;
     setError('');
-    setHomeId('');
     setPhoto(NO_PHOTO_CHANGE);
     setPapers(NO_PAPER_CHANGES);
     setForm(driver ? {
@@ -362,9 +356,6 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
   const driverStatus: DriverStatus = licenceLocked && !DRIVER_LOCK_FREE_STATUSES.includes(form.status)
     ? (driver && DRIVER_LOCK_FREE_STATUSES.includes(driver.status) ? driver.status : 'not_ready') : form.status;
 
-  // a new driver can be given a truck nobody has as their own truck yet
-  const unassigned = useMemo(() => vehicles.filter((v) => !v.home_driver && v.status !== 'inactive'), [vehicles]);
-
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) {
@@ -377,7 +368,7 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
       const data = { ...form, status: driverStatus };
       const id = driver
         ? (await updateFleetDriverApi(driver.id, data)).id
-        : (await createFleetDriverApi({ ...data, home_vehicle_id: homeId ? Number(homeId) : null })).id;
+        : (await createFleetDriverApi(data)).id;
       const errors = [await savePhoto(photo, id, uploadFleetDriverPhotoApi, deleteFleetDriverPhotoApi, t.fleet.toast.error,
         t.fleet.photo.outdatedBackend)];
       for (const which of DRIVER_DOCUMENTS) {
@@ -422,16 +413,6 @@ export const DriverFormModal: React.FC<DriverFormProps> = ({ isOpen, driver, veh
               <p role="note" data-testid="licence-lock-hint" className="col-span-2 text-[11px] font-medium text-orange-700 dark:text-orange-300">
                 {t.fleet.licenseLock.hint}
               </p>
-            )}
-            {!driver && (
-              <div className="col-span-2">
-                <FieldInputBox label={f.homeVehicle}>
-                  <select value={homeId} onChange={(e) => setHomeId(e.target.value)}>
-                    <option value="">{f.noHome}</option>
-                    <VehicleOptions vehicles={unassigned} />
-                  </select>
-                </FieldInputBox>
-              </div>
             )}
             <p className="col-span-2 text-[11px] text-slate-500 dark:text-slate-400">{f.oneVehicleHint} {f.statusHint}</p>
           </div>
@@ -544,9 +525,6 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
       } else {
         addToast(t.fleet.toast.saved, 'success');
       }
-      if (res.home_driver_away) {
-        addToast(tf(t.fleet.toast.homeAway, { name: res.home_driver_away.name, plate: res.home_driver_away.plate }), 'info');
-      }
       onSaved();
       onClose();
     } catch (err) {
@@ -601,7 +579,7 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
 };
 
 // ---------------------------------------------------------------------------
-// Driver: take another truck for now, or change their own truck
+// Driver: "Giao xe" (on no truck) / "Đổi xe" (on one): pick a free truck that can run
 // ---------------------------------------------------------------------------
 interface MoveProps {
   driver: FleetDriver | null;
@@ -613,9 +591,7 @@ interface MoveProps {
 export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose, onSaved }) => {
   const { t } = useApp();
   const { addToast } = useToastActions();
-  const confirm = useConfirm();
   const m = t.fleet.moveModal;
-  const [mode, setMode] = useState<'temporary' | 'permanent'>('temporary');
   const [vehicleId, setVehicleId] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
@@ -623,23 +599,16 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
 
   useEffect(() => {
     if (!driver) return;
-    const assign = needsTruck(driver);
-    setMode(driver.home_vehicle && driver.status === 'active' && !assign ? 'temporary' : 'permanent');
-    setVehicleId(driver.home_vehicle && driver.status !== 'active' && !assign ? String(driver.home_vehicle.id) : '');
+    setVehicleId('');
     setReason('');
     setError('');
   }, [driver]);
 
-  const temporaryChoices = useMemo(
-    () => freeVehicles(vehicles, driver?.home_vehicle?.id ?? null).filter((v) => v.id !== driver?.current_vehicle?.id),
-    [vehicles, driver],
-  );
-  const permanentChoices = useMemo(() => vehicles.filter((v) => v.status !== 'inactive'), [vehicles]);
+  // every truck that is not out of service, so the driven / broken ones show why they cannot be picked
+  const choices = useMemo(() => vehicles.filter((v) => v.status !== 'inactive' && v.id !== driver?.current_vehicle?.id),
+    [vehicles, driver]);
   if (!driver) return null;
-
-  // a driver with no truck at all gets one for good: no "drive for now", no "no own truck" card, a pick is needed
-  const assigning = needsTruck(driver);
-  const choices = mode === 'temporary' ? temporaryChoices : permanentChoices;
+  const current = driver.current_vehicle;
 
   const done = () => {
     onSaved();
@@ -648,33 +617,15 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if ((mode === 'temporary' || assigning) && !vehicleId) {
+    if (!vehicleId) {
       setError(m.pickRequired);
       return;
     }
     setSaving(true);
     setError('');
     try {
-      if (mode === 'temporary') {
-        const res = await moveDriverTemporaryApi(driver.id, Number(vehicleId), reason);
-        addToast(tf(t.fleet.toast.moved, { name: res.name, plate: res.current_vehicle?.plate || '' }), 'success');
-      } else {
-        const target = vehicleId ? Number(vehicleId) : null;
-        try {
-          await setDriverHomeVehicleApi(driver.id, target);
-        } catch (err) {
-          if (!isConflict(err)) throw err;
-          const ok = await confirm({
-            title: m.forceTitle,
-            message: tf(m.forceMessage, { message: apiError(err, ''), name: driver.name }),
-            confirmText: m.forceConfirm,
-            danger: true,
-          });
-          if (!ok) return;
-          await setDriverHomeVehicleApi(driver.id, target, true);
-        }
-        addToast(t.fleet.toast.saved, 'success');
-      }
+      const res = await assignDriverVehicleApi(driver.id, Number(vehicleId), reason);
+      addToast(tf(t.fleet.toast.assigned, { name: res.name, plate: res.current_vehicle?.plate || '' }), 'success');
       done();
     } catch (err) {
       setError(apiError(err, t.fleet.toast.error));
@@ -696,38 +647,13 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
     }
   };
 
-  const radio = (value: 'temporary' | 'permanent', label: string, hint: string, disabled = false) => (
-    <label className={`flex-1 flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-colors ${mode === value
-      ? 'border-primary-500 bg-primary-50/70 dark:bg-primary-950/40'
-      : 'border-slate-200 dark:border-slate-700 hover:border-primary-300'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
-      <span className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center ${mode === value
-        ? 'bg-primary-600 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'}`}>
-        {value === 'temporary' ? <Clock className="w-4 h-4" /> : <KeyRound className="w-4 h-4" />}
-      </span>
-      <input type="radio" name="mode" className="sr-only" checked={mode === value} disabled={disabled}
-        onChange={() => {
-          setMode(value);
-          setVehicleId(value === 'permanent' && driver.home_vehicle ? String(driver.home_vehicle.id) : '');
-          setError('');
-        }} />
-      <span>
-        <span className="block text-sm font-bold text-slate-800 dark:text-slate-100">{label}</span>
-        <span className="block mt-0.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{hint}</span>
-      </span>
-    </label>
-  );
-
   const picked = choices.find((v) => String(v.id) === vehicleId) || null;
-  const taker = picked && mode === 'permanent'
-    ? [picked.home_driver, picked.current_driver].find((d) => d && d.id !== driver.id) || null : null;
-  const summary = assigning && !picked ? m.summaryPick : mode === 'temporary'
-    ? (picked ? tf(m.summaryTemp, { name: driver.name, plate: picked.plate }) : m.summaryPick)
-    : picked && picked.id === driver.home_vehicle?.id ? tf(m.summarySame, { plate: picked.plate })
-      : picked ? [tf(m.summaryHome, { plate: picked.plate, name: driver.name }), taker ? tf(m.summaryTake, { other: taker.name }) : '']
-        .filter(Boolean).join(' ') : driver.home_vehicle ? tf(m.summaryNoHome, { name: driver.name }) : m.summaryPick;
+  const summary = !picked ? m.summaryPick
+    : current ? tf(m.summaryMove, { name: driver.name, from: current.plate, plate: picked.plate })
+      : tf(m.summaryGive, { name: driver.name, plate: picked.plate });
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(assigning ? m.assignTitle : m.title, { name: driver.name })} maxWidth="max-w-4xl">
+    <Modal isOpen onClose={onClose} title={tf(current ? m.title : m.assignTitle, { name: driver.name })} maxWidth="max-w-4xl">
       <form onSubmit={submit} className="space-y-5" noValidate>
         {/* who, and where they are now */}
         <div className="flex flex-wrap items-center gap-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
@@ -736,46 +662,33 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
             <p className="text-base font-bold text-slate-800 dark:text-slate-100">{driver.name}</p>
             {driver.phone && <p className="text-xs text-slate-500 dark:text-slate-400">{driver.phone}</p>}
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
-              <Truck className="w-3.5 h-3.5 text-slate-400" />
-              {driver.current_vehicle ? tf(m.current, { plate: driver.current_vehicle.plate }) : m.currentNone}
-            </span>
-          </div>
+          <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+            <Truck className="w-3.5 h-3.5 text-slate-400" />
+            {current ? tf(m.current, { plate: current.plate }) : m.currentNone}
+          </span>
         </div>
-        {assigning ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">{m.assignHint}</p>
-        ) : (
-          <div className="flex flex-col sm:flex-row gap-3">
-            {radio('temporary', m.temporary, m.temporaryHint, driver.status !== 'active')}
-            {radio('permanent', m.permanent, m.permanentHint)}
-          </div>
-        )}
-        <VehiclePicker key={mode} vehicles={choices} value={vehicleId} driverId={driver.id} label={m.vehicle}
-          onChange={(value) => { setVehicleId(value); setError(''); }}
-          noneLabel={mode === 'permanent' && !assigning ? m.noHomeCard : undefined} />
+        <p className="text-sm text-slate-500 dark:text-slate-400">{m.hint}</p>
+        <VehiclePicker vehicles={choices} value={vehicleId} driverId={driver.id} label={m.vehicle}
+          onChange={(value) => { setVehicleId(value); setError(''); }} />
         {/* what saving does, and the buttons: always in view under the list */}
         <div className="sticky -bottom-5 z-10 -mx-6 -mb-5 px-6 pt-3 pb-5 space-y-3 bg-white dark:bg-slate-900 shadow-[0_-10px_16px_-14px_rgba(15,23,42,0.35)]">
-        <p data-testid="move-summary" className={`text-sm rounded-xl px-4 py-3 ${picked || (mode === 'permanent' && driver.home_vehicle && !assigning)
-          ? (taker ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
-            : 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200')
-          : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400'}`}>
-          {summary}
-        </p>
-        {mode === 'temporary' && (
+          <p data-testid="move-summary" className={`text-sm rounded-xl px-4 py-3 ${picked
+            ? 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200'
+            : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400'}`}>
+            {summary}
+          </p>
           <Field label={m.reason}>
             <input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={m.reasonPh} />
           </Field>
-        )}
-        {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
-        <Footer onCancel={onClose} saving={saving} disabled={(mode === 'temporary' || assigning) && !vehicleId}>
-          {driver.current_vehicle && (
-            <button type="button" onClick={getOff} disabled={saving}
-              className="mr-auto h-9 px-3 text-sm font-semibold rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50">
-              {m.unassign}
-            </button>
-          )}
-        </Footer>
+          {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
+          <Footer onCancel={onClose} saving={saving} disabled={!vehicleId}>
+            {current && (
+              <button type="button" onClick={getOff} disabled={saving}
+                className="mr-auto h-9 px-3 text-sm font-semibold rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50">
+                {m.unassign}
+              </button>
+            )}
+          </Footer>
         </div>
       </form>
     </Modal>

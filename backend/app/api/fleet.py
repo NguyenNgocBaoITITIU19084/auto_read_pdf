@@ -34,20 +34,12 @@ class DriverIn(BaseModel):
     license_expiry: Optional[str] = None
     status: Optional[str] = None
     note: Optional[str] = None
-    home_vehicle_id: Optional[int] = None
 
 
 class VehicleStatusIn(BaseModel):
     status: str
     reason: str = ""
     move_to_vehicle_id: Optional[int] = None
-    # running again ("Đã sửa xong"): also bring its home driver back from a temporary truck
-    bring_home_driver: bool = False
-
-
-class HomeVehicleIn(BaseModel):
-    vehicle_id: Optional[int] = None
-    force: bool = False
 
 
 class MoveIn(BaseModel):
@@ -126,8 +118,7 @@ def delete_vehicle(vehicle_id: int):
 @router.post("/vehicles/{vehicle_id}/status")
 def set_vehicle_status(vehicle_id: int, payload: VehicleStatusIn):
     """Status change and, for a truck that stops running, where its driver goes, in one step."""
-    return _run(fleet.set_vehicle_status, vehicle_id, payload.status, payload.reason, payload.move_to_vehicle_id,
-                payload.bring_home_driver)
+    return _run(fleet.set_vehicle_status, vehicle_id, payload.status, payload.reason, payload.move_to_vehicle_id)
 
 
 # --- drivers --------------------------------------------------------------
@@ -145,7 +136,6 @@ def create_driver(payload: DriverIn):
 @router.put("/drivers/{driver_id}")
 def update_driver(driver_id: int, payload: DriverIn):
     data = payload.model_dump(exclude_unset=True)
-    data.pop("home_vehicle_id", None)  # the home truck changes through /home (it can move people)
     _run(fleet.update_driver, driver_id, data)
     return _driver(driver_id)
 
@@ -156,23 +146,10 @@ def delete_driver(driver_id: int):
     return {"status": "success"}
 
 
-@router.post("/drivers/{driver_id}/home")
-def set_home_vehicle(driver_id: int, payload: HomeVehicleIn):
-    """Give the driver a home truck (vehicle_id null: none). 409 when it belongs to / is driven by someone else,
-    unless force."""
-    _run(fleet.set_home_vehicle, driver_id, payload.vehicle_id, payload.force)
-    return _driver(driver_id)
-
-
-@router.post("/drivers/{driver_id}/temporary")
-def move_temporary(driver_id: int, payload: MoveIn):
-    _run(fleet.move_temporary, driver_id, payload.vehicle_id, payload.reason)
-    return _driver(driver_id)
-
-
-@router.post("/drivers/{driver_id}/return-home")
-def return_home(driver_id: int):
-    _run(fleet.return_home, driver_id)
+@router.post("/drivers/{driver_id}/assign")
+def assign_vehicle(driver_id: int, payload: MoveIn):
+    """Giao xe / Đổi xe: put a working driver on a free truck that can run (409 when it is driven or cannot run)."""
+    _run(fleet.assign_vehicle, driver_id, payload.vehicle_id, payload.reason)
     return _driver(driver_id)
 
 
@@ -184,7 +161,7 @@ def unassign(driver_id: int, payload: ReasonIn):
 
 @router.post("/drivers/{driver_id}/revoke")
 def revoke_vehicle(driver_id: int, payload: ReasonIn):
-    """Thu hồi xe: no home truck, off any truck they drive."""
+    """Thu hồi xe: off the truck they drive (400 when they drive none)."""
     _run(fleet.revoke_vehicle, driver_id, payload.reason)
     return _driver(driver_id)
 

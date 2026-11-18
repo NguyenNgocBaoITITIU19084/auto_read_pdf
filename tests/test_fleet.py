@@ -25,8 +25,15 @@ def _truck(plate, **extra):
     return fleet.create_vehicle({"plate": plate, **extra})
 
 
-def _driver(name, **extra):
-    return fleet.create_driver({"name": name, **extra})
+def _driver(name, home_vehicle_id=None, **extra):
+    """A driver; with home_vehicle_id they are put on that truck ("Giao xe") when it can take them."""
+    driver_id = fleet.create_driver({"name": name, **extra})
+    if home_vehicle_id:
+        try:
+            fleet.assign_vehicle(driver_id, home_vehicle_id)
+        except fleet.FleetError:
+            pass
+    return driver_id
 
 
 def _drivers():
@@ -64,126 +71,123 @@ def test_dates_are_checked():
         _driver("   ")
 
 
-def test_a_driver_created_with_a_home_truck_drives_it():
+def test_giao_xe_puts_a_working_driver_on_a_free_truck():
     t = _truck("51C-1")
-    _driver("Nguyễn Văn An", home_vehicle_id=t)
+    a = _driver("Nguyễn Văn An")
+    fleet.assign_vehicle(a, t)
     d = _drivers()["Nguyễn Văn An"]
-    assert d["home_vehicle"]["plate"] == "51C-1"
-    assert d["current_vehicle"]["plate"] == "51C-1" and d["current_vehicle"]["kind"] == "primary"
-    assert _trucks()["51C-1"]["current_driver"]["name"] == "Nguyễn Văn An"
+    assert "home_vehicle" not in d and d["current_vehicle"]["plate"] == "51C-1"
+    v = _trucks()["51C-1"]
+    assert "home_driver" not in v and v["current_driver"]["name"] == "Nguyễn Văn An"
+    fleet.assign_vehicle(a, t)                     # the same truck again changes nothing
+    assert len(fleet.list_history(driver_id=a)) == 1
 
 
-def test_a_truck_is_one_drivers_home_unless_forced():
-    t = _truck("51C-1")
-    a = _driver("An", home_vehicle_id=t)
-    b = _driver("Bình")
+def test_doi_xe_moves_the_driver_and_keeps_one_truck_each():
+    t1, t2 = _truck("51C-1"), _truck("51C-2")
+    a, b = _driver("An", home_vehicle_id=t1), _driver("Bình")
+    fleet.assign_vehicle(a, t2, "Đổi tuyến")
+    assert _open_rows() == [("An", "51C-2", "primary")]
+    history = fleet.list_history(driver_id=a)
+    assert [(h["vehicle_plate"], h["ended_at"] is None) for h in history] == [("51C-2", True), ("51C-1", False)]
+    assert history[1]["end_reason"] == "Đổi sang xe 51C-2" and history[0]["reason"] == "Đổi tuyến"
+    # a truck someone else drives is refused: take it back first
     with pytest.raises(fleet.FleetError) as e:
-        fleet.set_home_vehicle(b, t)
-    assert e.value.status == 409 and "An" in e.value.message
-    with pytest.raises(fleet.FleetError) as e:       # An drives it now: not even forced
-        fleet.set_home_vehicle(b, t, force=True)
-    assert e.value.status == 409 and "thu hồi" in e.value.message
-    fleet.unassign(a)                                # off the truck, still An's own truck
-    fleet.set_home_vehicle(b, t, force=True)
-    ds = _drivers()
-    assert ds["An"]["home_vehicle"] is None and ds["An"]["current_vehicle"] is None
-    assert ds["Bình"]["current_vehicle"]["plate"] == "51C-1"
-    assert a  # the old home driver still exists
+        fleet.assign_vehicle(b, t2)
+    assert e.value.status == 409 and "An" in e.value.message and "thu hồi" in e.value.message
+    fleet.assign_vehicle(b, t1)                    # the truck An left is free
+    assert _open_rows() == [("An", "51C-2", "primary"), ("Bình", "51C-1", "primary")]
+
+
+@pytest.mark.parametrize("status,label", [("not_ready", "không sẵn sàng"), ("broken", "hư hỏng"),
+                                          ("maintenance", "bảo dưỡng"), ("inactive", "ngưng hoạt động")])
+def test_a_truck_that_cannot_run_cannot_be_given(status, label):
+    t = _truck("51C-1", status=status) if status != "not_ready" else _truck("51C-1")
+    if status == "not_ready":
+        fleet.set_vehicle_status(t, "not_ready")
+    a = _driver("An")
+    with pytest.raises(fleet.FleetError) as e:
+        fleet.assign_vehicle(a, t)
+    assert e.value.status == 409 and label in e.value.message
+    assert _drivers()["An"]["current_vehicle"] is None
+
+
+@pytest.mark.parametrize("status", ["leave", "not_ready", "left"])
+def test_only_a_working_driver_is_given_a_truck(status):
+    t = _truck("51C-1")
+    a = _driver("An", status=status)
+    with pytest.raises(fleet.FleetError) as e:
+        fleet.assign_vehicle(a, t)
+    assert e.value.status == 409
+    assert _open_rows() == []
 
 
 # --- the breakdown flow -----------------------------------------------------
-def test_broken_truck_moves_its_driver_to_a_spare_and_back():
-    home = _truck("51C-1")
+def test_broken_truck_moves_its_driver_to_a_spare_and_repair_changes_nobody():
+    t = _truck("51C-1")
     spare = _truck("51C-9")
-    a = _driver("An", home_vehicle_id=home)
+    a = _driver("An", home_vehicle_id=t)
 
-    res = fleet.set_vehicle_status(home, "broken", "Hư hộp số", move_to_vehicle_id=spare)
-    assert res["moved_driver"] == {"id": a, "name": "An", "to_vehicle_id": spare, "to_plate": "51C-9"}
-    d = _drivers()["An"]
-    assert d["current_vehicle"]["plate"] == "51C-9" and d["current_vehicle"]["kind"] == "temporary"
-    assert d["home_vehicle"]["plate"] == "51C-1"
+    res = fleet.set_vehicle_status(t, "broken", "Hư hộp số", move_to_vehicle_id=spare)
+    assert res == {"vehicle_id": t, "status": "broken",
+                   "moved_driver": {"id": a, "name": "An", "to_vehicle_id": spare, "to_plate": "51C-9"}}
+    assert _drivers()["An"]["current_vehicle"]["plate"] == "51C-9"
     trucks = _trucks()
     assert trucks["51C-1"]["status"] == "broken" and trucks["51C-1"]["current_driver"] is None
-    assert trucks["51C-1"]["home_driver"]["driving_plate"] == "51C-9"
 
-    # going back while the home truck is still broken is refused
-    with pytest.raises(fleet.FleetError) as e:
-        fleet.return_home(a)
-    assert "hư hỏng" in e.value.message
-
-    # repaired: the driver is away on the spare, so it is only reported
-    res = fleet.set_vehicle_status(home, "active")
-    assert res["home_driver_away"] == {"id": a, "name": "An", "plate": "51C-9"}
-    fleet.return_home(a)
-    assert _open_rows() == [("An", "51C-1", "primary")]
-
+    # repaired: running again, nobody is put back on it
+    res = fleet.set_vehicle_status(t, "active")
+    assert res["moved_driver"] is None
+    assert _open_rows() == [("An", "51C-9", "primary")]
     history = fleet.list_history(driver_id=a)
-    assert [(h["vehicle_plate"], h["kind"], h["ended_at"] is None) for h in history] == [
-        ("51C-1", "primary", True), ("51C-9", "temporary", False), ("51C-1", "primary", False)]
-    assert history[1]["home_vehicle_plate"] == "51C-1"
-    assert "Hư hộp số" in history[2]["end_reason"]
+    assert [(h["vehicle_plate"], h["ended_at"] is None) for h in history] == [("51C-9", True), ("51C-1", False)]
+    assert "Hư hộp số" in history[1]["end_reason"]
 
 
-def test_broken_truck_without_spare_leaves_driver_idle_and_repair_puts_them_back():
-    home = _truck("51C-1")
-    a = _driver("An", home_vehicle_id=home)
-    res = fleet.set_vehicle_status(home, "maintenance")
+def test_broken_truck_without_spare_leaves_driver_idle():
+    t = _truck("51C-1")
+    a = _driver("An", home_vehicle_id=t)
+    res = fleet.set_vehicle_status(t, "maintenance")
     assert res["moved_driver"]["to_vehicle_id"] is None
     assert _drivers()["An"]["current_vehicle"] is None
-    res = fleet.set_vehicle_status(home, "active")
-    assert res["home_driver_away"] is None
-    assert _drivers()["An"]["current_vehicle"]["plate"] == "51C-1"
+    fleet.set_vehicle_status(t, "active")
+    assert _drivers()["An"]["current_vehicle"] is None
     assert a
 
 
 def test_spare_must_be_running_and_free():
-    home, busy, down = _truck("51C-1"), _truck("51C-2"), _truck("51C-3", status="broken")
-    _driver("An", home_vehicle_id=home)
+    t, busy, down = _truck("51C-1"), _truck("51C-2"), _truck("51C-3", status="broken")
+    _driver("An", home_vehicle_id=t)
     _driver("Bình", home_vehicle_id=busy)
     with pytest.raises(fleet.FleetError) as e:
-        fleet.set_vehicle_status(home, "broken", move_to_vehicle_id=busy)
+        fleet.set_vehicle_status(t, "broken", move_to_vehicle_id=busy)
     assert e.value.status == 409 and "Bình" in e.value.message
     with pytest.raises(fleet.FleetError):
-        fleet.set_vehicle_status(home, "broken", move_to_vehicle_id=down)
+        fleet.set_vehicle_status(t, "broken", move_to_vehicle_id=down)
     # nothing changed: the whole step is refused
     assert _trucks()["51C-1"]["status"] == "active"
     assert _drivers()["An"]["current_vehicle"]["plate"] == "51C-1"
 
 
-def test_return_home_refused_while_someone_else_drives_it():
-    home, spare = _truck("51C-1"), _truck("51C-9")
-    a = _driver("An", home_vehicle_id=home)
-    b = _driver("Bình")
-    fleet.move_temporary(a, spare, "Đổi tạm")
-    fleet.move_temporary(b, home, "Xe An đang trống")
-    with pytest.raises(fleet.FleetError) as e:
-        fleet.return_home(a)
-    assert e.value.status == 409 and "Bình" in e.value.message
-    fleet.unassign(b)
-    fleet.return_home(a)
-    assert _open_rows() == [("An", "51C-1", "primary")]
-
-
-def test_leave_and_quit():
-    home = _truck("51C-1")
-    a = _driver("An", home_vehicle_id=home)
+def test_leave_and_quit_get_the_driver_off_and_coming_back_gives_no_truck():
+    t = _truck("51C-1")
+    a = _driver("An", home_vehicle_id=t)
     fleet.update_driver(a, {"status": "leave"})
-    d = _drivers()["An"]
-    assert d["current_vehicle"] is None and d["home_vehicle"]["plate"] == "51C-1"
+    assert _drivers()["An"]["current_vehicle"] is None
     fleet.update_driver(a, {"status": "active"})
-    assert _drivers()["An"]["current_vehicle"]["plate"] == "51C-1"
+    assert _drivers()["An"]["current_vehicle"] is None      # nobody is put back on a truck
+    fleet.assign_vehicle(a, t)
     fleet.update_driver(a, {"status": "left"})
-    d = _drivers()["An"]
-    assert d["current_vehicle"] is None and d["home_vehicle"] is None
+    assert _drivers()["An"]["current_vehicle"] is None
     with pytest.raises(fleet.FleetError):
-        fleet.move_temporary(a, home)
+        fleet.assign_vehicle(a, t)
 
 
 def test_deleting_keeps_history():
-    home = _truck("51C-1")
-    a = _driver("An", home_vehicle_id=home)
-    fleet.delete_vehicle(home)
-    assert _drivers()["An"]["home_vehicle"] is None
+    t = _truck("51C-1")
+    a = _driver("An", home_vehicle_id=t)
+    fleet.delete_vehicle(t)
+    assert _drivers()["An"]["current_vehicle"] is None
     fleet.delete_driver(a)
     rows = fleet.list_history()
     assert len(rows) == 1 and rows[0]["vehicle_plate"] == "51C-1" and rows[0]["driver_name"] == "An"
@@ -192,22 +196,23 @@ def test_deleting_keeps_history():
 
 # --- API ----------------------------------------------------------------------
 def test_api_flow_and_errors():
-    home = client.post("/api/v1/fleet/vehicles", json={"plate": "51c-123.45", "trailer_plate": "51R-1"}).json()
+    t = client.post("/api/v1/fleet/vehicles", json={"plate": "51c-123.45", "trailer_plate": "51R-1"}).json()
     spare = client.post("/api/v1/fleet/vehicles", json={"plate": "51C-678.90"}).json()
-    assert home["plate"] == "51C-123.45"
+    assert t["plate"] == "51C-123.45"
     assert client.post("/api/v1/fleet/vehicles", json={"plate": "51C12345"}).status_code == 409
-    drv = client.post("/api/v1/fleet/drivers", json={"name": "An", "home_vehicle_id": home["id"]}).json()
-    assert drv["current_vehicle"]["id"] == home["id"]
+    drv = client.post("/api/v1/fleet/drivers", json={"name": "An"}).json()
+    assert drv["current_vehicle"] is None and "home_vehicle" not in drv
+    drv = client.post(f"/api/v1/fleet/drivers/{drv['id']}/assign", json={"vehicle_id": t["id"]}).json()
+    assert drv["current_vehicle"]["id"] == t["id"]
 
-    res = client.post(f"/api/v1/fleet/vehicles/{home['id']}/status",
+    res = client.post(f"/api/v1/fleet/vehicles/{t['id']}/status",
                       json={"status": "broken", "reason": "Nổ lốp", "move_to_vehicle_id": spare["id"]})
     assert res.status_code == 200 and res.json()["moved_driver"]["to_plate"] == "51C-678.90"
-    bad = client.post(f"/api/v1/fleet/drivers/{drv['id']}/return-home")
+    bad = client.post(f"/api/v1/fleet/drivers/{drv['id']}/assign", json={"vehicle_id": t["id"]})
     assert bad.status_code == 409 and "51C-123.45" in bad.json()["detail"]
-    client.post(f"/api/v1/fleet/vehicles/{home['id']}/status", json={"status": "active"})
-    back = client.post(f"/api/v1/fleet/drivers/{drv['id']}/return-home").json()
-    assert back["current_vehicle"]["kind"] == "primary"
-    assert len(client.get("/api/v1/fleet/history", params={"driver_id": drv["id"]}).json()) == 3
+    for gone in ("home", "temporary", "return-home"):
+        assert client.post(f"/api/v1/fleet/drivers/{drv['id']}/{gone}", json={}).status_code in (404, 405)
+    assert len(client.get("/api/v1/fleet/history", params={"driver_id": drv["id"]}).json()) == 2
     assert client.put("/api/v1/fleet/drivers/999", json={"name": "X"}).status_code == 404
 
 
@@ -340,46 +345,14 @@ def test_photo_api_upload_serve_and_reject_odd_names():
     assert client.delete(f"/api/v1/fleet/vehicles/{t['id']}/photo").json()["photo"] == ""
 
 
-# --- "Đã sửa xong": repaired, and its driver comes back in the same step -----------------
-def test_repaired_brings_home_driver_back_in_one_step():
-    home, spare = _truck("51C-1"), _truck("51C-9")
-    a = _driver("An", home_vehicle_id=home)
-    fleet.set_vehicle_status(home, "broken", move_to_vehicle_id=spare)
-    res = fleet.set_vehicle_status(home, "active", bring_home_driver=True)
-    assert res["returned_driver"] == {"id": a, "name": "An", "from_plate": "51C-9", "plate": "51C-1"}
-    assert res["home_driver_away"] is None
-    assert _open_rows() == [("An", "51C-1", "primary")]
-    assert _trucks()["51C-9"]["current_driver"] is None
-
-
-def test_repaired_leaves_driver_away_when_someone_else_is_on_the_truck():
-    home, spare = _truck("51C-1"), _truck("51C-9")
-    a = _driver("An", home_vehicle_id=home)
-    b = _driver("Bình")
-    fleet.move_temporary(a, spare)          # An left his truck while it still ran
-    fleet.move_temporary(b, home)           # and Bình took it
-    res = fleet.set_vehicle_status(home, "active", bring_home_driver=True)
-    assert res["returned_driver"] is None
-    assert res["home_driver_away"] == {"id": a, "name": "An", "plate": "51C-9"}
-    assert _open_rows() == [("An", "51C-9", "temporary"), ("Bình", "51C-1", "temporary")]
-
-
-def test_repair_api_flag():
-    home = client.post("/api/v1/fleet/vehicles", json={"plate": "51C-1"}).json()
-    spare = client.post("/api/v1/fleet/vehicles", json={"plate": "51C-9"}).json()
-    client.post("/api/v1/fleet/drivers", json={"name": "An", "home_vehicle_id": home["id"]})
-    client.post(f"/api/v1/fleet/vehicles/{home['id']}/status", json={"status": "broken", "move_to_vehicle_id": spare["id"]})
-    res = client.post(f"/api/v1/fleet/vehicles/{home['id']}/status", json={"status": "active", "bring_home_driver": True}).json()
-    assert res["returned_driver"]["plate"] == "51C-1"
-
-
 # --- history: paged, sorted, filtered -------------------------------------------------
 def _history_fixture():
     home, spare, other = _truck("51C-1"), _truck("51C-9"), _truck("51C-5")
     a = _driver("Nguyễn Văn Ân", home_vehicle_id=home)
     b = _driver("Bình", home_vehicle_id=other)
     fleet.set_vehicle_status(home, "broken", "Hư hộp số", move_to_vehicle_id=spare)
-    fleet.set_vehicle_status(home, "active", bring_home_driver=True)
+    fleet.set_vehicle_status(home, "active")
+    fleet.assign_vehicle(a, home, "Xe sửa xong")
     return home, spare, a, b
 
 
@@ -389,8 +362,7 @@ def test_history_page_filters_sorts_and_pages():
     assert everything["total"] == 4                   # An x3, Bình x1
     open_rows = fleet.history_page(states=["open"])
     assert {(r["driver_name"], r["vehicle_plate"]) for r in open_rows["items"]} == {("Nguyễn Văn Ân", "51C-1"), ("Bình", "51C-5")}
-    temp = fleet.history_page(kinds=["temporary"])
-    assert [r["vehicle_plate"] for r in temp["items"]] == ["51C-9"]
+    assert fleet.history_page(kinds=["temporary"])["total"] == 0          # new rows are never "temporary"
     assert fleet.history_page(kinds=["primary", "temporary"], states=["open", "closed"])["total"] == 4
 
     # accent-insensitive search over names, plates and reasons
@@ -409,8 +381,8 @@ def test_history_page_filters_sorts_and_pages():
 
 def test_history_page_api():
     _history_fixture()
-    res = client.get("/api/v1/fleet/history/page", params=[("kinds", "temporary"), ("limit", "10")]).json()
-    assert res["total"] == 1 and res["items"][0]["vehicle_plate"] == "51C-9"
+    res = client.get("/api/v1/fleet/history/page", params=[("states", "closed"), ("limit", "10")]).json()
+    assert res["total"] == 2 and {r["vehicle_plate"] for r in res["items"]} == {"51C-1", "51C-9"}
     res = client.get("/api/v1/fleet/history/page", params={"q": "binh", "sort_by": "started_at", "sort_dir": "asc"}).json()
     assert res["total"] == 1
 
@@ -419,7 +391,7 @@ def test_history_sorts_vietnamese_names_like_people_expect():
     t = _truck("51C-1")
     for name in ("Nguyễn Văn An", "Ngô Văn Khoa", "Đặng Văn Em", "Dương Văn Bé", "Bùi Thị Giang"):
         d = _driver(name)
-        fleet.move_temporary(d, t)
+        fleet.assign_vehicle(d, t)
         fleet.unassign(d)
     names = [r["driver_name"] for r in fleet.history_page(sort_by="driver_name", sort_dir="asc")["items"]]
     assert names == ["Bùi Thị Giang", "Đặng Văn Em", "Dương Văn Bé", "Ngô Văn Khoa", "Nguyễn Văn An"]
@@ -433,7 +405,7 @@ def test_deleted_truck_goes_to_trash_and_comes_back():
     a = _driver("An", home_vehicle_id=t)
     fleet.delete_vehicle(t)
     assert "51C-1" not in _trucks()
-    assert _drivers()["An"]["home_vehicle"] is None and _drivers()["An"]["current_vehicle"] is None
+    assert _drivers()["An"]["current_vehicle"] is None
     page = fleet.trash_page("vehicle")
     assert page["total"] == 1 and page["keep_days"] == 30
     item = page["items"][0]
@@ -448,7 +420,7 @@ def test_deleted_truck_goes_to_trash_and_comes_back():
     _truck("51C-2", trailer_plate="51R-1")
     # a truck in the trash can't be used
     with pytest.raises(fleet.FleetError) as e:
-        fleet.set_home_vehicle(a, t)
+        fleet.assign_vehicle(a, t)
     assert e.value.status == 404
 
     assert fleet.restore_from_trash("vehicle", [t, 999]) == 1
@@ -460,13 +432,12 @@ def test_deleted_driver_frees_their_truck_and_is_left_out_of_reminders():
     t = _truck("51C-1")
     a = _driver("An", home_vehicle_id=t, license_expiry="2026-11-20")
     fleet.delete_driver(a)
-    assert _trucks()["51C-1"]["home_driver"] is None and _trucks()["51C-1"]["current_driver"] is None
+    assert _trucks()["51C-1"]["current_driver"] is None
     assert fleet.expiring_documents(date(2026, 11, 15)) == []
     b = _driver("Bình")
-    fleet.set_home_vehicle(b, t)                       # the truck is free for someone else
+    fleet.assign_vehicle(b, t)                         # the truck is free for someone else
     fleet.restore_from_trash("driver", [a])
-    d = _drivers()["An"]
-    assert d["home_vehicle"] is None and d["current_vehicle"] is None
+    assert _drivers()["An"]["current_vehicle"] is None
     assert len(fleet.list_history(driver_id=a)) == 1  # their history is still there
 
 
@@ -627,46 +598,31 @@ def test_a_driver_can_have_a_rigid_truck_but_only_one_truck():
     tractor = _truck("51C-111.11")
     truck = _truck("51D-222.22", category="truck")
     a = _driver("An", home_vehicle_id=truck)
-    assert _drivers()["An"]["home_vehicle"]["category"] == "truck"
-    # a new home truck replaces the old one: never two
-    fleet.set_home_vehicle(a, tractor)
-    assert _drivers()["An"]["home_vehicle"]["id"] == tractor
-    assert _trucks()["51D-222.22"]["home_driver"] is None
+    assert _drivers()["An"]["current_vehicle"]["category"] == "truck"
+    # another truck replaces the first one: never two
+    fleet.assign_vehicle(a, tractor)
+    assert _drivers()["An"]["current_vehicle"]["id"] == tractor
+    assert _trucks()["51D-222.22"]["current_driver"] is None
     assert [r[1] for r in _open_rows()] == ["51C-111.11"]
 
 
-def test_revoke_vehicle_frees_home_and_current_truck():
-    home, spare = _truck("51C-1"), _truck("51C-9")
-    a = _driver("An", home_vehicle_id=home)
+def test_revoke_vehicle_takes_the_truck_back():
+    t = _truck("51C-1")
+    a = _driver("An", home_vehicle_id=t)
     b = _driver("Bình")
-    fleet.move_temporary(a, spare, "Xe gốc hư")
     fleet.revoke_vehicle(a, "Nghỉ chạy tuyến")
     assert _open_rows() == []
-    drivers = {d["name"]: d for d in fleet.list_drivers()}
-    assert drivers["An"]["home_vehicle"] is None and drivers["An"]["current_vehicle"] is None
+    assert _drivers()["An"]["current_vehicle"] is None
     with pytest.raises(fleet.FleetError):
         fleet.revoke_vehicle(a)          # nothing left to take back
-    fleet.set_home_vehicle(b, home)      # the truck is free for someone else, no force needed
+    fleet.assign_vehicle(b, t)           # the truck is free for someone else
     assert _open_rows() == [("Bình", "51C-1", "primary")]
-    last = [h for h in fleet.list_history(driver_id=a) if h["vehicle_plate"] == "51C-9"][0]
-    assert last["end_reason"] == "Nghỉ chạy tuyến"
+    assert fleet.list_history(driver_id=a)[0]["end_reason"] == "Nghỉ chạy tuyến"
 
 
 def test_revoke_route():
-    home = _truck("51C-1")
-    a = _driver("An", home_vehicle_id=home)
-    res = TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""})
-    assert res.status_code == 200 and res.json()["home_vehicle"] is None
-    assert TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""}).status_code == 400
-
-
-@pytest.mark.parametrize("status,label", [("not_ready", "không sẵn sàng"), ("broken", "hư hỏng"),
-                                          ("maintenance", "bảo dưỡng"), ("inactive", "ngưng hoạt động")])
-def test_a_truck_that_cannot_run_cannot_be_given(status, label):
     t = _truck("51C-1")
-    fleet.set_vehicle_status(t, status)
-    a = _driver("An")
-    with pytest.raises(fleet.FleetError) as e:
-        fleet.set_home_vehicle(a, t)
-    assert e.value.status == 409 and label in e.value.message
-    assert _drivers()["An"]["home_vehicle"] is None
+    a = _driver("An", home_vehicle_id=t)
+    res = TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""})
+    assert res.status_code == 200 and res.json()["current_vehicle"] is None
+    assert TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""}).status_code == 400

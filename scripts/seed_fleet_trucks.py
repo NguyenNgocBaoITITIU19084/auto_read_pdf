@@ -74,15 +74,15 @@ def main():
             continue
         data = {"name": name, "phone": phone, "id_number": id_no, "license_no": lic, "license_class": cls,
                 "license_expiry": lic_exp}
-        if home in ids:
-            data["home_vehicle_id"] = ids[home]
         driver_ids[name] = fleet.create_driver(data)
+        if home in ids:
+            fleet.assign_vehicle(driver_ids[name], ids[home])
         print(f"  + tài xế {name}" + (f" → {home}" if home in ids else ""))
 
-    # a few states to look at: a broken truck whose driver drives the spare for now, one in maintenance
+    # a few states to look at: a broken truck whose driver moved to the spare, one in maintenance
     if "51D-444.55" in ids and "51D-666.77" in ids and "Châu Quốc Tài" in driver_ids:
         fleet.set_vehicle_status(ids["51D-444.55"], "broken", "Hư máy lạnh thùng", move_to_vehicle_id=ids["51D-666.77"])
-        print("  ! 51D-444.55 hư máy lạnh → Châu Quốc Tài lái tạm 51D-666.77")
+        print("  ! 51D-444.55 hư máy lạnh → Châu Quốc Tài chuyển sang 51D-666.77")
     if "51D-555.66" in ids:
         fleet.set_vehicle_status(ids["51D-555.66"], "maintenance", "Bảo dưỡng định kỳ 40.000 km")
         print("  ! 51D-555.66 bảo dưỡng")

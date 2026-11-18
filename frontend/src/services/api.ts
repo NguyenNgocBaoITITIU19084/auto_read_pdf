@@ -821,7 +821,6 @@ export type VehicleInput = Partial<Pick<FleetVehicle,
   | 'note'>> & { /** on create only (tractor when left out) */ category?: VehicleCategory };
 export type DriverInput = Partial<Pick<FleetDriver,
   'name' | 'phone' | 'id_number' | 'license_no' | 'license_class' | 'license_expiry' | 'status' | 'note'>> & {
-  home_vehicle_id?: number | null;
 };
 
 export const getFleetVehiclesApi = async (): Promise<FleetVehicle[]> =>
@@ -836,10 +835,10 @@ export const deleteFleetVehicleApi = async (id: number): Promise<void> => {
 /** Status change and, for a truck that stops running, where its driver goes (null: gets off it) — one step.
  *  `bringHomeDriver` ("Đã sửa xong"): a truck running again also gets its home driver back from a temporary truck. */
 export const setFleetVehicleStatusApi = async (
-  id: number, status: VehicleStatus, reason = '', moveToVehicleId: number | null = null, bringHomeDriver = false,
+  id: number, status: VehicleStatus, reason = '', moveToVehicleId: number | null = null,
 ): Promise<VehicleStatusResult> =>
   (await apiClient.post<VehicleStatusResult>(`/fleet/vehicles/${id}/status`, {
-    status, reason, move_to_vehicle_id: moveToVehicleId, bring_home_driver: bringHomeDriver,
+    status, reason, move_to_vehicle_id: moveToVehicleId,
   })).data;
 
 export const getFleetDriversApi = async (): Promise<FleetDriver[]> =>
@@ -851,16 +850,12 @@ export const updateFleetDriverApi = async (id: number, data: DriverInput): Promi
 export const deleteFleetDriverApi = async (id: number): Promise<void> => {
   await apiClient.delete(`/fleet/drivers/${id}`);
 };
-/** 409 when the truck is someone else's home truck or driven by someone else, unless `force`. */
-export const setDriverHomeVehicleApi = async (id: number, vehicleId: number | null, force = false): Promise<FleetDriver> =>
-  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/home`, { vehicle_id: vehicleId, force })).data;
-export const moveDriverTemporaryApi = async (id: number, vehicleId: number, reason = ''): Promise<FleetDriver> =>
-  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/temporary`, { vehicle_id: vehicleId, reason })).data;
-export const returnDriverHomeApi = async (id: number): Promise<FleetDriver> =>
-  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/return-home`)).data;
+/** Giao xe / Đổi xe: put a working driver on a free truck that can run (409 when it is driven or cannot run). */
+export const assignDriverVehicleApi = async (id: number, vehicleId: number, reason = ''): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/assign`, { vehicle_id: vehicleId, reason })).data;
 export const unassignDriverApi = async (id: number, reason = ''): Promise<FleetDriver> =>
   (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/unassign`, { reason })).data;
-/** Thu hồi xe: the driver gives up their own truck and gets off any truck they drive. */
+/** Thu hồi xe: the driver gets off the truck they drive (400 when they drive none). */
 export const revokeDriverVehicleApi = async (id: number, reason = ''): Promise<FleetDriver> =>
   (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/revoke`, { reason })).data;
 

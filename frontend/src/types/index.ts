@@ -720,7 +720,6 @@ export type VehicleStatus = typeof VEHICLE_STATUSES[number];
 export const DRIVER_STATUSES = ['active', 'not_ready', 'leave', 'left'] as const;
 export type DriverStatus = typeof DRIVER_STATUSES[number];
 /** primary: the driver on their home truck; temporary: on another truck while theirs cannot run */
-export type AssignmentKind = 'primary' | 'temporary';
 /** tractor: đầu kéo (pulls a trailer); truck: xe tải (carries its own load, never a trailer). Set when made. */
 export const VEHICLE_CATEGORIES = ['tractor', 'truck'] as const;
 export type VehicleCategory = typeof VEHICLE_CATEGORIES[number];
@@ -754,11 +753,8 @@ export interface FleetVehicle {
   ownership_back: string;
   created_at: string;
   updated_at: string;
-  /** whose home truck it is; driving_* = the truck that driver is on now (another one when away) */
-  home_driver: {
-    id: number; name: string; status: DriverStatus; photo: string; driving_vehicle_id: number | null; driving_plate: string;
-  } | null;
-  current_driver: { id: number; name: string; phone: string; photo: string; kind: AssignmentKind; since: string; reason: string } | null;
+  /** who drives it now (a driver drives at most one truck, a truck has at most one driver) */
+  current_driver: { id: number; name: string; phone: string; photo: string; since: string; reason: string } | null;
 }
 
 export interface FleetDriver {
@@ -782,10 +778,8 @@ export interface FleetDriver {
   license_back: string;
   id_front: string;
   id_back: string;
-  home_vehicle: { id: number; plate: string; status: VehicleStatus; category: VehicleCategory } | null;
   current_vehicle: {
-    id: number; plate: string; trailer_plate: string; photo: string; category: VehicleCategory; kind: AssignmentKind;
-    since: string; reason: string;
+    id: number; plate: string; trailer_plate: string; photo: string; category: VehicleCategory; since: string; reason: string;
   } | null;
 }
 
@@ -795,8 +789,6 @@ export interface FleetAssignment {
   vehicle_id: number | null;
   driver_name: string;
   vehicle_plate: string;
-  kind: AssignmentKind;
-  home_vehicle_plate: string;
   reason: string;
   started_at: string;
   ended_at: string | null;
@@ -829,9 +821,6 @@ export interface VehicleStatusResult {
   vehicle_id: number;
   status: VehicleStatus;
   moved_driver: { id: number; name: string; to_vehicle_id: number | null; to_plate: string } | null;
-  home_driver_away: { id: number; name: string; plate: string } | null;
-  /** with bringHomeDriver: the home driver brought back from their temporary truck */
-  returned_driver: { id: number; name: string; from_plate: string; plate: string } | null;
 }
 
 export interface FleetHistoryPage {

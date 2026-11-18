@@ -35,7 +35,7 @@ import { DriverFormModal, VehicleFormModal } from './FleetModals';
 const p = translations.vi.fleet.photo;
 const truck: FleetVehicle = {
   id: 9, plate: '51C-1', category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active',
-  note: '', photo: '', created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', home_driver: null, current_driver: null,
+  note: '', photo: '', created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', current_driver: null,
 };
 
 const pickAndSave = async () => {
@@ -163,18 +163,14 @@ describe('VehicleFormModal pick by clicking the box', () => {
   });
 });
 
-describe('DriverFormModal own truck', () => {
-  it('offers tractors and rigid trucks in their own groups, and saves the one picked', async () => {
+describe('DriverFormModal has no own truck', () => {
+  it('a new driver is saved without a truck (give them one with "Giao xe")', async () => {
     createDriver.mockReset().mockResolvedValue({ id: 7 });
-    const rigid: FleetVehicle = { ...truck, id: 10, plate: '51D-2', category: 'truck' };
-    render(<DriverFormModal isOpen driver={null} vehicles={[truck, rigid]} onClose={() => {}} onSaved={() => {}} />);
-    const v = translations.vi.fleet.views;
-    const groups = Array.from(document.querySelectorAll('optgroup')).map((g) => g.label);
-    expect(groups).toEqual([v.vehicles, v.trucks]);
-    const select = screen.getByLabelText(translations.vi.fleet.driverForm.homeVehicle) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: '10' } });
+    render(<DriverFormModal isOpen driver={null} vehicles={[truck]} onClose={() => {}} onSaved={() => {}} />);
+    expect(screen.queryByLabelText(translations.vi.fleet.driverForm.homeVehicle)).toBeNull();
     fireEvent.change(screen.getByLabelText(/Họ tên/), { target: { value: 'An' } });
     fireEvent.click(screen.getByText(translations.vi.common.save));
-    await waitFor(() => expect(createDriver).toHaveBeenCalledWith(expect.objectContaining({ home_vehicle_id: 10 })));
+    await waitFor(() => expect(createDriver).toHaveBeenCalled());
+    expect(createDriver.mock.calls[0][0]).not.toHaveProperty('home_vehicle_id');
   });
 });
