@@ -105,6 +105,11 @@ export function canReturnHome(d: FleetDriver, vehicles: FleetVehicle[]): boolean
   return !!home && isRunning(home.status) && !home.current_driver;
 }
 
+/** A working driver with no truck at all (no own truck, not driving one): "Giao xe" instead of "Đổi xe". */
+export function needsTruck(d: FleetDriver): boolean {
+  return d.status !== 'left' && !d.home_vehicle && !d.current_vehicle;
+}
+
 /** Expiring or expired documents of running trucks and working drivers. */
 export function expiringCount(vehicles: FleetVehicle[], drivers: FleetDriver[], today: string = todayVnIso()): number {
   const soon = (iso: string) => {

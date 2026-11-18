@@ -24,7 +24,7 @@ import {
   type VehicleCategory, type VehicleDocument, type VehicleStatus,
 } from '../../types';
 import {
-  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, isConflict, isRunning, licenseExpired,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, isConflict, isRunning, licenseExpired, needsTruck,
   type PaperExpiry,
 } from './fleetUtils';
 
@@ -636,6 +636,8 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
   const permanentChoices = useMemo(() => vehicles.filter((v) => v.status !== 'inactive'), [vehicles]);
   if (!driver) return null;
 
+  // a driver with no truck at all gets one for good: no "drive for now", no "no own truck" card, a pick is needed
+  const assigning = needsTruck(driver);
   const choices = mode === 'temporary' ? temporaryChoices : permanentChoices;
 
   const done = () => {
@@ -645,7 +647,7 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === 'temporary' && !vehicleId) {
+    if ((mode === 'temporary' || assigning) && !vehicleId) {
       setError(m.pickRequired);
       return;
     }
@@ -720,7 +722,7 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
         .filter(Boolean).join(' ') : driver.home_vehicle ? tf(m.summaryNoHome, { name: driver.name }) : m.summaryPick;
 
   return (
-    <Modal isOpen onClose={onClose} title={tf(m.title, { name: driver.name })} maxWidth="max-w-xl">
+    <Modal isOpen onClose={onClose} title={tf(assigning ? m.assignTitle : m.title, { name: driver.name })} maxWidth="max-w-xl">
       <form onSubmit={submit} className="space-y-4" noValidate>
         {/* who, and where they are now */}
         <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
@@ -731,13 +733,17 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
             <p>{driver.home_vehicle ? tf(m.home, { plate: driver.home_vehicle.plate }) : m.homeNone}</p>
           </div>
         </div>
-        <div className="flex gap-2">
-          {radio('temporary', m.temporary, m.temporaryHint, driver.status !== 'active')}
-          {radio('permanent', m.permanent, m.permanentHint)}
-        </div>
+        {assigning ? (
+          <p className="text-xs text-slate-500 dark:text-slate-400">{m.assignHint}</p>
+        ) : (
+          <div className="flex gap-2">
+            {radio('temporary', m.temporary, m.temporaryHint, driver.status !== 'active')}
+            {radio('permanent', m.permanent, m.permanentHint)}
+          </div>
+        )}
         <VehiclePicker key={mode} vehicles={choices} value={vehicleId} driverId={driver.id} label={m.vehicle}
           onChange={(value) => { setVehicleId(value); setError(''); }}
-          noneLabel={mode === 'permanent' ? m.noHomeCard : undefined} />
+          noneLabel={mode === 'permanent' && !assigning ? m.noHomeCard : undefined} />
         <p data-testid="move-summary" className={`text-xs rounded-lg px-3 py-2 ${picked || (mode === 'permanent' && driver.home_vehicle)
           ? (taker ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
             : 'bg-primary-50 text-primary-800 dark:bg-primary-950/30 dark:text-primary-200')
@@ -750,7 +756,7 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
           </Field>
         )}
         {error && <p role="alert" className="text-xs font-medium text-rose-600 dark:text-rose-400">{error}</p>}
-        <Footer onCancel={onClose} saving={saving} disabled={mode === 'temporary' && !vehicleId}>
+        <Footer onCancel={onClose} saving={saving} disabled={(mode === 'temporary' || assigning) && !vehicleId}>
           {driver.current_vehicle && (
             <button type="button" onClick={getOff} disabled={saving}
               className="mr-auto h-9 px-3 text-sm font-semibold rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-50">

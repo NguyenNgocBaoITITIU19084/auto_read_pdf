@@ -1418,7 +1418,7 @@ export const translations = {
       clearFilter: "Xem tất cả",
       actions: {
         addVehicle: "Thêm xe", addTruck: "Thêm xe tải", addDriver: "Thêm tài xế", edit: "Sửa", delete: "Xóa", history: "Lịch sử",
-        status: "Báo hư / đổi trạng thái", move: "Đổi xe", returnHome: "Trả về xe gốc",
+        status: "Báo hư / đổi trạng thái", move: "Đổi xe", assign: "Giao xe", changeDriver: "Đổi tài xế", revoke: "Thu hồi xe", returnHome: "Trả về xe gốc",
       },
       truckChip: "Xe tải",
       truckForm: {
@@ -1455,7 +1455,8 @@ export const translations = {
         backHint: "Khi xe chạy lại, tài xế cố định đang rảnh sẽ tự lên lại xe.",
       },
       moveModal: {
-        title: "Đổi xe cho {name}",
+        title: "Đổi xe cho {name}", assignTitle: "Giao xe cho {name}",
+        assignHint: "Mỗi tài xế chỉ lái 1 xe. Chọn xe để giao cố định cho tài xế này.",
         current: "Đang lái: {plate}", currentNone: "Hiện chưa lái xe nào",
         home: "Xe cố định: {plate}", homeNone: "Chưa có xe cố định",
         temporary: "Lái tạm xe khác", temporaryHint: "Giữ xe cố định, sau này bấm \"Trả về xe gốc\" để quay lại.",
@@ -1472,6 +1473,24 @@ export const translations = {
         summaryNoHome: "{name} sẽ không còn xe cố định.", summaryTake: "{other} sẽ không còn xe này.",
         summaryPick: "Bấm chọn một xe ở danh sách trên.",
         summarySame: "Xe {plate} đang là xe cố định của tài xế này — không đổi gì.",
+      },
+      revoke: {
+        title: "Thu hồi xe của {name}?",
+        home: "{name} sẽ không còn xe cố định {plate}.", driving: "{name} sẽ xuống xe {plate} đang lái.",
+        temp: "{name} sẽ xuống xe {plate} (đang lái tạm), vẫn giữ xe cố định.",
+        after: "Xe sẽ trống để giao cho tài xế khác.",
+      },
+      driverModal: {
+        assignTitle: "Giao xe {plate} cho tài xế", changeTitle: "Đổi tài xế xe {plate}",
+        hint: "Mỗi tài xế chỉ lái 1 xe: tài xế đang có xe khác sẽ rời xe đó.",
+        current: "Tài xế cố định: {name}", currentNone: "Xe chưa có tài xế cố định",
+        pick: "Chọn tài xế", search: "Tìm tên, số điện thoại…", clearSearch: "Xóa tìm kiếm",
+        noMatch: "Không có tài xế phù hợp.", noDrivers: "Chưa có tài xế nào.",
+        noTruck: "Chưa có xe", ownerOf: "Xe cố định {plate}", driving: "Đang lái {plate}", thisTruck: "Tài xế hiện tại của xe",
+        summaryPick: "Bấm chọn một tài xế ở danh sách trên.", summaryGive: "Xe {plate} sẽ là xe cố định của {name}.",
+        summaryLeave: "{name} sẽ rời xe {old}.", summaryTake: "{other} sẽ không còn xe này.",
+        summarySame: "{name} đang là tài xế cố định của xe này — không đổi gì.",
+        unassign: "Bỏ giao xe", unassigned: "Xe {plate} không còn tài xế cố định",
       },
       photo: {
         label: "Ảnh", choose: "Chọn ảnh", change: "Đổi ảnh", remove: "Xóa ảnh", drop: "Kéo thả ảnh vào đây hoặc bấm để chọn",
@@ -1679,7 +1698,7 @@ export const translations = {
       },
       toast: {
         saved: "Đã lưu", deleted: "Đã chuyển vào thùng rác", error: "Không thực hiện được",
-        moved: "{name} chuyển sang lái tạm xe {plate}", idle: "{name} đã xuống xe",
+        moved: "{name} chuyển sang lái tạm xe {plate}", idle: "{name} đã xuống xe", revoked: "Đã thu hồi xe của {name}",
         returned: "{name} đã trở về xe {plate}",
         repaired: "Xe {plate} đã chạy lại", repairedReturned: "Xe {plate} đã chạy lại — {name} đã về lại xe của mình", homeAway: "{name} đang lái tạm xe {plate} — bấm \"Trả về xe gốc\" khi sẵn sàng",
       },
@@ -3186,7 +3205,7 @@ export const translations = {
       clearFilter: "Show all",
       actions: {
         addVehicle: "Add truck", addTruck: "Add rigid truck", addDriver: "Add driver", edit: "Edit", delete: "Delete", history: "History",
-        status: "Report breakdown / change status", move: "Change truck", returnHome: "Back to own truck",
+        status: "Report breakdown / change status", move: "Change truck", assign: "Assign truck", changeDriver: "Change driver", revoke: "Take back truck", returnHome: "Back to own truck",
       },
       truckChip: "Truck",
       truckForm: {
@@ -3223,7 +3242,8 @@ export const translations = {
         backHint: "When the truck runs again, its idle assigned driver gets back on it automatically.",
       },
       moveModal: {
-        title: "Change truck for {name}",
+        title: "Change truck for {name}", assignTitle: "Assign a truck to {name}",
+        assignHint: "Each driver drives one truck. Pick the truck to give this driver for good.",
         current: "Driving: {plate}", currentNone: "Not driving any truck",
         home: "Own truck: {plate}", homeNone: "No own truck",
         temporary: "Take another truck for now", temporaryHint: "Keeps their own truck; use \"Back to own truck\" later.",
@@ -3240,6 +3260,24 @@ export const translations = {
         summaryNoHome: "{name} will have no own truck.", summaryTake: "{other} loses this truck.",
         summaryPick: "Pick a truck from the list above.",
         summarySame: "{plate} is already this driver's own truck — nothing changes.",
+      },
+      revoke: {
+        title: "Take the truck back from {name}?",
+        home: "{name} will no longer own {plate}.", driving: "{name} gets off {plate}.",
+        temp: "{name} gets off {plate} (driving it for now) and keeps their own truck.",
+        after: "The truck is then free to give to another driver.",
+      },
+      driverModal: {
+        assignTitle: "Assign {plate} to a driver", changeTitle: "Change the driver of {plate}",
+        hint: "Each driver drives one truck: a driver who has another truck leaves it.",
+        current: "Assigned driver: {name}", currentNone: "No assigned driver yet",
+        pick: "Pick a driver", search: "Search name, phone…", clearSearch: "Clear search",
+        noMatch: "No driver matches.", noDrivers: "No drivers yet.",
+        noTruck: "No truck", ownerOf: "Own truck {plate}", driving: "Driving {plate}", thisTruck: "This truck's driver now",
+        summaryPick: "Pick a driver from the list above.", summaryGive: "{plate} becomes {name}'s own truck.",
+        summaryLeave: "{name} leaves {old}.", summaryTake: "{other} loses this truck.",
+        summarySame: "{name} already has this truck — nothing changes.",
+        unassign: "Unassign", unassigned: "{plate} has no assigned driver now",
       },
       photo: {
         label: "Photo", choose: "Choose photo", change: "Change photo", remove: "Remove photo", drop: "Drop a photo here or click to choose",
@@ -3447,7 +3485,7 @@ export const translations = {
       },
       toast: {
         saved: "Saved", deleted: "Moved to the trash", error: "Could not do that",
-        moved: "{name} moved to temporary truck {plate}", idle: "{name} got off the truck",
+        moved: "{name} moved to temporary truck {plate}", idle: "{name} got off the truck", revoked: "Took the truck back from {name}",
         returned: "{name} is back on truck {plate}",
         repaired: "Truck {plate} is running again", repairedReturned: "Truck {plate} is running again — {name} is back on it", homeAway: "{name} is on temporary truck {plate} — use \"Back to own truck\" when ready",
       },

@@ -544,6 +544,19 @@ def unassign(driver_id: int, reason: str = "") -> dict:
     return {"driver_id": driver_id, "vehicle_id": None}
 
 
+def revoke_vehicle(driver_id: int, reason: str = "") -> dict:
+    """Thu hồi xe: the driver gives up their home truck and gets off whatever truck they drive, both at once. The
+    truck is then free for "Giao xe" to someone else."""
+    stamp = _now()
+    with _conn() as conn:
+        driver = _driver(conn, driver_id)
+        if not driver.get("home_vehicle_id") and not _open_by_driver(conn, driver_id):
+            raise FleetError(f"{driver['name']} chưa có xe để thu hồi")
+        conn.execute("UPDATE fleet_drivers SET home_vehicle_id = NULL, updated_at = ? WHERE id = ?;", (stamp, driver_id))
+        _close(conn, _open_by_driver(conn, driver_id), reason or "Thu hồi xe", stamp)
+    return {"driver_id": driver_id, "vehicle_id": None}
+
+
 def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_vehicle_id: int | None = None,
                        bring_home_driver: bool = False, forced: bool = False) -> dict:
     """Change a truck's status in one step with what it means for its driver:

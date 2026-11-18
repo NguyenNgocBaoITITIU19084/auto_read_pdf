@@ -182,6 +182,13 @@ def unassign(driver_id: int, payload: ReasonIn):
     return _driver(driver_id)
 
 
+@router.post("/drivers/{driver_id}/revoke")
+def revoke_vehicle(driver_id: int, payload: ReasonIn):
+    """Thu hồi xe: no home truck, off any truck they drive."""
+    _run(fleet.revoke_vehicle, driver_id, payload.reason)
+    return _driver(driver_id)
+
+
 # --- trailers -------------------------------------------------------------
 @router.get("/trailers")
 def list_trailers():

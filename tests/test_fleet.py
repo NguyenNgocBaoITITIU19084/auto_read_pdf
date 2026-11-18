@@ -629,3 +629,28 @@ def test_a_driver_can_have_a_rigid_truck_but_only_one_truck():
     assert _drivers()["An"]["home_vehicle"]["id"] == tractor
     assert _trucks()["51D-222.22"]["home_driver"] is None
     assert [r[1] for r in _open_rows()] == ["51C-111.11"]
+
+
+def test_revoke_vehicle_frees_home_and_current_truck():
+    home, spare = _truck("51C-1"), _truck("51C-9")
+    a = _driver("An", home_vehicle_id=home)
+    b = _driver("Bình")
+    fleet.move_temporary(a, spare, "Xe gốc hư")
+    fleet.revoke_vehicle(a, "Nghỉ chạy tuyến")
+    assert _open_rows() == []
+    drivers = {d["name"]: d for d in fleet.list_drivers()}
+    assert drivers["An"]["home_vehicle"] is None and drivers["An"]["current_vehicle"] is None
+    with pytest.raises(fleet.FleetError):
+        fleet.revoke_vehicle(a)          # nothing left to take back
+    fleet.set_home_vehicle(b, home)      # the truck is free for someone else, no force needed
+    assert _open_rows() == [("Bình", "51C-1", "primary")]
+    last = [h for h in fleet.list_history(driver_id=a) if h["vehicle_plate"] == "51C-9"][0]
+    assert last["end_reason"] == "Nghỉ chạy tuyến"
+
+
+def test_revoke_route():
+    home = _truck("51C-1")
+    a = _driver("An", home_vehicle_id=home)
+    res = TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""})
+    assert res.status_code == 200 and res.json()["home_vehicle"] is None
+    assert TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""}).status_code == 400

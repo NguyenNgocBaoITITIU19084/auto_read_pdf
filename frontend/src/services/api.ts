@@ -860,6 +860,9 @@ export const returnDriverHomeApi = async (id: number): Promise<FleetDriver> =>
   (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/return-home`)).data;
 export const unassignDriverApi = async (id: number, reason = ''): Promise<FleetDriver> =>
   (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/unassign`, { reason })).data;
+/** Thu hồi xe: the driver gives up their own truck and gets off any truck they drive. */
+export const revokeDriverVehicleApi = async (id: number, reason = ''): Promise<FleetDriver> =>
+  (await apiClient.post<FleetDriver>(`/fleet/drivers/${id}/revoke`, { reason })).data;
 
 /** URL of a stored truck / driver photo ('' when there is none). */
 export const fleetPhotoUrl = (name: string | null | undefined): string =>
