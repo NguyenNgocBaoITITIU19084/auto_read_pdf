@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, IdCard, Phone, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { tf } from '../../services/i18nFormat';
-import type { VehicleCategory } from '../../types';
-import { formatIsoDate, licenseExpired, licenseNeeded } from './fleetUtils';
+import { formatIsoDate, grossWeightMissing, licenseExpired, licenseNeeded, type LicenceTarget } from './fleetUtils';
 
 const CARD_W = 300;
 const GAP = 6;
@@ -23,12 +22,12 @@ interface Props {
   driver: LicenceWarnDriver;
   /** the truck they are on, which their licence may not drive */
   plate: string;
-  category: VehicleCategory;
+  vehicle: LicenceTarget;
 }
 
 /** A red warning by a driver on a truck their licence may not drive. Hovering (or focusing) it shows what is wrong,
  *  who the driver is (name, phone, licence) and what to do, in a card kept out of the table's overflow. */
-export const LicenceWarn: React.FC<Props> = ({ driver, plate, category }) => {
+export const LicenceWarn: React.FC<Props> = ({ driver, plate, vehicle }) => {
   const { t } = useApp();
   const L = t.fleet.licence;
   const [open, setOpen] = useState(false);
@@ -54,8 +53,8 @@ export const LicenceWarn: React.FC<Props> = ({ driver, plate, category }) => {
     setPos({ top, left });
   }, [open]);
 
-  const classes = licenseNeeded(category);
-  const kind = category === 'truck' ? L.kindTruck : L.kindTractor;
+  const classes = licenseNeeded(vehicle);
+  const kind = vehicle.category === 'truck' ? L.kindTruck : L.kindTractor;
   const problem = tf(L.problem, { kind, plate, classes });
   const expired = !!driver.license_expiry && licenseExpired({ license_expiry: driver.license_expiry });
   const row = (icon: React.ReactNode, label: string, value: React.ReactNode) => (
@@ -100,6 +99,9 @@ export const LicenceWarn: React.FC<Props> = ({ driver, plate, category }) => {
                 </span>
               ))}
             </div>
+            {grossWeightMissing(vehicle) && (
+              <p className="text-amber-700 dark:text-amber-300 leading-relaxed">{L.noWeight}</p>
+            )}
             <p className="text-slate-500 dark:text-slate-400 leading-relaxed">{tf(L.fix, { classes })}</p>
           </div>
         </div>,

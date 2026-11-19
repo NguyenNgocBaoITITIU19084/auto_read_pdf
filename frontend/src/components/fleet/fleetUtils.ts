@@ -1,4 +1,4 @@
-import type { DriverStatus, FleetDriver, FleetVehicle, VehicleStatus } from '../../types';
+import type { DriverStatus, FleetDriver, FleetVehicle, VehicleCategory, VehicleStatus } from '../../types';
 import { VN_TIME_ZONE } from '../../utils/vnTime';
 
 /** Documents expiring within this many days are flagged (same as the backend reminder). */
@@ -83,19 +83,65 @@ export function expiredPapers(row: Record<PaperExpiry, string>, today: string = 
 }
 
 /** While a driver's licence is expired only these can be picked (the backend refuses the rest) */
-/** Licence classes that may drive each category (same as LICENSE_CLASSES_FOR in backend/app/core/fleet.py): a
- *  tractor pulling a semi-trailer needs FC (old) or CE (Luật 2024); a truck a class covering hạng C. */
-export const LICENSE_CLASSES_FOR: Record<'tractor' | 'truck', readonly string[]> = {
-  tractor: ['FC', 'CE'],
-  truck: ['C1', 'C', 'C1E', 'CE', 'FC', 'E', 'FD', 'FE'],
-};
-/** The driver's "Hạng bằng" ("B2, FC", "fc" ...) includes a class that may drive this category (empty: never). */
-export function licenseAllows(licenseClass: string | null | undefined, category: 'tractor' | 'truck' | undefined): boolean {
-  const have = String(licenseClass || '').toUpperCase().split(/[^0-9A-Z]+/).filter(Boolean);
-  return have.some((c) => LICENSE_CLASSES_FOR[category || 'tractor'].includes(c));
+// Licence classes (hạng bằng lái) that may drive a truck: the same rules as allowed_license_classes in
+// backend/app/core/fleet.py.
+// - A tractor pulling a semi-trailer: FC (old) or CE (Luật 2024).
+// - Any truck: C, CE and the old FC, E, FD, FE.
+// - By khối lượng toàn bộ (gross weight): up to 7,500 kg also C1 / C1E, up to 3,500 kg also B. By tải trọng (payload):
+//   under 3,500 kg also the old B2. A truck without its gross weight takes only the classes for any truck.
+export const TRACTOR_LICENSE_CLASSES = ['FC', 'CE'] as const;
+export const ANY_TRUCK_LICENSE_CLASSES = ['C', 'CE', 'FC', 'E', 'FD', 'FE'] as const;
+export const C1_MAX_KG = 7500;
+export const B_MAX_KG = 3500;
+export const B2_PAYLOAD_UNDER_KG = 3500;
+
+/** What the licence rules look at on a truck. */
+export interface LicenceTarget {
+  category?: VehicleCategory;
+  /** khối lượng toàn bộ in kg (0 / missing = not entered) */
+  gross_weight?: number;
+  /** tải trọng as typed ("8 tấn") */
+  payload?: string;
 }
-/** "FC/CE": the classes a category needs, for messages. */
-export const licenseNeeded = (category: 'tractor' | 'truck' | undefined) => LICENSE_CLASSES_FOR[category || 'tractor'].join('/');
+
+/** A typed tải trọng in kg ("8 tấn" 8000, "2,4 tấn" 2400, "7500 kg" 7500; a bare number under 100 is tonnes), or null. */
+export function payloadKg(value: string | null | undefined): number | null {
+  const text = String(value || '').toLowerCase().replace(/,/g, '.');
+  const m = text.match(/\d+(?:\.\d+)?/);
+  if (!m) return null;
+  const n = parseFloat(m[0]);
+  if (text.includes('kg')) return Math.round(n);
+  return text.includes('t') || n < 100 ? Math.round(n * 1000) : Math.round(n);
+}
+
+/** The licence classes that may drive this tractor / truck. */
+export function allowedLicenceClasses(v: LicenceTarget): string[] {
+  if ((v.category || 'tractor') === 'tractor') return [...TRACTOR_LICENSE_CLASSES];
+  const gross = Number(v.gross_weight || 0);
+  const extra: string[] = [];
+  if (gross > 0 && gross <= B_MAX_KG) extra.push('B');
+  const load = payloadKg(v.payload);
+  if (load !== null && load > 0 && load < B2_PAYLOAD_UNDER_KG) extra.push('B2');
+  if (gross > 0 && gross <= C1_MAX_KG) extra.push('C1', 'C1E');
+  return [...extra, ...ANY_TRUCK_LICENSE_CLASSES];
+}
+
+/** The driver's "Hạng bằng" ("B2, FC", "fc" ...) includes a class that may drive this truck (empty: never). */
+export function licenseAllows(licenseClass: string | null | undefined, v: LicenceTarget): boolean {
+  const have = String(licenseClass || '').toUpperCase().split(/[^0-9A-Z]+/).filter(Boolean);
+  const allowed = allowedLicenceClasses(v);
+  return have.some((c) => allowed.includes(c));
+}
+
+/** The classes to name in a message: "FC/CE", "B2/C1/C/FC" ... (the higher ones left out). */
+export function licenseNeeded(v: LicenceTarget): string {
+  const shown = (v.category || 'tractor') === 'tractor' ? ['FC', 'CE'] : ['B', 'B2', 'C1', 'C', 'FC'];
+  const allowed = allowedLicenceClasses(v);
+  return shown.filter((c) => allowed.includes(c)).join('/');
+}
+
+/** A truck whose gross weight is not entered: B / C1 cannot be judged for it. */
+export const grossWeightMissing = (v: LicenceTarget) => v.category === 'truck' && !Number(v.gross_weight || 0);
 
 export const DRIVER_LOCK_FREE_STATUSES: readonly DriverStatus[] = ['not_ready', 'leave', 'left'];
 /** The licence date is before today (its last day still counts, as on the server). */

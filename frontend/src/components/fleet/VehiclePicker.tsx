@@ -41,7 +41,7 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
   // cannot be given to this driver: someone else drives it now (take it back first), or it cannot run
   // (Không sẵn sàng / Hư hỏng / Bảo dưỡng / Ngưng hoạt động)
   // or the driver's licence may not drive it (a tractor needs FC / CE)
-  const wrongLicence = (v: FleetVehicle) => licenseClass !== undefined && !licenseAllows(licenseClass, v.category);
+  const wrongLicence = (v: FleetVehicle) => licenseClass !== undefined && !licenseAllows(licenseClass, v);
   const locked = (v: FleetVehicle) => (!!v.current_driver && v.current_driver.id !== driverId) || !isRunning(v.status)
     || wrongLicence(v);
   const rank = (v: FleetVehicle) => (locked(v) ? 1 : 0);
@@ -111,7 +111,7 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
             {driving && tag(tf(m.drivenBy, { name: driving.name }), 'slate')}
             {!driving && isRunning(v.status) && tag(m.free, 'emerald')}
             {!isRunning(v.status) && tag(t.fleet.vehicleStatus[v.status], 'rose')}
-            {wrongLicence(v) && tag(tf(t.fleet.licence.needs, { classes: licenseNeeded(v.category) }), 'rose')}
+            {wrongLicence(v) && tag(tf(t.fleet.licence.needs, { classes: licenseNeeded(v) }), 'rose')}
           </span>
         </span>
       </>

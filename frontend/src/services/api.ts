@@ -818,7 +818,8 @@ export const forgetAutoImportFileApi = async (sha256: string): Promise<void> => 
 // ---------------------------------------------------------------------------
 export type VehicleInput = Partial<Pick<FleetVehicle,
   'plate' | 'trailer_plate' | 'vehicle_type' | 'body_type' | 'payload' | 'registration_expiry' | 'insurance_expiry' | 'status'
-  | 'note'>> & { /** on create only (tractor when left out) */ category?: VehicleCategory };
+  | 'note'>> & { /** on create only (tractor when left out) */ category?: VehicleCategory;
+  /** trucks: khối lượng toàn bộ in kg, as typed ('' = not entered) */ gross_weight?: string | number };
 export type DriverInput = Partial<Pick<FleetDriver,
   'name' | 'phone' | 'id_number' | 'license_no' | 'license_class' | 'license_expiry' | 'status' | 'note'>> & {
 };

@@ -1429,6 +1429,7 @@ export const translations = {
         driver: "Tài xế", phone: "SĐT", licence: "Bằng lái", class: "Hạng", needsShort: "cần {classes}",
         number: "Số {no}", until: "Hạn đến {date}", expired: "Đã hết hạn {date}",
         fix: "Cách xử lý: Thu hồi xe rồi giao xe này cho tài xế có bằng {classes}, hoặc cập nhật lại hạng bằng nếu nhập sai.",
+        noWeight: "Xe chưa nhập khối lượng toàn bộ nên chỉ nhận bằng C. Nhập theo đăng kiểm để xét bằng B / C1.",
       },
       trailerHold: "Moóc {plate} đang {trailerStatus}: đầu kéo chuyển Không sẵn sàng. Tháo moóc ra (hoặc moóc chạy lại được) thì về {status}.",
       unhitch: {
@@ -1451,6 +1452,9 @@ export const translations = {
         typePh: "VD: Hino 8 tấn", body: "Loại thùng", bodyPh: "VD: Thùng kín",
         bodies: ["Thùng kín", "Thùng bạt", "Thùng lửng", "Thùng đông lạnh", "Thùng cánh dơi"],
         payload: "Tải trọng", payloadPh: "VD: 8 tấn",
+        grossWeight: "Khối lượng toàn bộ (kg)", grossWeightPh: "VD: 7500",
+        grossWeightHint: "Theo giấy đăng kiểm. Quyết định hạng bằng được lái: đến 3.500 kg thêm bằng B, đến 7.500 kg thêm bằng C1; trên đó cần bằng C.",
+        grossWeightShort: "KLTB {kg} kg",
       },
       vehicleForm: {
         addTitle: "Thêm xe", editTitle: "Sửa xe {plate}",
@@ -3245,6 +3249,7 @@ export const translations = {
         driver: "Driver", phone: "Phone", licence: "Licence", class: "Class", needsShort: "needs {classes}",
         number: "No. {no}", until: "Valid until {date}", expired: "Expired {date}",
         fix: "To fix: take the truck back and give it to a driver with {classes}, or correct the licence class if it was typed wrong.",
+        noWeight: "The truck's gross weight is not entered, so only a C licence is accepted. Enter it from the registration to allow B / C1.",
       },
       trailerHold: "Trailer {plate} is {trailerStatus}: the tractor is Not ready. Unhitch it (or get it running) and it goes back to {status}.",
       unhitch: {
@@ -3267,6 +3272,9 @@ export const translations = {
         typePh: "e.g. Hino 8 t", body: "Body", bodyPh: "e.g. Box",
         bodies: ["Box", "Tarp", "Flatbed", "Refrigerated", "Wing"],
         payload: "Payload", payloadPh: "e.g. 8 t",
+        grossWeight: "Gross weight (kg)", grossWeightPh: "e.g. 7500",
+        grossWeightHint: "From the registration. It decides the licence: up to 3,500 kg also B, up to 7,500 kg also C1; above that C.",
+        grossWeightShort: "GVW {kg} kg",
       },
       vehicleForm: {
         addTitle: "Add truck", editTitle: "Edit truck {plate}",

@@ -190,10 +190,11 @@ def test_vehicle_trailer_api():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("license_class,tractor_ok,truck_ok", [
     ("FC", True, True), ("CE", True, True), ("b2, fc", True, True), (" fc ", True, True),
-    ("C", False, True), ("C1", False, True), ("E", False, True), ("FE", False, True),
-    ("B2", False, False), ("D", False, False), ("", False, False),
+    ("C", False, True), ("E", False, True), ("FE", False, True),
+    ("C1", False, False), ("B2", False, False), ("B", False, False), ("D", False, False), ("", False, False),
 ])
 def test_the_licence_class_decides_which_trucks_a_driver_may_drive(license_class, tractor_ok, truck_ok):
+    """A truck with no gross weight entered takes only the classes that drive any truck."""
     tractor = fleet.create_vehicle({"plate": "51C-1"})
     truck = fleet.create_vehicle({"plate": "51D-1", "category": "truck"})
     d = fleet.create_driver({"name": "An", "license_class": license_class})
@@ -223,7 +224,7 @@ def test_a_driver_on_a_truck_their_licence_does_not_allow_is_listed_with_their_c
     fleet.assign_vehicle(d, v)
     fleet.update_driver(d, {"license_class": "C"})                # the true class is saved; the office reassigns
     assert _v("51C-1")["current_driver"]["license_class"] == "C"
-    assert not fleet.license_allows("C", "tractor")
+    assert not fleet.license_allows("C", {"category": "tractor"})
 
 
 # ---------------------------------------------------------------------------
@@ -266,3 +267,62 @@ def test_statuses_picked_by_hand_before_are_put_right_on_start():
     db.init_db()
     assert _v("51C-1")["status"] == "ready"
     assert tr.list_trailers()[0]["status"] == "ready"
+
+
+# ---------------------------------------------------------------------------
+# Xe tải: the classes follow its khối lượng toàn bộ (gross weight) and tải trọng (payload)
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("gross,payload,allowed,refused", [
+    (3400, "1.9 tấn", {"B", "B2", "C1", "C", "FC"}, {"D"}),           # small van: B up to 3,500 kg
+    (4990, "2,4 tấn", {"B2", "C1", "C"}, {"B"}),                       # Kia K250: B2 (payload under 3.5 t), C1
+    (7500, "3.5 tấn", {"C1", "C"}, {"B", "B2"}),                       # C1 up to 7,500 kg; B2 needs under 3.5 t
+    (9500, "5.5 tấn", {"C", "FC", "CE", "E"}, {"C1", "B2", "B"}),      # over 7,500 kg: C only
+    (0, "2 tấn", {"B2", "C"}, {"C1", "B"}),                            # weight not entered: no B / C1
+])
+def test_a_trucks_weight_decides_the_licence(gross, payload, allowed, refused):
+    truck = {"category": "truck", "gross_weight": gross, "payload": payload}
+    for c in allowed:
+        assert fleet.license_allows(c, truck), c
+    for c in refused:
+        assert not fleet.license_allows(c, truck), c
+
+
+@pytest.mark.parametrize("text,kg", [("8 tấn", 8000), ("2,4 tấn", 2400), ("2.4t", 2400), ("7500 kg", 7500),
+                                     ("3.5", 3500), ("7500", 7500), ("", None), ("không rõ", None)])
+def test_payload_is_read_in_kg(text, kg):
+    assert fleet.payload_kg(text) == kg
+
+
+def test_gross_weight_is_saved_in_kg_and_checked():
+    v = fleet.create_vehicle({"plate": "51D-1", "category": "truck", "gross_weight": "7.500"})
+    assert _v("51D-1")["gross_weight"] == 7500
+    fleet.update_vehicle(v, {"gross_weight": ""})
+    assert _v("51D-1")["gross_weight"] == 0
+    for bad in ("7,5", "abc", "50", "200000"):
+        with pytest.raises(fleet.FleetError):
+            fleet.update_vehicle(v, {"gross_weight": bad})
+
+
+def test_giao_xe_names_the_classes_this_truck_needs():
+    heavy = fleet.create_vehicle({"plate": "51D-9", "category": "truck", "gross_weight": 9500, "payload": "5.5 tấn"})
+    light = fleet.create_vehicle({"plate": "51D-2", "category": "truck", "gross_weight": 4990, "payload": "2.4 tấn"})
+    d = fleet.create_driver({"name": "Cường", "license_class": "C1"})
+    with pytest.raises(fleet.FleetError) as e:
+        fleet.assign_vehicle(d, heavy)
+    assert e.value.status == 409 and "cần bằng C/FC" in e.value.message
+    fleet.assign_vehicle(d, light)
+    b2 = fleet.create_driver({"name": "Dũng", "license_class": "B2"})
+    with pytest.raises(fleet.FleetError) as e:
+        fleet.assign_vehicle(b2, fleet.create_vehicle({"plate": "51D-3", "category": "truck", "payload": "4 tấn"}))
+    assert "cần bằng C/FC" in e.value.message and "khối lượng toàn bộ" in e.value.message
+    fleet.assign_vehicle(b2, fleet.create_vehicle({"plate": "51D-4", "category": "truck", "payload": "3 tấn"}))
+
+
+def test_the_api_takes_and_lists_gross_weight():
+    res = client.post("/api/v1/fleet/vehicles", json={"plate": "51D-1", "category": "truck", "gross_weight": "4990"})
+    assert res.status_code == 200 and res.json()["gross_weight"] == 4990
+    d = fleet.create_driver({"name": "An", "license_class": "C1"})
+    fleet.assign_vehicle(d, res.json()["id"])
+    cv = next(x for x in fleet.list_drivers() if x["id"] == d)["current_vehicle"]
+    assert (cv["gross_weight"], cv["category"]) == (4990, "truck")
+    assert client.put(f"/api/v1/fleet/vehicles/{res.json()['id']}", json={"gross_weight": "7,5"}).status_code == 400

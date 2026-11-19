@@ -18,6 +18,7 @@ class VehicleIn(BaseModel):
     vehicle_type: Optional[str] = None
     body_type: Optional[str] = None       # trucks: loại thùng
     payload: Optional[str] = None         # trucks: tải trọng
+    gross_weight: Optional[str | int] = None   # trucks: khối lượng toàn bộ in kg ('' = not entered)
     ownership_expiry: Optional[str] = None   # hạn đăng ký
     registration_expiry: Optional[str] = None
     insurance_expiry: Optional[str] = None

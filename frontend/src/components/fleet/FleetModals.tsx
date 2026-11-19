@@ -132,7 +132,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const isTruck = (vehicle?.category || category) === 'truck';
   const f = isTruck ? { ...t.fleet.vehicleForm, ...t.fleet.truckForm } : t.fleet.vehicleForm;
   const [form, setForm] = useState({
-    plate: '', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', registration_expiry: '',
+    plate: '', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', gross_weight: '', ownership_expiry: '', registration_expiry: '',
     // a new truck has no driver yet: Sẵn sàng (Đang chạy comes with a driver)
     insurance_expiry: '', status: 'ready' as VehicleStatus, note: '',
   });
@@ -165,7 +165,8 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     setPapers(NO_VEHICLE_PAPERS);
     setForm({
       plate: vehicle?.plate || '', trailer_plate: vehicle?.trailer_plate || '', vehicle_type: vehicle?.vehicle_type || '',
-      body_type: vehicle?.body_type || '', payload: vehicle?.payload || '', ownership_expiry: vehicle?.ownership_expiry || '',
+      body_type: vehicle?.body_type || '', payload: vehicle?.payload || '',
+      gross_weight: vehicle?.gross_weight ? String(vehicle.gross_weight) : '', ownership_expiry: vehicle?.ownership_expiry || '',
       registration_expiry: vehicle?.registration_expiry || '', insurance_expiry: vehicle?.insurance_expiry || '',
       status: vehicle?.status || 'ready', note: vehicle?.note || '',
     });
@@ -188,8 +189,8 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     try {
       let id: number;
       // a tractor has no body / payload, a truck no trailer
-      const { body_type, payload, trailer_plate, ...common } = form;
-      const data = isTruck ? { ...common, body_type, payload } : { ...common, trailer_plate };
+      const { body_type, payload, gross_weight, trailer_plate, ...common } = form;
+      const data = isTruck ? { ...common, body_type, payload, gross_weight } : { ...common, trailer_plate };
       if (vehicle) {
         const { status: _ignored, ...rest } = data;
         id = (await updateFleetVehicleApi(vehicle.id, rest)).id;
@@ -227,6 +228,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     ...(isTruck ? [
       { key: 'body_type', label: t.fleet.truckForm.body, value: form.body_type },
       { key: 'payload', label: t.fleet.truckForm.payload, value: form.payload },
+      { key: 'gross_weight', label: t.fleet.truckForm.grossWeight, value: form.gross_weight },
     ] : [{ key: 'trailer_plate', label: f.trailer, value: form.trailer_plate }]),
     { key: 'status', label: f.status, value: t.fleet.vehicleStatus[statusValue] },
     { key: 'ownership_expiry', label: expiryLabel.ownership, value: formatIsoDate(form.ownership_expiry) },
@@ -256,6 +258,9 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
                 list="fleet-free-trailers" title={t.fleet.trailer.formHint} />)}
             {isTruck && box('payload', t.fleet.truckForm.payload,
               <input value={form.payload} onChange={set('payload')} placeholder={t.fleet.truckForm.payloadPh} />)}
+            {isTruck && box('gross_weight', t.fleet.truckForm.grossWeight,
+              <input value={form.gross_weight} onChange={set('gross_weight')} inputMode="numeric"
+                placeholder={t.fleet.truckForm.grossWeightPh} title={t.fleet.truckForm.grossWeightHint} />)}
             {box('status', f.status, (
               <select value={statusValue} onChange={set('status')} disabled={!!vehicle}>
                 {VEHICLE_STATUSES.map((s) => (
@@ -508,7 +513,7 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
 
   // the driver may only move to a truck their licence allows
   const spares = useMemo(() => freeVehicles(vehicles, vehicle?.id)
-    .filter((v) => !vehicle?.current_driver || licenseAllows(vehicle.current_driver.license_class, v.category)), [vehicles, vehicle]);
+    .filter((v) => !vehicle?.current_driver || licenseAllows(vehicle.current_driver.license_class, v)), [vehicles, vehicle]);
   if (!vehicle) return null;
   const driver = vehicle.current_driver;
   const stops = !isRunning(status);

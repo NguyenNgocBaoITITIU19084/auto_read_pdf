@@ -46,10 +46,19 @@ DRIVER_STATUS_LABELS = {"active": "Đang làm", "not_ready": "Không sẵn sàng
 # only these can be picked. Someone on leave or who quit is not driving anyway: never forced.
 DRIVER_LOCK_FREE_STATUSES = ("not_ready", "leave", "left")
 ASSIGNMENT_KINDS = ("primary", "temporary")
-# Licence classes (hạng bằng lái) that may drive each category. A tractor pulling a semi-trailer needs FC (before
-# 2025) or CE (Luật TTATGTĐB 2024). A truck takes a class covering hạng C: C1 / C (new), C1E / CE, and the old FC, E,
-# FD, FE. "D" is left out: the old D covered C but the new one does not. Mirrored in frontend fleetUtils.ts.
-LICENSE_CLASSES_FOR = {"tractor": ("FC", "CE"), "truck": ("C1", "C", "C1E", "CE", "FC", "E", "FD", "FE")}
+# Licence classes (hạng bằng lái) that may drive a truck; see allowed_license_classes. Mirrored in frontend
+# fleetUtils.ts.
+# - A tractor pulling a semi-trailer: FC (before 2025) or CE (Luật TTATGTĐB 2024).
+# - Any truck: C (old and new), CE, and the old FC, E, FD, FE (all cover the old C). "D" is left out: the old D
+#   covered C but the new one does not.
+# - By the truck's khối lượng toàn bộ (gross weight, from its đăng kiểm): up to 7,500 kg also C1 / C1E, up to 3,500 kg
+#   also B (new). By its tải trọng (payload): under 3,500 kg also the old B2.
+# A truck whose gross weight is not entered takes only the classes for any truck.
+TRACTOR_LICENSE_CLASSES = ("FC", "CE")
+ANY_TRUCK_LICENSE_CLASSES = ("C", "CE", "FC", "E", "FD", "FE")
+C1_MAX_KG = 7500
+B_MAX_KG = 3500
+B2_PAYLOAD_UNDER_KG = 3500
 VEHICLE_CATEGORIES = ("tractor", "truck")
 # the app tab listing each category
 CATEGORY_TABS = {"tractor": "fleet", "truck": "trucks"}
@@ -194,6 +203,9 @@ def create_fleet_tables(conn: sqlite3.Connection) -> None:
     for column, default in (("category", "tractor"), ("body_type", ""), ("payload", ""), ("trailer_hold_status", "")):
         if column not in have:
             conn.execute(f"ALTER TABLE fleet_vehicles ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}';")
+    # trucks: khối lượng toàn bộ in kg from the đăng kiểm (0 = not entered); decides which licence classes may drive it
+    if "gross_weight" not in have:
+        conn.execute("ALTER TABLE fleet_vehicles ADD COLUMN gross_weight INTEGER NOT NULL DEFAULT 0;")
     # Hạn đăng ký, and whether the status was forced to not_ready by expired papers (1: it comes back to "ready" once
     # they are renewed; a not_ready picked by hand stays)
     for table in ("fleet_vehicles", "fleet_trailers", "fleet_drivers"):
@@ -301,7 +313,7 @@ def list_vehicles() -> list[dict]:
         c = current.get(v["id"])
         h = pulled.get(v["id"])
         item = {k: v[k] for k in ("id", "plate", "category", "trailer_plate", "vehicle_type", "body_type", "payload",
-                                  "ownership_expiry", "registration_expiry", "status_forced",
+                                  "gross_weight", "ownership_expiry", "registration_expiry", "status_forced",
                                   "insurance_expiry", "status", "note", "photo", *VEHICLE_DOCUMENTS,
                                   "trailer_hold_status", "created_at", "updated_at")}
         item["trailer"] = ({"id": h["trailer_id"], "plate": h["plate"], "status": h["status"], "since": h["started_at"]}
@@ -320,7 +332,8 @@ def list_drivers() -> list[dict]:
     with _conn() as conn:
         drivers = _rows(conn, "SELECT * FROM fleet_drivers WHERE deleted_at IS NULL;")
         current = {r["driver_id"]: r for r in _rows(conn, """
-            SELECT a.driver_id, a.vehicle_id, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo, v.category
+            SELECT a.driver_id, a.vehicle_id, a.started_at, a.reason, v.plate, v.trailer_plate, v.photo, v.category,
+                   v.payload, v.gross_weight
             FROM fleet_assignments a JOIN fleet_vehicles v ON v.id = a.vehicle_id
             WHERE a.ended_at IS NULL;""")}
     out = []
@@ -330,7 +343,8 @@ def list_drivers() -> list[dict]:
                                   "license_expiry", "status", "status_forced", "note", "photo", *DRIVER_DOCUMENTS,
                                   "created_at", "updated_at")}
         item["current_vehicle"] = ({"id": c["vehicle_id"], "plate": c["plate"], "trailer_plate": c["trailer_plate"],
-                                    "photo": c["photo"], "category": c["category"],
+                                    "photo": c["photo"], "category": c["category"], "payload": c["payload"],
+                                    "gross_weight": c["gross_weight"],
                                     "since": c["started_at"], "reason": c["reason"]} if c else None)
         out.append(item)
     out.sort(key=lambda r: (DRIVER_STATUSES.index(r["status"]) if r["status"] in DRIVER_STATUSES else 9,
@@ -433,19 +447,57 @@ def license_classes(value) -> set[str]:
     return {c for c in re.split(r"[^0-9A-Za-z]+", str(value or "").upper()) if c}
 
 
-def license_allows(license_class, category: str) -> bool:
-    """The driver's licence classes include one that may drive this category of truck (an empty one never does)."""
-    return bool(license_classes(license_class) & set(LICENSE_CLASSES_FOR.get(category, ())))
+def payload_kg(value) -> int | None:
+    """A typed tải trọng in kg: "8 tấn" 8000, "2,4 tấn" 2400, "7500 kg" 7500, a bare number under 100 is tonnes.
+    None when no number is in it."""
+    text = str(value or "").lower().replace(",", ".")
+    m = re.search(r"\d+(?:\.\d+)?", text)
+    if not m:
+        return None
+    n = float(m.group())
+    if "kg" in text:
+        return int(round(n))
+    return int(round(n * 1000)) if ("t" in text or n < 100) else int(round(n))
+
+
+def allowed_license_classes(vehicle: dict) -> tuple[str, ...]:
+    """The licence classes that may drive this tractor / truck (see TRACTOR_LICENSE_CLASSES and the rules above)."""
+    if (vehicle.get("category") or "tractor") == "tractor":
+        return TRACTOR_LICENSE_CLASSES
+    gross = int(vehicle.get("gross_weight") or 0)
+    extra = []
+    if 0 < gross <= B_MAX_KG:
+        extra.append("B")
+    load = payload_kg(vehicle.get("payload"))
+    if load is not None and 0 < load < B2_PAYLOAD_UNDER_KG:
+        extra.append("B2")
+    if 0 < gross <= C1_MAX_KG:
+        extra += ["C1", "C1E"]
+    return (*extra, *ANY_TRUCK_LICENSE_CLASSES)
+
+
+def license_needed(vehicle: dict) -> str:
+    """The classes to name in a message: "FC/CE", "B/B2/C1/C/FC" ... (the higher ones left out)."""
+    shown = ("FC", "CE") if (vehicle.get("category") or "tractor") == "tractor" else ("B", "B2", "C1", "C", "FC")
+    return "/".join(c for c in shown if c in allowed_license_classes(vehicle))
+
+
+def license_allows(license_class, vehicle: dict) -> bool:
+    """The driver's licence classes include one that may drive this truck (an empty one never does)."""
+    return bool(license_classes(license_class) & set(allowed_license_classes(vehicle)))
 
 
 def _check_license(driver: dict, vehicle: dict) -> None:
     """409 when the driver's licence may not drive the truck (an expired one is refused by the status check)."""
-    if license_allows(driver.get("license_class"), vehicle.get("category") or "tractor"):
+    if license_allows(driver.get("license_class"), vehicle):
         return
-    need = "/".join(LICENSE_CLASSES_FOR[vehicle.get("category") or "tractor"])
-    kind = "đầu kéo" if (vehicle.get("category") or "tractor") == "tractor" else "xe tải"
+    is_truck = vehicle.get("category") == "truck"
+    kind = "xe tải" if is_truck else "đầu kéo"
     have = f"bằng {driver['license_class']}" if (driver.get("license_class") or "").strip() else "chưa nhập hạng bằng"
-    raise FleetError(f"{driver['name']} ({have}) không được lái {kind} {vehicle['plate']}: cần bằng {need}", 409)
+    unknown = (" (xe chưa nhập khối lượng toàn bộ: nhập theo đăng kiểm để xét bằng B / C1)"
+               if is_truck and not int(vehicle.get("gross_weight") or 0) else "")
+    raise FleetError(f"{driver['name']} ({have}) không được lái {kind} {vehicle['plate']}: cần bằng "
+                     f"{license_needed(vehicle)}{unknown}", 409)
 
 
 def _sync_running(conn, vehicle_id: int | None) -> None:
@@ -577,7 +629,7 @@ def set_vehicle_status(vehicle_id: int, status: str, reason: str = "", move_to_v
 # Trucks and drivers: create / edit / delete
 # ---------------------------------------------------------------------------
 # editable after creation (the category is not: see create_vehicle)
-_VEHICLE_FIELDS = ("plate", "trailer_plate", "vehicle_type", "body_type", "payload", "ownership_expiry",
+_VEHICLE_FIELDS = ("plate", "trailer_plate", "vehicle_type", "body_type", "payload", "gross_weight", "ownership_expiry",
                    "registration_expiry", "insurance_expiry", "status", "note")
 _DRIVER_FIELDS = ("name", "phone", "id_number", "license_no", "license_class", "license_expiry", "status", "note")
 
@@ -597,6 +649,8 @@ def _clean_vehicle(data: dict, partial: bool) -> dict:
         out["body_type"] = _text(data.get("body_type"), 60)
     if "payload" in data or not partial:
         out["payload"] = _text(data.get("payload"), 30)
+    if "gross_weight" in data or not partial:
+        out["gross_weight"] = _gross_weight(data.get("gross_weight"))
     if "ownership_expiry" in data or not partial:
         out["ownership_expiry"] = _date(data.get("ownership_expiry"), "Hạn đăng ký")
     if "registration_expiry" in data or not partial:
@@ -611,6 +665,17 @@ def _clean_vehicle(data: dict, partial: bool) -> dict:
             raise FleetError(f"Trạng thái xe không hợp lệ: {status}")
         out["status"] = status
     return out
+
+
+def _gross_weight(value) -> int:
+    """Khối lượng toàn bộ in kg ("7.500", "7500", 7500); '' / None is 0 (not entered). 400 for anything else."""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return 0
+    digits = re.sub(r"[.\s]", "", text)
+    if not digits.isdigit() or not 500 <= int(digits) <= 100000:
+        raise FleetError(f"Khối lượng toàn bộ không hợp lệ: {text} (nhập số kg theo đăng kiểm, VD 7500)")
+    return int(digits)
 
 
 _IN_TRASH = "đang nằm trong thùng rác: hãy khôi phục xe đó hoặc xóa hẳn"
@@ -648,11 +713,11 @@ def create_vehicle(data: dict) -> int:
     with _conn() as conn:
         _check_vehicle_unique(conn, fields, None)
         cur = conn.execute(
-            "INSERT INTO fleet_vehicles (plate, plate_key, category, vehicle_type, body_type, payload, ownership_expiry, "
-            "registration_expiry, insurance_expiry, status, status_forced, note, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "INSERT INTO fleet_vehicles (plate, plate_key, category, vehicle_type, body_type, payload, gross_weight, "
+            "ownership_expiry, registration_expiry, insurance_expiry, status, status_forced, note, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             (fields["plate"], plate_key(fields["plate"]), category,
-             fields["vehicle_type"], fields["body_type"], fields["payload"], fields["ownership_expiry"],
+             fields["vehicle_type"], fields["body_type"], fields["payload"], fields["gross_weight"], fields["ownership_expiry"],
              fields["registration_expiry"], fields["insurance_expiry"], fields["status"], forced, fields["note"],
              stamp, stamp))
         vehicle_id = cur.lastrowid

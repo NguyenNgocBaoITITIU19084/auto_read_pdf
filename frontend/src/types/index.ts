@@ -734,6 +734,8 @@ export interface FleetVehicle {
   /** trucks: loại thùng (e.g. "Thùng kín") and tải trọng (free text, e.g. "8 tấn") */
   body_type: string;
   payload: string;
+  /** trucks: khối lượng toàn bộ in kg from the đăng kiểm (0 = not entered); decides which licence classes may drive it */
+  gross_weight: number;
   /** 'YYYY-MM-DD' or '' (đăng ký, đăng kiểm, bảo hiểm) */
   ownership_expiry: string;
   registration_expiry: string;
@@ -787,6 +789,8 @@ export interface FleetDriver {
   id_back: string;
   current_vehicle: {
     id: number; plate: string; trailer_plate: string; photo: string; category: VehicleCategory; since: string; reason: string;
+    /** trucks: what the licence rules look at */
+    payload?: string; gross_weight?: number;
   } | null;
 }
 

@@ -40,7 +40,7 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
   const shown = useMemo(() => {
     const q = norm(query);
     // working drivers on no truck first, then working ones on another truck, then those not at work; by name
-    const rank = (d: FleetDriver) => (d.status !== 'active' || !licenseAllows(d.license_class, vehicle?.category) ? 2
+    const rank = (d: FleetDriver) => (d.status !== 'active' || (!!vehicle && !licenseAllows(d.license_class, vehicle)) ? 2
       : d.current_vehicle ? 1 : 0);
     return drivers
       .filter((d) => d.status !== 'left')
@@ -85,7 +85,7 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
   const card = (d: FleetDriver) => {
     const on = String(d.id) === driverId;
     const driving = d.current_vehicle;
-    const wrongLicence = !licenseAllows(d.license_class, vehicle.category);
+    const wrongLicence = !licenseAllows(d.license_class, vehicle);
     // on leave / not ready, or a licence that may not drive this truck: cannot be given it
     const off = d.status !== 'active' || wrongLicence;
     return (
@@ -104,7 +104,7 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
             {driving && tag(tf(m.driving, { plate: driving.plate }), 'amber')}
             {!driving && !off && tag(m.noTruck, 'emerald')}
             {d.status !== 'active' && tag(t.fleet.driverStatus[d.status], 'rose')}
-            {d.status === 'active' && wrongLicence && tag(tf(t.fleet.licence.needs, { classes: licenseNeeded(vehicle.category) }), 'rose')}
+            {d.status === 'active' && wrongLicence && tag(tf(t.fleet.licence.needs, { classes: licenseNeeded(vehicle) }), 'rose')}
           </span>
         </span>
         <span className={`absolute top-2.5 right-2.5 shrink-0 w-5 h-5 rounded-full border flex items-center justify-center ${on

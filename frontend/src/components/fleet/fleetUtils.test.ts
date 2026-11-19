@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, fold, formatIsoDate, liveDaysLeft, matches, todayVnIso } from './fleetUtils';
+import { daysUntil, fold, formatIsoDate, liveDaysLeft, matches, todayVnIso, licenseAllows, licenseNeeded, payloadKg } from './fleetUtils';
 
 describe('fleetUtils', () => {
   it('counts days in Vietnam time', () => {
@@ -26,4 +26,29 @@ describe('fleetUtils', () => {
     expect(matches('51c9', '51C-123.45')).toBe(false);
     expect(matches('51c-123', '51C-123.45')).toBe(true);
   });
+});
+
+describe('licence classes for a truck follow its weight', () => {
+  const truck = (gross_weight: number, payload: string) => ({ category: 'truck' as const, gross_weight, payload });
+  it.each([
+    [3400, '1.9 tấn', ['B', 'B2', 'C1', 'C', 'FC'], ['D']],
+    [4990, '2,4 tấn', ['B2', 'C1', 'C'], ['B']],
+    [7500, '3.5 tấn', ['C1', 'C'], ['B', 'B2']],
+    [9500, '5.5 tấn', ['C', 'FC', 'CE', 'E'], ['C1', 'B2', 'B']],
+    [0, '2 tấn', ['B2', 'C'], ['C1', 'B']],
+  ])('%i kg, %s', (gross, payload, allowed, refused) => {
+    for (const c of allowed) expect(licenseAllows(c, truck(gross, payload))).toBe(true);
+    for (const c of refused) expect(licenseAllows(c, truck(gross, payload))).toBe(false);
+  });
+  it('a tractor needs FC / CE whatever it weighs', () => {
+    expect(licenseAllows('C', { category: 'tractor', gross_weight: 3000 })).toBe(false);
+    expect(licenseAllows('b2, fc', { category: 'tractor' })).toBe(true);
+    expect(licenseNeeded({ category: 'tractor' })).toBe('FC/CE');
+  });
+  it('names the classes to ask for', () => {
+    expect(licenseNeeded(truck(4990, '2,4 tấn'))).toBe('B2/C1/C/FC');
+    expect(licenseNeeded(truck(9500, '5.5 tấn'))).toBe('C/FC');
+  });
+  it.each([['8 tấn', 8000], ['2,4 tấn', 2400], ['7500 kg', 7500], ['3.5', 3500], ['', null], ['không rõ', null]])(
+    'reads tải trọng %s', (text, kg) => expect(payloadKg(text as string)).toBe(kg));
 });

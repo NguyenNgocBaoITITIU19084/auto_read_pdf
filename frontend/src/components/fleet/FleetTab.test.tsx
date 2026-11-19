@@ -85,7 +85,7 @@ import { FleetTab } from './FleetTab';
 const f = translations.vi.fleet;
 
 const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
-  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
+  id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', gross_weight: 0, ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
   created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', trailer: null, trailer_hold_status: '', current_driver: null, ...extra,
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
@@ -387,6 +387,21 @@ describe('FleetTab: hạng bằng lái and Sẵn sàng / Đang chạy', () => {
     expect(screen.getByRole('radio', { name: '51C-1' })).toBeDisabled();
     expect(screen.getByText(tf(f.licence.needs, { classes: 'FC/CE' }))).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: '51D-1' })).toBeEnabled();         // hạng C drives a truck
+  });
+
+  it('a C1 driver gets only trucks up to 7,500 kg', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([
+      vehicle(1, '51D-1', { category: 'truck', gross_weight: 9500, payload: '5.5 tấn' }),
+      vehicle(2, '51D-2', { category: 'truck', gross_weight: 4990, payload: '2.4 tấn' }),
+      vehicle(3, '51D-3', { category: 'truck', payload: '4 tấn' }),          // weight not entered: C only
+    ]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'Cường', { license_class: 'C1' })]);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.click(within(await screen.findByTestId('driver-1')).getByText(f.actions.assign));
+    expect(screen.getByRole('radio', { name: '51D-1' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '51D-3' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '51D-2' })).toBeEnabled();
+    expect(screen.getAllByText(tf(f.licence.needs, { classes: 'C/FC' }))).toHaveLength(2);
   });
 
   it('flags a driver already on a truck their licence does not allow; hovering shows why and who', async () => {

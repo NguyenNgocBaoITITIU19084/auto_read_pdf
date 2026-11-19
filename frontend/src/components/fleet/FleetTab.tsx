@@ -763,7 +763,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       filter: { column: T.type, options: () => valueCounts(shownVehicles, vehicleValue.plate), value: vehicleCols.plate || [],
         onChange: setCol(setVehicleCols, 'plate'), format: (v) => v || t.common.columnFilter.empty },
       render: (v) => {
-        const sub = (v.category === 'truck' ? [v.vehicle_type, v.body_type, v.payload]
+        const sub = (v.category === 'truck' ? [v.vehicle_type, v.body_type, v.payload,
+          v.gross_weight ? tf(t.fleet.truckForm.grossWeightShort, { kg: v.gross_weight.toLocaleString('vi-VN') }) : '']
           : [v.vehicle_type, v.trailer_plate ? tf(L.trailer, { plate: v.trailer_plate }) : '']).filter(Boolean).join(' · ');
         return (
           <div className="flex items-center gap-3">
@@ -808,8 +809,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
                 <div className="flex items-center gap-1.5">
                   <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.name}</span>
                   {/* a server too old to send the class: nothing to judge, no warning */}
-                  {c.license_class !== undefined && !licenseAllows(c.license_class, v.category)
-                    && <LicenceWarn driver={c} plate={v.plate} category={v.category} />}
+                  {c.license_class !== undefined && !licenseAllows(c.license_class, v)
+                    && <LicenceWarn driver={c} plate={v.plate} vehicle={v} />}
                 </div>
                 {c.phone && <div className={MUTED}>{c.phone}</div>}
               </div>
@@ -870,7 +871,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.plate}</span>
                 {c.category === 'truck' && <Chip tone={TRUCK_CHIP}>{f.truckChip}</Chip>}
-                {!licenseAllows(d.license_class, c.category) && <LicenceWarn driver={d} plate={c.plate} category={c.category} />}
+                {!licenseAllows(d.license_class, c) && <LicenceWarn driver={d} plate={c.plate} vehicle={c} />}
               </div>
               <div className={MUTED}>{c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
             </div>
