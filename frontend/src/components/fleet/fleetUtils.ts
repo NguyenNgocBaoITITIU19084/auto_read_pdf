@@ -66,6 +66,9 @@ export function liveDaysLeft(doc: { expiry: string; days_left: number }, today: 
 /** Statuses a truck / trailer runs in ("Sẵn sàng", "Đang chạy"); the others stop it. */
 export const RUNNING_STATUSES: readonly VehicleStatus[] = ['ready', 'active'];
 export const isRunning = (status: VehicleStatus) => RUNNING_STATUSES.includes(status);
+/** A tractor pulling a trailer that cannot run: held in not_ready, it cannot be set running until the trailer comes off
+ *  or runs again. */
+export const heldByTrailer = (v: Pick<FleetVehicle, 'trailer'>): boolean => !!v.trailer && !isRunning(v.trailer.status);
 /** While a paper is expired only these can be picked (the backend refuses the rest) */
 export const LOCK_FREE_STATUSES: readonly VehicleStatus[] = ['not_ready', 'inactive'];
 export const PAPER_EXPIRIES = ['ownership_expiry', 'registration_expiry', 'insurance_expiry'] as const;
@@ -80,6 +83,20 @@ export function expiredPapers(row: Record<PaperExpiry, string>, today: string = 
 }
 
 /** While a driver's licence is expired only these can be picked (the backend refuses the rest) */
+/** Licence classes that may drive each category (same as LICENSE_CLASSES_FOR in backend/app/core/fleet.py): a
+ *  tractor pulling a semi-trailer needs FC (old) or CE (Luật 2024); a truck a class covering hạng C. */
+export const LICENSE_CLASSES_FOR: Record<'tractor' | 'truck', readonly string[]> = {
+  tractor: ['FC', 'CE'],
+  truck: ['C1', 'C', 'C1E', 'CE', 'FC', 'E', 'FD', 'FE'],
+};
+/** The driver's "Hạng bằng" ("B2, FC", "fc" ...) includes a class that may drive this category (empty: never). */
+export function licenseAllows(licenseClass: string | null | undefined, category: 'tractor' | 'truck' | undefined): boolean {
+  const have = String(licenseClass || '').toUpperCase().split(/[^0-9A-Z]+/).filter(Boolean);
+  return have.some((c) => LICENSE_CLASSES_FOR[category || 'tractor'].includes(c));
+}
+/** "FC/CE": the classes a category needs, for messages. */
+export const licenseNeeded = (category: 'tractor' | 'truck' | undefined) => LICENSE_CLASSES_FOR[category || 'tractor'].join('/');
+
 export const DRIVER_LOCK_FREE_STATUSES: readonly DriverStatus[] = ['not_ready', 'leave', 'left'];
 /** The licence date is before today (its last day still counts, as on the server). */
 export function licenseExpired(row: { license_expiry: string }, today: string = todayVnIso()): boolean {

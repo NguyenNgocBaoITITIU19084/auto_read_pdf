@@ -54,7 +54,8 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
   const D = t.fleet.detail;
   const empty = {
     plate: '', trailer_type: DEFAULT_TRAILER_TYPE, chassis_no: '', payload: '', year: '', ownership_expiry: '', registration_expiry: '',
-    insurance_expiry: '', status: 'active' as TrailerStatus, note: '',
+    // Sẵn sàng / Đang dùng follow the hitch (the server sets which); a new one starts as Sẵn sàng
+    insurance_expiry: '', status: 'ready' as TrailerStatus, note: '',
   };
   const [form, setForm] = useState(empty);
   const [vehicleId, setVehicleId] = useState('');
@@ -86,8 +87,9 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
   const locked = expired.length > 0;
   const status: TrailerStatus = locked && !LOCK_FREE_STATUSES.includes(form.status)
     ? (trailer && LOCK_FREE_STATUSES.includes(trailer.status) ? trailer.status : 'not_ready') : form.status;
-  // out of service / not ready: off its tractor, and none can be picked
-  const inactive = status === 'inactive' || status === 'not_ready';
+  // a trailer that cannot run (not ready, broken, maintenance, out of service) is never hitched anew; one already on a
+  // tractor stays on it (the tractor is held in "Không sẵn sàng" until it comes off or runs again)
+  const inactive = !isRunning(status);
   const current = trailer?.vehicle || null;
   const picked = vehicles.find((v) => String(v.id) === vehicleId) || null;
   // a tractor pulling another trailer: that one comes off it
@@ -102,15 +104,15 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
     setSaving(true);
     setError('');
     try {
-      const target = vehicleId && !inactive ? Number(vehicleId) : null;
+      const target = vehicleId ? Number(vehicleId) : null;
       let id: number;
       const data = { ...form, status };
       if (trailer) {
         id = (await updateFleetTrailerApi(trailer.id, data)).id;
-        // going out of service unhitches it on the server already
+        // a trailer that cannot run keeps its tractor, whatever the picker shows
         if (!inactive && target !== (current?.id ?? null)) await hitchFleetTrailerApi(id, target);
       } else {
-        id = (await createFleetTrailerApi({ ...data, vehicle_id: target })).id;
+        id = (await createFleetTrailerApi({ ...data, vehicle_id: inactive ? null : target })).id;
       }
       const errors = [await savePhoto(photo, id, uploadFleetTrailerPhotoApi, deleteFleetTrailerPhotoApi, t.fleet.toast.error,
         t.fleet.photo.outdatedBackend)];
@@ -219,7 +221,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
             </div>
             <div className="space-y-1">
               {box('vehicle', f.vehicle, (
-                <select value={inactive ? '' : vehicleId} onChange={(e) => setVehicleId(e.target.value)} disabled={inactive}>
+                <select value={inactive ? String(current?.id ?? '') : vehicleId} onChange={(e) => setVehicleId(e.target.value)} disabled={inactive}>
                   <option value="">{f.noVehicle}</option>
                   {tractors.map((v) => (
                     <option key={v.id} value={v.id}>
@@ -230,7 +232,7 @@ export const TrailerFormModal: React.FC<TrailerFormProps> = ({ isOpen, trailer, 
                 </select>
               ))}
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                {inactive ? f.inactiveHint : replacing ? tf(t.fleet.trailer.hitchModal.replaceWarn, { plate: replacing })
+                {inactive ? (current ? tf(f.heldHint, { plate: current.plate }) : f.inactiveHint) : replacing ? tf(t.fleet.trailer.hitchModal.replaceWarn, { plate: replacing })
                   : trailer ? f.changeHint : ''}
               </p>
             </div>

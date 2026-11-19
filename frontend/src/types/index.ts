@@ -753,8 +753,15 @@ export interface FleetVehicle {
   ownership_back: string;
   created_at: string;
   updated_at: string;
+  /** tractors: the trailer it pulls now (null = none) */
+  trailer: { id: number; plate: string; status: TrailerStatus; since: string } | null;
+  /** its own status while a hitched trailer that cannot run holds it in not_ready ('' = not held); it gets it back
+   *  when the trailer comes off or runs again */
+  trailer_hold_status: VehicleStatus | '';
   /** who drives it now (a driver drives at most one truck, a truck has at most one driver) */
-  current_driver: { id: number; name: string; phone: string; photo: string; since: string; reason: string } | null;
+  current_driver: { id: number; name: string; phone: string; photo: string; since: string; reason: string;
+    /** their bằng lái (hạng, số, hạn 'YYYY-MM-DD'), to flag a driver whose licence may not drive this truck */
+    license_class: string; license_no?: string; license_expiry?: string } | null;
 }
 
 export interface FleetDriver {
@@ -887,6 +894,14 @@ export interface FleetHitch {
   end_reason: string;
 }
 export interface FleetHitchPage { items: FleetHitch[]; total: number }
+/** A tractor after "Ghép rơ moóc" / "Tháo rơ moóc". */
+export interface VehicleTrailerResult extends FleetVehicle {
+  /** the trailer taken off the tractor ('' = none) */
+  replaced: string;
+  /** the tractor the trailer came off ('' = none) */
+  from_plate: string;
+}
+
 export interface HitchResult extends FleetTrailer {
   /** the trailer taken off the tractor ('' = none) */
   replaced: string;

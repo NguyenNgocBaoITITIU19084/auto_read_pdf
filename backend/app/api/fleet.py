@@ -121,6 +121,19 @@ def set_vehicle_status(vehicle_id: int, payload: VehicleStatusIn):
     return _run(fleet.set_vehicle_status, vehicle_id, payload.status, payload.reason, payload.move_to_vehicle_id)
 
 
+class VehicleTrailerIn(BaseModel):
+    trailer_id: Optional[int] = None      # null: Tháo rơ moóc
+    reason: str = ""
+
+
+@router.post("/vehicles/{vehicle_id}/trailer")
+def set_vehicle_trailer(vehicle_id: int, payload: VehicleTrailerIn):
+    """Ghép rơ moóc (a trailer that can run: 409 otherwise) or Tháo rơ moóc (trailer_id null) from the tractor.
+    Answers the tractor plus {"replaced", "from_plate"}."""
+    moved = _run(trailers.hitch_vehicle, vehicle_id, payload.trailer_id, payload.reason)
+    return {**_vehicle(vehicle_id), **moved}
+
+
 # --- drivers --------------------------------------------------------------
 @router.get("/drivers")
 def list_drivers():

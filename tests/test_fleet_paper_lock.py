@@ -54,7 +54,7 @@ def test_a_new_one_with_an_expired_paper_starts_not_ready():
     fleet.create_vehicle({"plate": "51C-1", "ownership_expiry": PAST})
     assert (_v("51C-1")["status"], _v("51C-1")["status_forced"]) == ("not_ready", 1)
     fleet.create_vehicle({"plate": "51C-2", "registration_expiry": TODAY.isoformat()})   # still valid on its last day
-    assert _v("51C-2")["status"] == "active"
+    assert _v("51C-2")["status"] == "ready"                 # nobody drives it yet: Sẵn sàng
     fleet.create_vehicle({"plate": "51C-3", "insurance_expiry": PAST, "status": "inactive"})
     assert _v("51C-3")["status"] == "inactive"              # out of service is never forced
     tr.create_trailer({"plate": "51R-1", "insurance_expiry": PAST})
@@ -106,18 +106,22 @@ def test_a_not_ready_picked_by_hand_stays():
     assert _v("51C-1")["status"] == "not_ready"
 
 
-def test_a_forced_trailer_comes_off_its_tractor_and_back_to_ready_when_renewed():
-    tractor = fleet.create_vehicle({"plate": "51C-1"})
+def test_a_forced_trailer_holds_its_tractor_and_both_come_back_when_renewed():
+    tractor = fleet.create_vehicle({"plate": "51C-1", "status": "active"})
+    other = fleet.create_vehicle({"plate": "51C-2"})
     t = tr.create_trailer({"plate": "51R-1", "registration_expiry": SOON, "vehicle_id": tractor})
     assert _t("51R-1")["vehicle"]["id"] == tractor
     assert tr.enforce_trailer_papers(t, TODAY + timedelta(days=10)) == "not_ready"
-    assert _t("51R-1")["vehicle"] is None and _t("51R-1")["status"] == "not_ready"
+    assert _t("51R-1")["vehicle"]["id"] == tractor and _t("51R-1")["status"] == "not_ready"
+    assert (_v("51C-1")["status"], _v("51C-1")["trailer_hold_status"]) == ("not_ready", "ready")   # nobody drives it
     with pytest.raises(fleet.FleetError) as e:
-        tr.hitch(t, tractor)
+        tr.hitch(t, other)
     assert "không sẵn sàng" in e.value.message
-    # the form sends the same status with the new date: renewed, it is ready again
+    # the form sends the same status with the new date: renewed, it runs again (still hitched: Đang dùng), and so does
+    # its tractor
     tr.update_trailer(t, {"status": "not_ready", "registration_expiry": LATER})
-    assert (_t("51R-1")["status"], _t("51R-1")["status_forced"]) == ("ready", 0)
+    assert (_t("51R-1")["status"], _t("51R-1")["status_forced"]) == ("active", 0)
+    assert (_v("51C-1")["status"], _v("51C-1")["trailer_hold_status"]) == ("ready", "")
 
 
 def test_the_form_saving_the_same_status_keeps_a_forced_trailer_locked():

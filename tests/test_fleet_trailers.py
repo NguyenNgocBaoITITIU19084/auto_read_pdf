@@ -97,12 +97,14 @@ def test_renaming_or_stopping_a_trailer_shows_on_its_tractor():
     t = _trailers()["51R-1"]["id"]
     tr.update_trailer(t, {"plate": "51R-111"})
     assert _trucks()["51C-1"]["trailer_plate"] == "51R-111"
-    tr.update_trailer(t, {"status": "broken"})                          # broken: still on it
+    tr.update_trailer(t, {"status": "broken"})                          # broken: still on it, the tractor held
     assert _trucks()["51C-1"]["trailer_plate"] == "51R-111"
-    tr.update_trailer(t, {"status": "inactive"})                        # out of service: off
-    assert _trucks()["51C-1"]["trailer_plate"] == ""
-    with pytest.raises(fleet.FleetError):
+    tr.update_trailer(t, {"status": "inactive"})                        # out of service: still on it
+    assert (_trucks()["51C-1"]["trailer_plate"], _trucks()["51C-1"]["status"]) == ("51R-111", "not_ready")
+    tr.hitch(t, None)
+    with pytest.raises(fleet.FleetError) as e:                          # only a trailer that can run is hitched
         tr.hitch(t, a)
+    assert e.value.status == 409
 
 
 def test_trash_unhitches_both_ways_and_restores_free():

@@ -35,7 +35,7 @@ import { DriverFormModal, VehicleFormModal } from './FleetModals';
 const p = translations.vi.fleet.photo;
 const truck: FleetVehicle = {
   id: 9, plate: '51C-1', category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active',
-  note: '', photo: '', created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', current_driver: null,
+  note: '', photo: '', created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', trailer: null, trailer_hold_status: '', current_driver: null,
 };
 
 const pickAndSave = async () => {

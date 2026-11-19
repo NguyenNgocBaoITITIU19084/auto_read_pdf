@@ -4,7 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { tf } from '../../services/i18nFormat';
 import type { FleetVehicle } from '../../types';
 import { FleetAvatar } from './FleetPhoto';
-import { isRunning } from './fleetUtils';
+import { isRunning, licenseAllows, licenseNeeded } from './fleetUtils';
 
 type Filter = 'all' | 'tractor' | 'truck';
 
@@ -17,6 +17,8 @@ interface Props {
   noneLabel?: string;
   /** the driver being moved: the truck they drive now is not marked as someone else's */
   driverId?: number;
+  /** the driver's hạng bằng lái: trucks it may not drive cannot be picked (undefined: not checked) */
+  licenseClass?: string;
   label: string;
 }
 
@@ -24,7 +26,7 @@ const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,
   .replace(/[^a-z0-9]/g, '');
 
 /** Pick one vehicle from cards (photo, plate, trailer / truck body, who has it), filtered by kind and searchable. */
-export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, noneLabel, driverId, label }) => {
+export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, noneLabel, driverId, licenseClass, label }) => {
   const { t } = useApp();
   const m = t.fleet.moveModal;
   const [filter, setFilter] = useState<Filter>('all');
@@ -38,7 +40,10 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
 
   // cannot be given to this driver: someone else drives it now (take it back first), or it cannot run
   // (Không sẵn sàng / Hư hỏng / Bảo dưỡng / Ngưng hoạt động)
-  const locked = (v: FleetVehicle) => (!!v.current_driver && v.current_driver.id !== driverId) || !isRunning(v.status);
+  // or the driver's licence may not drive it (a tractor needs FC / CE)
+  const wrongLicence = (v: FleetVehicle) => licenseClass !== undefined && !licenseAllows(licenseClass, v.category);
+  const locked = (v: FleetVehicle) => (!!v.current_driver && v.current_driver.id !== driverId) || !isRunning(v.status)
+    || wrongLicence(v);
   const rank = (v: FleetVehicle) => (locked(v) ? 1 : 0);
 
   const shown = useMemo(() => {
@@ -48,7 +53,7 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
       .filter((v) => !q || [v.plate, v.trailer_plate, v.vehicle_type, v.body_type, v.current_driver?.name || ''].some((s) => norm(s).includes(q)))
       // free trucks first, then the ones that cannot be picked; by plate within each
       .sort((a, b) => rank(a) - rank(b) || a.plate.localeCompare(b.plate));
-  }, [vehicles, filter, query, driverId]);
+  }, [vehicles, filter, query, driverId, licenseClass]);
 
   const chip = (key: Filter, text: string) => (
     <button key={key} type="button" onClick={() => setFilter(key)} aria-pressed={filter === key}
@@ -106,6 +111,7 @@ export const VehiclePicker: React.FC<Props> = ({ vehicles, value, onChange, none
             {driving && tag(tf(m.drivenBy, { name: driving.name }), 'slate')}
             {!driving && isRunning(v.status) && tag(m.free, 'emerald')}
             {!isRunning(v.status) && tag(t.fleet.vehicleStatus[v.status], 'rose')}
+            {wrongLicence(v) && tag(tf(t.fleet.licence.needs, { classes: licenseNeeded(v.category) }), 'rose')}
           </span>
         </span>
       </>

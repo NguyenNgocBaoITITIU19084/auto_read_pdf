@@ -36,6 +36,8 @@ const api = {
   updateFleetVehicleApi: vi.fn(),
   unassignDriverApi: vi.fn(),
   revokeDriverVehicleApi: vi.fn(),
+  getFleetTrailersApi: vi.fn(),
+  setFleetVehicleTrailerApi: vi.fn(),
 };
 vi.mock('../../services/api', () => ({
   getFleetVehiclesApi: (...a: unknown[]) => api.getFleetVehiclesApi(...a),
@@ -70,8 +72,8 @@ vi.mock('../../services/api', () => ({
   uploadFleetDriverPhotoApi: vi.fn(),
   deleteFleetDriverPhotoApi: vi.fn(),
   fleetPhotoUrl: (name: string) => (name ? `http://api/fleet/photos/${name}` : ''),
-  getFleetTrailersApi: async () => [{ id: 7, plate: '51R-1', trailer_type: "Sàn 40'", payload: '32 tấn', photo: '',
-    vehicle: { id: 1, plate: '51C-1', since: '2026-11-15 08:00:00' } }],
+  getFleetTrailersApi: (...a: unknown[]) => api.getFleetTrailersApi(...a),
+  setFleetVehicleTrailerApi: (...a: unknown[]) => api.setFleetVehicleTrailerApi(...a),
   uploadFleetDriverDocumentApi: (...a: unknown[]) => api.uploadFleetDriverDocumentApi(...a),
   uploadFleetVehicleDocumentApi: (...a: unknown[]) => api.uploadFleetVehicleDocumentApi(...a),
   deleteFleetVehicleDocumentApi: vi.fn(),
@@ -84,10 +86,10 @@ const f = translations.vi.fleet;
 
 const vehicle = (id: number, plate: string, extra: Partial<FleetVehicle> = {}): FleetVehicle => ({
   id, plate, category: 'tractor', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', status_forced: 0, registration_expiry: '', insurance_expiry: '', status: 'active', note: '', photo: '',
-  created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', current_driver: null, ...extra,
+  created_at: '', updated_at: '', registration_front: '', registration_back: '', insurance_front: '', insurance_back: '', ownership_front: '', ownership_back: '', trailer: null, trailer_hold_status: '', current_driver: null, ...extra,
 });
 const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): FleetDriver => ({
-  id, name, phone: '', id_number: '', license_no: '', license_class: '', license_expiry: '', status: 'active', status_forced: 0, note: '', photo: '',
+  id, name, phone: '', id_number: '', license_no: '', license_class: 'FC', license_expiry: '', status: 'active', status_forced: 0, note: '', photo: '',
   license_front: '', license_back: '', id_front: '', id_back: '',
   created_at: '', updated_at: '', current_vehicle: null, ...extra,
 });
@@ -95,7 +97,7 @@ const driver = (id: number, name: string, extra: Partial<FleetDriver> = {}): Fle
 const driving = (id: number, plate: string): NonNullable<FleetDriver['current_vehicle']> =>
   ({ id, plate, trailer_plate: '', photo: '', category: 'tractor', since: '', reason: '' });
 
-const an = { id: 1, name: 'Nguyễn Văn An', phone: '0909', photo: '', since: '', reason: '' };
+const an = { id: 1, name: 'Nguyễn Văn An', phone: '0909', photo: '', since: '', reason: '', license_class: 'FC' };
 
 beforeEach(() => {
   Object.values(api).forEach((fn) => fn.mockReset());
@@ -103,6 +105,8 @@ beforeEach(() => {
   confirmMock.mockReset();
   localStorage.clear();
   api.getFleetHistoryApi.mockResolvedValue([]);
+  api.getFleetTrailersApi.mockResolvedValue([{ id: 7, plate: '51R-1', trailer_type: "Sàn 40'", payload: '32 tấn', photo: '',
+    status: 'active', vehicle: { id: 1, plate: '51C-1', since: '2026-11-15 08:00:00' } }]);
   api.getFleetHistoryPageApi.mockResolvedValue({ items: [], total: 0 });
   api.getFleetTrashCountApi.mockResolvedValue({ vehicle: 0, driver: 0 });
   api.trashList.mockResolvedValue({ items: [], total: 0, keep_days: 30 });
@@ -199,7 +203,7 @@ describe('FleetTab', () => {
 
   it('a truck someone else drives cannot be picked', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([
-      vehicle(1, '51C-1', { current_driver: { id: 2, name: 'Bình', phone: '', photo: '', since: '', reason: '' } }),
+      vehicle(1, '51C-1', { current_driver: { id: 2, name: 'Bình', phone: '', photo: '', since: '', reason: '', license_class: 'FC' } }),
       vehicle(2, '51C-2'),
     ]);
     api.getFleetDriversApi.mockResolvedValue([driver(1, an.name)]);
@@ -364,12 +368,126 @@ describe('FleetTab quick actions', () => {
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
     const menu = screen.getByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(
-      [f.detail.open, f.quick.report, f.actions.assign, ...VEHICLE_ORDER.map((st) => f.vehicleStatus[st]), f.menu.edit, f.menu.history, f.menu.delete]);
+      [f.detail.open, f.quick.report, f.actions.assign, f.actions.hitchTrailer, ...VEHICLE_ORDER.map((st) => f.vehicleStatus[st]),
+        f.menu.edit, f.menu.history, f.menu.delete]);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
     fireEvent.click(screen.getByRole('menuitem', { name: f.menu.delete }));
     await waitFor(() => expect(api.deleteFleetVehicleApi).toHaveBeenCalledWith(1));
+  });
+});
+
+describe('FleetTab: hạng bằng lái and Sẵn sàng / Đang chạy', () => {
+  it('a tractor cannot be given to a driver whose licence does not allow it', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1'), vehicle(2, '51D-1', { category: 'truck' })]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'Bình', { license_class: 'C' })]);
+    render(<FleetTab screen="drivers" />);
+    fireEvent.click(within(await screen.findByTestId('driver-1')).getByText(f.actions.assign));
+    expect(screen.getByRole('radio', { name: '51C-1' })).toBeDisabled();
+    expect(screen.getByText(tf(f.licence.needs, { classes: 'FC/CE' }))).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '51D-1' })).toBeEnabled();         // hạng C drives a truck
+  });
+
+  it('flags a driver already on a truck their licence does not allow; hovering shows why and who', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { current_driver: { ...an, license_class: 'C',
+      license_no: '790123456789', license_expiry: '2028-05-10' } })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    const warn = within(row).getByTestId('licence-warn');
+    expect(screen.queryByTestId('licence-card')).not.toBeInTheDocument();
+    fireEvent.mouseEnter(warn);
+    const card = await screen.findByTestId('licence-card');
+    expect(card).toHaveTextContent(f.licence.title);
+    expect(card).toHaveTextContent(tf(f.licence.problem, { kind: f.licence.kindTractor, plate: '51C-1', classes: 'FC/CE' }));
+    expect(card).toHaveTextContent(an.name);
+    expect(card).toHaveTextContent('0909');
+    expect(card).toHaveTextContent('790123456789');
+    expect(card).toHaveTextContent(tf(f.licence.until, { date: '10/05/2028' }));
+    fireEvent.mouseLeave(warn);
+    await waitFor(() => expect(screen.queryByTestId('licence-card')).not.toBeInTheDocument());
+  });
+
+  it('the drivers table flags it too', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([]);
+    api.getFleetDriversApi.mockResolvedValue([driver(1, 'Bình', { license_class: 'C', phone: '0912',
+      current_vehicle: { id: 1, plate: '51C-1', trailer_plate: '', photo: '', category: 'tractor', since: '', reason: '' } })]);
+    render(<FleetTab screen="drivers" />);
+    const warn = within(await screen.findByTestId('driver-1')).getByTestId('licence-warn');
+    fireEvent.focus(warn);
+    const card = await screen.findByTestId('licence-card');
+    expect(card).toHaveTextContent('Bình');
+    expect(card).toHaveTextContent('0912');
+  });
+
+  it('only the running status that matches the driver can be picked', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { status: 'active', current_driver: an }),
+      vehicle(2, '51C-2', { status: 'ready' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab />);
+    fireEvent.contextMenu(await screen.findByTestId('vehicle-1'), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: f.vehicleStatus.ready })).toBeDisabled();       // someone drives it
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.contextMenu(screen.getByTestId('vehicle-2'), { clientX: 10, clientY: 10 });
+    expect(screen.getByRole('menuitem', { name: f.vehicleStatus.active })).toBeDisabled();      // nobody drives it
+  });
+});
+
+describe('FleetTab: rơ moóc from the tractor', () => {
+  const T = f.trailerModal;
+  const trailerRow = (id: number, plate: string, status: string, vehicle: { id: number; plate: string } | null = null) => ({
+    id, plate, trailer_type: "Sàn 40'", payload: '', photo: '', status, vehicle });
+
+  it('hitches only a trailer that can run', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1')]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.getFleetTrailersApi.mockResolvedValue([trailerRow(7, '51R-7', 'ready'), trailerRow(8, '51R-8', 'broken'),
+      trailerRow(9, '51R-9', 'maintenance'), trailerRow(10, '51R-10', 'active', { id: 2, plate: '51C-2' })]);
+    api.setFleetVehicleTrailerApi.mockResolvedValue({ replaced: '', from_plate: '' });
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
+    fireEvent.click(screen.getByRole('menuitem', { name: f.actions.hitchTrailer }));
+    await screen.findByRole('radio', { name: '51R-7' });
+    const dialog = screen.getByRole('radiogroup', { name: T.pick }).closest('form')!;
+    expect(within(dialog).getByRole('radio', { name: '51R-8' })).toBeDisabled();
+    expect(within(dialog).getByRole('radio', { name: '51R-9' })).toBeDisabled();
+    expect(within(dialog).getByRole('radio', { name: '51R-10' })).toBeEnabled();     // moves off 51C-2
+    fireEvent.click(within(dialog).getByRole('radio', { name: '51R-7' }));
+    expect(within(dialog).getByTestId('trailer-summary')).toHaveTextContent(tf(T.summaryHitch, { plate: '51R-7', vehicle: '51C-1' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: translations.vi.common.save }));
+    await waitFor(() => expect(api.setFleetVehicleTrailerApi).toHaveBeenCalledWith(1, 7));
+  });
+
+  it('unhitches after asking, and a held tractor shows why and cannot be set running', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { status: 'not_ready', trailer_plate: '51R-1',
+      trailer: { id: 7, plate: '51R-1', status: 'broken', since: '' }, trailer_hold_status: 'active' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    api.setFleetVehicleTrailerApi.mockResolvedValue({ replaced: '51R-1', from_plate: '' });
+    confirmMock.mockResolvedValue(true);
+    render(<FleetTab />);
+    const row = await screen.findByTestId('vehicle-1');
+    expect(within(row).getByTestId('status-held')).toHaveAttribute('title',
+      tf(f.trailerHold, { plate: '51R-1', trailerStatus: f.trailer.status.broken.toLowerCase(), status: f.vehicleStatus.active }));
+    fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51C-1`));
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: f.vehicleStatus.ready })).toBeDisabled();
+    expect(within(menu).getByRole('menuitem', { name: f.vehicleStatus.active })).toBeDisabled();
+    expect(within(menu).getByRole('menuitem', { name: f.vehicleStatus.broken })).toBeEnabled();
+    expect(within(menu).getByRole('menuitem', { name: f.actions.changeTrailer })).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: f.actions.unhitchTrailer }));
+    await waitFor(() => expect(api.setFleetVehicleTrailerApi).toHaveBeenCalledWith(1, null));
+    expect(confirmMock.mock.calls[0][0].message).toContain(tf(f.unhitch.held, { status: f.vehicleStatus.active }));
+  });
+
+  it('a truck (xe tải) has no trailer actions', async () => {
+    api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51D-1', { category: 'truck' })]);
+    api.getFleetDriversApi.mockResolvedValue([]);
+    render(<FleetTab screen="trucks" />);
+    const row = await screen.findByTestId('vehicle-1');
+    fireEvent.click(within(row).getByLabelText(`${f.menu.more} · 51D-1`));
+    expect(screen.queryByRole('menuitem', { name: f.actions.hitchTrailer })).not.toBeInTheDocument();
   });
 });
 
@@ -718,7 +836,7 @@ describe('FleetTab truck details', () => {
 
   it('picks boxes with one click each and copies them together, or one at once', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', { trailer_plate: '51R-1', vehicle_type: 'Hino',
-      current_driver: { id: 2, name: 'An', phone: '0909', photo: '', since: '', reason: '' } })]);
+      current_driver: { id: 2, name: 'An', phone: '0909', photo: '', since: '', reason: '', license_class: 'FC' } })]);
     api.getFleetDriversApi.mockResolvedValue([]);
     api.getFleetHistoryApi.mockResolvedValue([]);
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -852,7 +970,7 @@ describe('FleetTab quick status from the row menu', () => {
 
   it('right-click a truck someone drives now → no "Giao xe", only "Thu hồi xe", which gets them off', async () => {
     api.getFleetVehiclesApi.mockResolvedValue([vehicle(1, '51C-1', {
-      current_driver: { id: 2, name: 'Bình', phone: '', photo: '', since: '', reason: '' } })]);
+      current_driver: { id: 2, name: 'Bình', phone: '', photo: '', since: '', reason: '', license_class: 'FC' } })]);
     api.getFleetDriversApi.mockResolvedValue([driver(2, 'Bình', { current_vehicle: driving(1, '51C-1') })]);
     api.revokeDriverVehicleApi.mockResolvedValue({});
     confirmMock.mockResolvedValue(true);
@@ -998,10 +1116,11 @@ describe('FleetTab paper lock', () => {
     expect(within(row).getByText(f.vehicleStatus.not_ready)).toBeInTheDocument();
     expect(within(row).getByTestId('status-forced')).toHaveAttribute('title', f.lock.forced);
     expect(within(row).queryByText(f.quick.repaired)).not.toBeInTheDocument();
-    // "Sẵn sàng" runs: it gets the "Báo hư" button and counts as running
+    // "Sẵn sàng" can run: it gets the "Báo hư" button; nobody drives it, so it is a free truck, not "Đang chạy"
     expect(within(screen.getByTestId('vehicle-2')).getByText(f.quick.report)).toBeInTheDocument();
     const filters = screen.getByRole('group', { name: f.filters.label });
-    expect(within(filters).getByRole('button', { name: /Đang chạy\s*1/ })).toBeInTheDocument();
+    expect(within(filters).getByRole('button', { name: /Đang chạy\s*0/ })).toBeInTheDocument();
+    expect(within(filters).getByRole('button', { name: new RegExp(`${f.filters.free}\\s*1`) })).toBeInTheDocument();
 
     fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
     expect(screen.getByRole('menuitem', { name: f.vehicleStatus.ready })).toBeDisabled();

@@ -8,7 +8,7 @@ import { assignDriverVehicleApi } from '../../services/api';
 import type { FleetDriver, FleetVehicle } from '../../types';
 import { FleetAvatar } from './FleetPhoto';
 import { Footer } from './FleetModals';
-import { apiError } from './fleetUtils';
+import { apiError, licenseAllows, licenseNeeded } from './fleetUtils';
 
 interface Props {
   vehicle: FleetVehicle | null;
@@ -40,12 +40,13 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
   const shown = useMemo(() => {
     const q = norm(query);
     // working drivers on no truck first, then working ones on another truck, then those not at work; by name
-    const rank = (d: FleetDriver) => (d.status !== 'active' ? 2 : d.current_vehicle ? 1 : 0);
+    const rank = (d: FleetDriver) => (d.status !== 'active' || !licenseAllows(d.license_class, vehicle?.category) ? 2
+      : d.current_vehicle ? 1 : 0);
     return drivers
       .filter((d) => d.status !== 'left')
       .filter((d) => !q || [d.name, d.phone, d.current_vehicle?.plate || ''].some((s) => norm(s).includes(q)))
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, 'vi'));
-  }, [drivers, query]);
+  }, [drivers, query, vehicle]);
 
   if (!vehicle) return null;
   const picked = drivers.find((d) => String(d.id) === driverId) || null;
@@ -84,7 +85,9 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
   const card = (d: FleetDriver) => {
     const on = String(d.id) === driverId;
     const driving = d.current_vehicle;
-    const off = d.status !== 'active';     // on leave / not ready: cannot be given a truck
+    const wrongLicence = !licenseAllows(d.license_class, vehicle.category);
+    // on leave / not ready, or a licence that may not drive this truck: cannot be given it
+    const off = d.status !== 'active' || wrongLicence;
     return (
       <button key={d.id} type="button" role="radio" aria-checked={on} aria-label={d.name} disabled={off}
         onClick={() => { setDriverId(String(d.id)); setError(''); }}
@@ -101,6 +104,7 @@ export const VehicleDriverModal: React.FC<Props> = ({ vehicle, drivers, onClose,
             {driving && tag(tf(m.driving, { plate: driving.plate }), 'amber')}
             {!driving && !off && tag(m.noTruck, 'emerald')}
             {d.status !== 'active' && tag(t.fleet.driverStatus[d.status], 'rose')}
+            {d.status === 'active' && wrongLicence && tag(tf(t.fleet.licence.needs, { classes: licenseNeeded(vehicle.category) }), 'rose')}
           </span>
         </span>
         <span className={`absolute top-2.5 right-2.5 shrink-0 w-5 h-5 rounded-full border flex items-center justify-center ${on

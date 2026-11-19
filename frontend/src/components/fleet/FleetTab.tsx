@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArchiveRestore, Lock, ArrowLeftRight, CheckCircle2, Copy, Eye, ListChecks, History, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search,
-  FileSpreadsheet, Info, KeyRound, LogOut, SlidersHorizontal, Trash2, Truck, Wrench, X,
+  FileSpreadsheet, Info, KeyRound, Link2, Link2Off, LogOut, SlidersHorizontal, Trash2, Truck, Wrench, X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useToastActions } from '../../context/ToastContext';
@@ -9,7 +9,7 @@ import { useConfirm } from '../../hooks/useConfirm';
 import { tf } from '../../services/i18nFormat';
 import {
   deleteFleetDriverApi, deleteFleetVehicleApi, getFleetDriversApi, getFleetHistoryPageApi, getFleetVehiclesApi, revokeDriverVehicleApi,
-  setFleetVehicleStatusApi, getFleetTrashCountApi, updateFleetDriverApi, updateFleetVehicleApi, type FleetTrashCount,
+  setFleetVehicleStatusApi, setFleetVehicleTrailerApi, getFleetTrashCountApi, updateFleetDriverApi, updateFleetVehicleApi, type FleetTrashCount,
 } from '../../services/api';
 import { useRowSelection } from '../../hooks/useRowSelection';
 import { BulkActionBar, type BulkAction } from '../common/BulkActionBar';
@@ -34,6 +34,8 @@ import { DriverFormModal, DriverMoveModal, VehicleFormModal, VehicleStatusModal 
 import { FleetAvatar, PhotoLightbox } from './FleetPhoto';
 import { RowContextMenu, useRowContextMenu, type MenuGroup } from '../common/RowContextMenu';
 import { VehicleDriverModal } from './VehicleDriverModal';
+import { VehicleTrailerModal } from './VehicleTrailerModal';
+import { LicenceWarn } from './LicenceWarn';
 import { FleetDetailModal, type DetailAction, type FleetDetailTarget } from './FleetDetailModal';
 import {
   Chip, DOC_STATES, DRIVER_TONE, DocsCell, DateCell, MUTED, NoteIcon, ROW, StatusBadge, SttTd, SttTh, TD, TH, TRUCK_CHIP,
@@ -41,7 +43,7 @@ import {
   docState, docWarnings, fromControl, soonestDays, type DocState,
 } from './fleetCells';
 import {
-  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, licenseExpired, needsTruck, canChangeTruck, expiredPapers, formatIsoDate, formatStampShort, isRunning, matches,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, heldByTrailer, licenseAllows, licenseExpired, needsTruck, canChangeTruck, expiredPapers, formatIsoDate, formatStampShort, isRunning, matches,
   todayVnIso,
 } from './fleetUtils';
 
@@ -111,6 +113,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   const [statusFor, setStatusFor] = useState<FleetVehicle | null>(null);
   const [moveFor, setMoveFor] = useState<FleetDriver | null>(null);
   const [driverFor, setDriverFor] = useState<FleetVehicle | null>(null);
+  /** the tractor whose "Ghép rơ moóc" / "Đổi rơ moóc" window is open */
+  const [trailerFor, setTrailerFor] = useState<FleetVehicle | null>(null);
   const [viewing, setViewing] = useState<{ photo: string; name: string } | null>(null);
   const [detail, setDetail] = useState<RowRef | null>(null);
   const menu = useRowContextMenu<RowRef>();
@@ -192,7 +196,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
 
   const vehicleTest: Record<VehicleFilter, (v: FleetVehicle) => boolean> = useMemo(() => ({
     all: () => true,
-    running: (v) => isRunning(v.status),
+    running: (v) => v.status === 'active',
     down: (v) => v.status === 'broken' || v.status === 'maintenance',
     notReady: (v) => v.status === 'not_ready',
     free: (v) => isRunning(v.status) && !v.current_driver,
@@ -409,6 +413,26 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     }
   };
 
+  /** "Tháo rơ moóc" from a tractor (asked first). A trailer that held it in Không sẵn sàng gives its status back. */
+  const unhitchVehicle = async (v: FleetVehicle) => {
+    const plate = v.trailer?.plate || v.trailer_plate;
+    if (!plate) return;
+    const U = f.unhitch;
+    const message = [tf(U.message, { plate, vehicle: v.plate }),
+      v.trailer_hold_status ? tf(U.held, { status: f.vehicleStatus[v.trailer_hold_status] }) : ''].filter(Boolean).join(' ');
+    if (!(await confirm({ title: tf(U.title, { vehicle: v.plate }), message, confirmText: U.confirm, danger: true }))) return;
+    setBusyId(`v${v.id}`);
+    try {
+      await setFleetVehicleTrailerApi(v.id, null);
+      addToast(tf(t.fleet.trailer.toast.unhitched, { plate }), 'success');
+      reload();
+    } catch (err) {
+      addToast(apiError(err, f.toast.error), 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   /** "Thu hồi xe": the driver gets off the truck they drive, which is then free. Asked first. */
   const revoke = async (driverId: number) => {
     const d = ds.find((x) => x.id === driverId);
@@ -556,7 +580,11 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
         key: `status-${s}`, label, icon: ListChecks,
         // a truck with expired papers: only not_ready / inactive (the server refuses the rest)
         disabled: ids.length === 1 && (row.status === s || (kind === 'vehicle'
-          ? expiredPapers(row as FleetVehicle, today).length > 0 && !LOCK_FREE_STATUSES.includes(s as VehicleStatus)
+          ? (expiredPapers(row as FleetVehicle, today).length > 0 && !LOCK_FREE_STATUSES.includes(s as VehicleStatus))
+            // a trailer that cannot run holds it: not running until the trailer comes off
+            || (heldByTrailer(row as FleetVehicle) && isRunning(s as VehicleStatus))
+            // Sẵn sàng / Đang chạy follow the driver: only the one that matches
+            || (s === 'active' && !(row as FleetVehicle).current_driver) || (s === 'ready' && !!(row as FleetVehicle).current_driver)
           // a driver with an expired licence: only not_ready / leave / left
           : licenseExpired(row as FleetDriver, today) && !DRIVER_LOCK_FREE_STATUSES.includes(s as DriverStatus))),
         onClick: () => void applyStatus(kind, ids, s),
@@ -567,6 +595,8 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
   // ---- one place for each row's actions: the right-click / "⋯" menu and the detail window use them alike ----
   const vehicleMain = (v: FleetVehicle): DetailAction | null =>
     isRunning(v.status) ? { label: f.quick.report, icon: <Wrench className="w-4 h-4" />, onClick: () => setStatusFor(v), primary: true }
+      // its trailer cannot run: it cannot run either until that comes off
+      : heldByTrailer(v) ? { label: f.actions.unhitchTrailer, icon: <Link2Off className="w-4 h-4" />, onClick: () => void unhitchVehicle(v), primary: true }
       : v.status === 'broken' || v.status === 'maintenance'
         ? { label: f.quick.repaired, icon: <CheckCircle2 className="w-4 h-4" />, onClick: () => void markRepaired(v), primary: true }
         : null;
@@ -581,13 +611,19 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     return [
       { label: v.plate, items: [
         { key: 'detail', label: f.detail.open, icon: Eye, onClick: () => setDetail({ kind: 'vehicle', id: v.id }) },
-        ...(main ? [{ key: 'main', label: main.label, icon: isRunning(v.status) ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
+        // held by its trailer: "Tháo rơ moóc" is already below
+        ...(main && !heldByTrailer(v) ? [{ key: 'main', label: main.label, icon: isRunning(v.status) ? Wrench : CheckCircle2, onClick: main.onClick }] : []),
         // a free truck that can run: give it to a driver; a driven one: take it back first ("Thu hồi xe")
         ...(isRunning(v.status) && !v.current_driver
           ? [{ key: 'driver', label: f.actions.assign, icon: KeyRound, onClick: () => setDriverFor(v) }] : []),
         ...(v.current_driver
           ? [{ key: 'revoke', label: f.actions.revoke, icon: LogOut, danger: true, onClick: () => void revoke(v.current_driver!.id) }]
           : []),
+        // a tractor: Ghép rơ moóc / Đổi rơ moóc, and Tháo rơ moóc when it pulls one
+        ...(v.category !== 'truck' ? [{ key: 'trailer', label: v.trailer_plate ? f.actions.changeTrailer : f.actions.hitchTrailer,
+          icon: Link2, onClick: () => setTrailerFor(v) }] : []),
+        ...(v.category !== 'truck' && v.trailer_plate
+          ? [{ key: 'unhitch', label: f.actions.unhitchTrailer, icon: Link2Off, onClick: () => void unhitchVehicle(v) }] : []),
       ] },
       statusGroup('vehicle', v),
       { items: [
@@ -743,11 +779,21 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
     status: {
       filter: { options: () => valueCounts(shownVehicles, vehicleValue.status, [...VEHICLE_STATUSES]), value: vehicleCols.status || [],
         onChange: setCol(setVehicleCols, 'status'), format: (v) => f.vehicleStatus[v as VehicleStatus] ?? v },
-      render: (v) => (
-        <span title={v.status_forced ? f.lock.forced : undefined} data-testid={v.status_forced ? 'status-forced' : undefined}>
-          <StatusBadge tone={VEHICLE_TONE[v.status]}>{f.vehicleStatus[v.status]}{!!v.status_forced && <Lock className="w-3 h-3" aria-hidden />}</StatusBadge>
-        </span>
-      ),
+      render: (v) => {
+        // held by a trailer that cannot run: why, and what it gets back once the trailer comes off
+        const held = heldByTrailer(v) && v.trailer_hold_status ? tf(f.trailerHold, {
+          plate: v.trailer!.plate, trailerStatus: t.fleet.trailer.status[v.trailer!.status].toLowerCase(),
+          status: f.vehicleStatus[v.trailer_hold_status] }) : '';
+        return (
+          <span title={held || (v.status_forced ? f.lock.forced : undefined)}
+            data-testid={held ? 'status-held' : v.status_forced ? 'status-forced' : undefined}>
+            <StatusBadge tone={VEHICLE_TONE[v.status]}>{f.vehicleStatus[v.status]}
+              {!!v.status_forced && <Lock className="w-3 h-3" aria-hidden />}
+              {!!held && <Link2 className="w-3 h-3" aria-hidden />}
+            </StatusBadge>
+          </span>
+        );
+      },
     },
     driver: {
       filter: { options: () => valueCounts(shownVehicles, vehicleValue.driver, ['primary', 'none']), value: vehicleCols.driver || [],
@@ -761,6 +807,9 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.name}</span>
+                  {/* a server too old to send the class: nothing to judge, no warning */}
+                  {c.license_class !== undefined && !licenseAllows(c.license_class, v.category)
+                    && <LicenceWarn driver={c} plate={v.plate} category={v.category} />}
                 </div>
                 {c.phone && <div className={MUTED}>{c.phone}</div>}
               </div>
@@ -821,6 +870,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
               <div className="flex items-center gap-1.5">
                 <span className="font-semibold text-slate-800 dark:text-slate-100 whitespace-nowrap">{c.plate}</span>
                 {c.category === 'truck' && <Chip tone={TRUCK_CHIP}>{f.truckChip}</Chip>}
+                {!licenseAllows(d.license_class, c.category) && <LicenceWarn driver={d} plate={c.plate} category={c.category} />}
               </div>
               <div className={MUTED}>{c.trailer_plate ? tf(L.trailer, { plate: c.trailer_plate }) : ''}</div>
             </div>
@@ -1167,6 +1217,7 @@ export const FleetTab: React.FC<Props> = ({ initialSearchQuery, screen = 'vehicl
       <PhotoLightbox photo={viewing?.photo || null} name={viewing?.name || ''} onClose={closeViewer} />
       <DriverMoveModal driver={moveFor} vehicles={allVs} onClose={() => setMoveFor(null)} onSaved={reload} />
       <VehicleDriverModal vehicle={driverFor} drivers={ds} onClose={() => setDriverFor(null)} onSaved={reload} />
+      <VehicleTrailerModal vehicle={trailerFor} onClose={() => setTrailerFor(null)} onSaved={reload} />
     </div>
   );
 };

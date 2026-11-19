@@ -6,7 +6,7 @@ import {
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
   AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
   FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleCategory, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
-  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, VehicleDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult,
+  FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, VehicleDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult, VehicleTrailerResult,
 } from '../types';
 
 // The Docker build sets VITE_API_BASE=/api/v1 (same origin as the page); Electron keeps the local backend.
@@ -933,6 +933,9 @@ export const deleteFleetTrailerApi = async (id: number): Promise<void> => {
 /** Onto a tractor (vehicleId null: off). It comes off any other tractor, and the tractor's own trailer comes off. */
 export const hitchFleetTrailerApi = async (id: number, vehicleId: number | null, reason = ''): Promise<HitchResult> =>
   (await apiClient.post<HitchResult>(`/fleet/trailers/${id}/hitch`, { vehicle_id: vehicleId, reason })).data;
+/** From the tractor: Ghép rơ moóc (a trailer that can run; 409 otherwise) or, with null, Tháo rơ moóc. */
+export const setFleetVehicleTrailerApi = async (vehicleId: number, trailerId: number | null, reason = ''): Promise<VehicleTrailerResult> =>
+  (await apiClient.post<VehicleTrailerResult>(`/fleet/vehicles/${vehicleId}/trailer`, { trailer_id: trailerId, reason })).data;
 export const uploadFleetTrailerPhotoApi = (id: number, file: Blob) => uploadPhoto<FleetTrailer>(`/fleet/trailers/${id}/photo`, file);
 export const deleteFleetTrailerPhotoApi = async (id: number): Promise<FleetTrailer> =>
   (await apiClient.delete<FleetTrailer>(`/fleet/trailers/${id}/photo`)).data;

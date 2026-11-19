@@ -56,8 +56,8 @@ const readView = (): View => {
 
 const docsOf = (r: FleetTrailer): [FleetDocumentKind, string][] =>
   [['ownership', r.ownership_expiry], ['registration', r.registration_expiry], ['insurance', r.insurance_expiry]];
-/** a trailer in these is off its tractor and cannot be hitched */
-const canHitch = (r: FleetTrailer) => r.status !== 'inactive' && r.status !== 'not_ready';
+/** only a trailer that can run (ready / active) is hitched */
+const canHitch = (r: FleetTrailer) => isRunning(r.status);
 
 interface Props {
   initialSearchQuery?: string;
@@ -267,7 +267,9 @@ export const TrailerTab: React.FC<Props> = ({ initialSearchQuery }) => {
       items: VEHICLE_STATUSES.map((s) => ({
         key: `status-${s}`, label: R.status[s], icon: ListChecks,
         // expired papers: only not_ready / inactive (the server refuses the rest)
-        disabled: ids.length === 1 && (r.status === s || (expiredPapers(r, today).length > 0 && !LOCK_FREE_STATUSES.includes(s))),
+        disabled: ids.length === 1 && (r.status === s || (expiredPapers(r, today).length > 0 && !LOCK_FREE_STATUSES.includes(s))
+          // Sẵn sàng / Đang dùng follow the hitch: only the one that matches
+          || (s === 'active' && !r.vehicle) || (s === 'ready' && !!r.vehicle)),
         onClick: () => void applyStatus(ids, s),
       })),
     };

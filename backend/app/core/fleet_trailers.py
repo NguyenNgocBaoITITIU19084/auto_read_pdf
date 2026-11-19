@@ -11,20 +11,24 @@ tractor it touched, clearing before setting, so the unique index on `trailer_key
 
 Tractors made before trailers had records carry only `trailer_plate`: migrate_trailer_plates() turns each into a
 trailer record and an open hitch, on every start, doing nothing once done.
+
+Only a trailer that can run (ready / active) is hitched. A hitched trailer that stops running (not ready, broken,
+maintenance, out of service: by hand or by the paper lock) stays on its tractor, and the tractor is held in "not_ready":
+its own status is kept in `fleet_vehicles.trailer_hold_status` and comes back when the trailer comes off or runs again
+(the paper lock still applies to it then). The driver stays on the tractor through the hold. See _refresh_hold.
 """
 import re
 from datetime import datetime
 
 from backend.app.core.fleet import (
-    LOCK_FREE_STATUSES, TRAILER_DOCUMENTS, VEHICLE_STATUSES, FleetError, _check_paper_lock, _conn, _date, _fold, _now,
+    LOCK_FREE_STATUSES, RUNNING_STATUSES, TRAILER_DOCUMENTS, VEHICLE_STATUSES, FleetError, _check_paper_lock, _conn, _date, _fold, _now,
     _paper_move, _rows, _text, _vehicle, expired_papers, logger, plate_key,
 )
+from backend.app.core.fleet import _close as _end_drive, _open_by_vehicle as _drive_of, _sync_running
 
 TRAILER_STATUSES = VEHICLE_STATUSES          # ready / active / not_ready / broken / maintenance / inactive
 TRAILER_STATUS_LABELS = {"ready": "Sẵn sàng", "active": "Đang dùng", "not_ready": "Không sẵn sàng", "broken": "Hư hỏng",
                          "maintenance": "Bảo dưỡng", "inactive": "Ngưng hoạt động"}
-# a trailer in these comes off its tractor and cannot be hitched
-UNHITCHED_STATUSES = ("not_ready", "inactive")
 _TRAILER_FIELDS = ("plate", "trailer_type", "chassis_no", "payload", "year", "ownership_expiry", "registration_expiry",
                    "insurance_expiry", "status", "note")
 _YEAR_RE = re.compile(r"^\d{4}$")
@@ -201,12 +205,66 @@ def _sync_cache(conn, vehicle_id: int) -> None:
     plate = row[0] if row else ""
     conn.execute("UPDATE fleet_vehicles SET trailer_plate = ?, trailer_key = ? WHERE id = ?;",
                  (plate, plate_key(plate), vehicle_id))
+    _refresh_hold(conn, vehicle_id)
+
+
+def stopped_trailer(conn, vehicle_id: int) -> dict | None:
+    """The trailer hitched to the tractor when it cannot run (it holds the tractor in not_ready), else None."""
+    rows = _rows(conn, """SELECT t.* FROM fleet_trailer_hitches h JOIN fleet_trailers t ON t.id = h.trailer_id
+                          WHERE h.vehicle_id = ? AND h.ended_at IS NULL;""", (vehicle_id,))
+    return rows[0] if rows and rows[0]["status"] not in RUNNING_STATUSES else None
+
+
+def _refresh_hold(conn, vehicle_id: int) -> None:
+    """A tractor pulling a trailer that cannot run is held in not_ready, its own status kept; once the trailer is off
+    or runs again it gets that status back (not_ready, forced, if its own papers ran out meanwhile). Only a running
+    tractor is held. The driver stays on it either way."""
+    rows = _rows(conn, "SELECT * FROM fleet_vehicles WHERE id = ?;", (vehicle_id,))
+    if not rows:
+        return
+    v = rows[0]
+    held = v.get("trailer_hold_status") or ""
+    stopped = stopped_trailer(conn, vehicle_id)
+    if stopped and not held and v["status"] in RUNNING_STATUSES and not v["deleted_at"]:
+        conn.execute("UPDATE fleet_vehicles SET trailer_hold_status = ?, status = 'not_ready', updated_at = ? "
+                     "WHERE id = ?;", (v["status"], _now(), vehicle_id))
+        logger.info(f"Trailer hold: tractor {v['plate']} -> not_ready (moóc {stopped['plate']} {stopped['status']})")
+    elif held and not stopped:
+        status, forced = held, 0
+        if expired_papers(v):  # its own papers ran out meanwhile: the paper lock's not_ready, the driver gets off
+            status, forced = "not_ready", 1
+            _end_drive(conn, _drive_of(conn, vehicle_id), f"Xe {v['plate']}: {', '.join(expired_papers(v))} hết hạn",
+                       _now())
+        conn.execute("UPDATE fleet_vehicles SET trailer_hold_status = '', status = ?, status_forced = ?, updated_at = ? "
+                     "WHERE id = ?;", (status, forced, _now(), vehicle_id))
+        _sync_running(conn, vehicle_id)   # its driver may have left meanwhile
+        logger.info(f"Trailer hold: tractor {v['plate']} -> {status}")
+
+
+def _sync_trailer(conn, trailer_id: int | None) -> None:
+    """A trailer that can run is "active" (Đang dùng) on a tractor, "ready" (Sẵn sàng) when free; a stopped one is
+    left alone."""
+    if trailer_id is None:
+        return
+    row = conn.execute("SELECT status FROM fleet_trailers WHERE id = ?;", (trailer_id,)).fetchone()
+    if not row or row[0] not in RUNNING_STATUSES:
+        return
+    want = "active" if _open_by_trailer(conn, trailer_id) else "ready"
+    if row[0] != want:
+        conn.execute("UPDATE fleet_trailers SET status = ?, updated_at = ? WHERE id = ?;", (want, _now(), trailer_id))
+
+
+def refresh_all_holds(conn) -> None:
+    """Every tractor's hold, on start (trailers that stopped before the hold existed)."""
+    for (vehicle_id,) in conn.execute("SELECT id FROM fleet_vehicles WHERE deleted_at IS NULL;").fetchall():
+        _refresh_hold(conn, vehicle_id)
 
 
 def _close(conn, row: dict | None, end_reason: str, stamp: str) -> None:
     if row:
         conn.execute("UPDATE fleet_trailer_hitches SET ended_at = ?, end_reason = ? WHERE id = ?;",
                      (stamp, _text(end_reason), row["id"]))
+        _sync_trailer(conn, row["trailer_id"])
         if row["vehicle_id"]:
             _sync_cache(conn, row["vehicle_id"])
 
@@ -215,6 +273,7 @@ def _open(conn, trailer: dict, vehicle: dict, reason: str, stamp: str) -> None:
     conn.execute("INSERT INTO fleet_trailer_hitches (trailer_id, vehicle_id, trailer_plate, vehicle_plate, reason, "
                  "started_at) VALUES (?, ?, ?, ?, ?, ?);",
                  (trailer["id"], vehicle["id"], trailer["plate"], vehicle["plate"], _text(reason), stamp))
+    _sync_trailer(conn, trailer["id"])
     _sync_cache(conn, vehicle["id"])
 
 
@@ -234,11 +293,12 @@ def _hitch(conn, trailer: dict, vehicle: dict, reason: str, stamp: str) -> dict:
 
 
 def _check_hitchable(trailer: dict) -> None:
-    """Out of service or not ready (expired papers, ...): it cannot go on a tractor."""
-    if trailer["status"] in UNHITCHED_STATUSES:
+    """Only a trailer that can run (ready / active) goes on a tractor (409 otherwise)."""
+    if trailer["status"] not in RUNNING_STATUSES:
         expired = expired_papers(trailer)
         why = f" ({', '.join(expired)} hết hạn)" if expired else ""
-        raise FleetError(f"Moóc {trailer['plate']} đang {TRAILER_STATUS_LABELS[trailer['status']].lower()}{why}")
+        raise FleetError(f"Moóc {trailer['plate']} đang {TRAILER_STATUS_LABELS[trailer['status']].lower()}{why}: "
+                         "chỉ ghép được moóc sẵn sàng hoặc đang dùng", 409)
 
 
 def hitch(trailer_id: int, vehicle_id: int | None, reason: str = "") -> dict:
@@ -253,6 +313,21 @@ def hitch(trailer_id: int, vehicle_id: int | None, reason: str = "") -> dict:
         vehicle = _vehicle(conn, vehicle_id)
         _check_hitchable(trailer)
         return _hitch(conn, trailer, vehicle, reason, stamp)
+
+
+def hitch_vehicle(vehicle_id: int, trailer_id: int | None, reason: str = "") -> dict:
+    """From the tractor: Ghép rơ moóc (a trailer that can run, off any other tractor; the tractor's own trailer comes
+    off) or, with None, Tháo rơ moóc (400 when it pulls none)."""
+    if trailer_id is not None:
+        return hitch(trailer_id, vehicle_id, reason or "Ghép rơ moóc")
+    stamp = _now()
+    with _conn() as conn:
+        vehicle = _vehicle(conn, vehicle_id)
+        current = _open_by_vehicle(conn, vehicle_id)
+        if not current:
+            raise FleetError(f"Đầu kéo {vehicle['plate']} chưa ghép moóc nào")
+        _close(conn, current, reason or "Tháo rơ moóc", stamp)
+    return {"replaced": current["trailer_plate"], "from_plate": ""}
 
 
 def hitch_by_plate(conn, vehicle: dict, plate: str, stamp: str) -> None:
@@ -358,11 +433,13 @@ def create_trailer(data: dict) -> int:
             trailer = _trailer(conn, trailer_id)
             _check_hitchable(trailer)
             _hitch(conn, trailer, vehicle, "", stamp)
+        _sync_trailer(conn, trailer_id)
         return trailer_id
 
 
 def update_trailer(trailer_id: int, data: dict) -> None:
-    """Edit a trailer. A new plate shows on the tractor pulling it; going out of service or not ready takes it off.
+    """Edit a trailer. A new plate shows on the tractor pulling it; it stays hitched whatever its status, and one
+    that cannot run holds its tractor in not_ready (see _refresh_hold).
     A status other than the stored one is a change by hand: refused while a paper is expired (unless not_ready /
     inactive), and it clears the "forced" mark. The same status (the form always sends it) changes nothing; the new
     dates then lock or free it (see enforce_trailer_papers)."""
@@ -386,14 +463,16 @@ def update_trailer(trailer_id: int, data: dict) -> None:
         if hitched and "plate" in fields and fields["plate"] != before["plate"]:
             conn.execute("UPDATE fleet_trailer_hitches SET trailer_plate = ? WHERE id = ?;", (fields["plate"], hitched["id"]))
             _sync_cache(conn, hitched["vehicle_id"])
-        if hitched and fields.get("status") in UNHITCHED_STATUSES:
-            _close(conn, hitched, TRAILER_STATUS_LABELS[fields["status"]], stamp)
+        if hitched and "status" in fields:
+            _refresh_hold(conn, hitched["vehicle_id"])
+        _sync_trailer(conn, trailer_id)
     enforce_trailer_papers(trailer_id)
 
 
 def enforce_trailer_papers(trailer_id: int, today=None) -> str | None:
-    """The paper lock on one trailer (see fleet.enforce_vehicle_papers): an expired paper makes it not_ready and takes
-    it off its tractor; renewed papers bring a trailer it had forced back to "ready". Returns the new status."""
+    """The paper lock on one trailer (see fleet.enforce_vehicle_papers): an expired paper makes it not_ready (its
+    tractor is held in not_ready too); renewed papers bring a trailer it had forced back to "ready" (and its tractor
+    back). Returns the new status."""
     stamp = _now()
     with _conn() as conn:
         rows = _rows(conn, "SELECT * FROM fleet_trailers WHERE id = ? AND deleted_at IS NULL;", (trailer_id,))
@@ -403,8 +482,10 @@ def enforce_trailer_papers(trailer_id: int, today=None) -> str | None:
         status, reason = move
         conn.execute("UPDATE fleet_trailers SET status = ?, status_forced = ?, updated_at = ? WHERE id = ?;",
                      (status, int(status == "not_ready"), stamp, trailer_id))
-        if status == "not_ready":
-            _close(conn, _open_by_trailer(conn, trailer_id), f"{TRAILER_STATUS_LABELS['not_ready']}: {reason}", stamp)
+        hitched = _open_by_trailer(conn, trailer_id)
+        if hitched:
+            _refresh_hold(conn, hitched["vehicle_id"])
+        _sync_trailer(conn, trailer_id)
     logger.info(f"Paper lock: trailer {rows[0]['plate']} -> {status} ({reason})")
     return status
 

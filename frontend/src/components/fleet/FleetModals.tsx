@@ -22,7 +22,7 @@ import {
   type VehicleCategory, type VehicleDocument, type VehicleStatus,
 } from '../../types';
 import {
-  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, isRunning, licenseExpired,
+  DRIVER_LOCK_FREE_STATUSES, LOCK_FREE_STATUSES, apiError, expiredPapers, formatIsoDate, freeVehicles, heldByTrailer, isRunning, licenseAllows, licenseExpired,
   type PaperExpiry,
 } from './fleetUtils';
 
@@ -133,7 +133,8 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
   const f = isTruck ? { ...t.fleet.vehicleForm, ...t.fleet.truckForm } : t.fleet.vehicleForm;
   const [form, setForm] = useState({
     plate: '', trailer_plate: '', vehicle_type: '', body_type: '', payload: '', ownership_expiry: '', registration_expiry: '',
-    insurance_expiry: '', status: 'active' as VehicleStatus, note: '',
+    // a new truck has no driver yet: Sẵn sàng (Đang chạy comes with a driver)
+    insurance_expiry: '', status: 'ready' as VehicleStatus, note: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -149,7 +150,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
     let live = true;
     getFleetTrailersApi()
       .then((list) => live && setFreeTrailers(list
-        .filter((r) => r.status !== 'inactive' && r.status !== 'not_ready' && (!r.vehicle || r.vehicle.id === vehicle?.id))
+        .filter((r) => (isRunning(r.status) && !r.vehicle) || (!!r.vehicle && r.vehicle.id === vehicle?.id))
         .map((r) => r.plate)))
       .catch(() => live && setFreeTrailers([]));
     return () => {
@@ -166,7 +167,7 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
       plate: vehicle?.plate || '', trailer_plate: vehicle?.trailer_plate || '', vehicle_type: vehicle?.vehicle_type || '',
       body_type: vehicle?.body_type || '', payload: vehicle?.payload || '', ownership_expiry: vehicle?.ownership_expiry || '',
       registration_expiry: vehicle?.registration_expiry || '', insurance_expiry: vehicle?.insurance_expiry || '',
-      status: vehicle?.status || 'active', note: vehicle?.note || '',
+      status: vehicle?.status || 'ready', note: vehicle?.note || '',
     });
   }, [isOpen, vehicle]);
 
@@ -258,7 +259,9 @@ export const VehicleFormModal: React.FC<VehicleFormProps> = ({ isOpen, vehicle, 
             {box('status', f.status, (
               <select value={statusValue} onChange={set('status')} disabled={!!vehicle}>
                 {VEHICLE_STATUSES.map((s) => (
-                  <option key={s} value={s} disabled={formLocked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
+                  <option key={s} value={s} disabled={(formLocked && !LOCK_FREE_STATUSES.includes(s)) || (!vehicle && s === 'active')}>
+                    {t.fleet.vehicleStatus[s]}
+                  </option>
                 ))}
               </select>
             ), { className: isTruck ? '' : 'col-span-2' })}
@@ -490,18 +493,22 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
   // expired papers: only not_ready / inactive can be picked
   const expired = vehicle ? expiredPapers(vehicle) : [];
   const locked = expired.length > 0;
+  // a hitched trailer that cannot run holds it: nothing running until the trailer comes off
+  const held = !!vehicle && heldByTrailer(vehicle);
 
   useEffect(() => {
     if (!vehicle) return;
     setStatus(expiredPapers(vehicle).length ? (vehicle.status === 'not_ready' ? 'inactive' : 'not_ready')
-      : isRunning(vehicle.status) ? 'broken' : 'ready');
+      : isRunning(vehicle.status) ? 'broken' : heldByTrailer(vehicle) ? 'broken' : vehicle.current_driver ? 'active' : 'ready');
     setReason('');
     setSpareId('');
     setError('');
     setPlan('move');
   }, [vehicle]);
 
-  const spares = useMemo(() => freeVehicles(vehicles, vehicle?.id), [vehicles, vehicle]);
+  // the driver may only move to a truck their licence allows
+  const spares = useMemo(() => freeVehicles(vehicles, vehicle?.id)
+    .filter((v) => !vehicle?.current_driver || licenseAllows(vehicle.current_driver.license_class, v.category)), [vehicles, vehicle]);
   if (!vehicle) return null;
   const driver = vehicle.current_driver;
   const stops = !isRunning(status);
@@ -540,10 +547,19 @@ export const VehicleStatusModal: React.FC<StatusProps> = ({ vehicle, vehicles, o
         <Field label={m.status}>
           <select className={INPUT} value={status} onChange={(e) => setStatus(e.target.value as VehicleStatus)}>
             {VEHICLE_STATUSES.map((s) => (
-              <option key={s} value={s} disabled={locked && !LOCK_FREE_STATUSES.includes(s)}>{t.fleet.vehicleStatus[s]}</option>
+              <option key={s} value={s} disabled={(locked && !LOCK_FREE_STATUSES.includes(s)) || (held && isRunning(s))
+                // Sẵn sàng / Đang chạy follow the driver: only the one that matches
+                || (s === 'active' && !driver) || (s === 'ready' && !!driver)}>
+                {t.fleet.vehicleStatus[s]}
+              </option>
             ))}
           </select>
           {locked && <LockHint papers={expired} />}
+          {held && (
+            <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+              {tf(m.heldHint, { plate: vehicle.trailer!.plate, trailerStatus: t.fleet.trailer.status[vehicle.trailer!.status].toLowerCase() })}
+            </p>
+          )}
         </Field>
         <Field label={m.reason}>
           <input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} placeholder={m.reasonPh} />
@@ -668,7 +684,7 @@ export const DriverMoveModal: React.FC<MoveProps> = ({ driver, vehicles, onClose
           </span>
         </div>
         <p className="text-sm text-slate-500 dark:text-slate-400">{m.hint}</p>
-        <VehiclePicker vehicles={choices} value={vehicleId} driverId={driver.id} label={m.vehicle}
+        <VehiclePicker vehicles={choices} value={vehicleId} driverId={driver.id} licenseClass={driver.license_class} label={m.vehicle}
           onChange={(value) => { setVehicleId(value); setError(''); }} />
         {/* what saving does, and the buttons: always in view under the list */}
         <div className="sticky -bottom-5 z-10 -mx-6 -mb-5 px-6 pt-3 pb-5 space-y-3 bg-white dark:bg-slate-900 shadow-[0_-10px_16px_-14px_rgba(15,23,42,0.35)]">
