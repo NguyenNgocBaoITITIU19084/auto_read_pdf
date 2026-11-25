@@ -132,6 +132,15 @@ function parseSyncedMessage(m) {
   return { msgType, content, mediaUrl };
 }
 
+// A live sticker arrives as { id, catId, type }. Store it in the same "[^catId,id^]" form the phone
+// sync uses, so one renderer shows both.
+function stickerToken(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  if (obj.href || obj.thumb || obj.hdUrl) return '';
+  if (obj.id === undefined || obj.id === null || obj.catId === undefined || obj.catId === null) return '';
+  return `[^${obj.catId},${obj.id}^]`;
+}
+
 function parseIncomingMessage(msg) {
   const data = msg?.data || {};
   const isGroup = msg?.type === ThreadType.Group;
@@ -154,6 +163,9 @@ function parseIncomingMessage(msg) {
     } else {
       content = data.content;
     }
+  } else if (data.content && typeof data.content === 'object' && stickerToken(data.content)) {
+    msgType = 'sticker';
+    content = stickerToken(data.content);
   } else if (data.content && typeof data.content === 'object') {
     const objRes = parseObjectPayload(data.content, data.msgType);
     if (objRes) {
@@ -609,6 +621,9 @@ function createZaloBridge({ userDataDir, backendRequest, sendToRenderer, showMai
       let mediaUrl = '';
       if (typeof data.content === 'string') {
         content = data.content;
+      } else if (stickerToken(data.content)) {
+        msgType = 'sticker';
+        content = stickerToken(data.content);
       } else if (data.content && typeof data.content === 'object') {
         if (data.content.href || data.content.thumb || data.content.hdUrl) {
           msgType = 'image';

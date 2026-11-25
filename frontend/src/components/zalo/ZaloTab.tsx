@@ -90,7 +90,10 @@ function fillPlaceholders(text: string, values: Record<string, string>): string 
 }
 
 const MESSAGE_PAGE = 50;
-const OLDER_SYNC_DAYS = 90;
+const OLDER_SYNC_OPTIONS = [
+  { days: 90, label: '90 ngày' },
+  { days: 365, label: '1 năm' },
+];
 
 /** Union of two message lists, ordered like the chat (oldest first by time, then id). */
 function mergeMessages(a: ZaloMessage[], b: ZaloMessage[]): ZaloMessage[] {
@@ -100,6 +103,19 @@ function mergeMessages(a: ZaloMessage[], b: ZaloMessage[]): ZaloMessage[] {
   return [...byId.values()].sort((x, y) =>
     x.created_at === y.created_at ? x.id - y.id : x.created_at < y.created_at ? -1 : 1
   );
+}
+
+// Zalo stores a sticker as "[^categoryId,stickerId^]" (phone sync, and the bridge for live ones).
+const STICKER_RE = /^\[\^(\d+),(\d+)\^\]$/;
+
+function stickerImageUrl(content: string): string {
+  const m = STICKER_RE.exec((content || '').trim());
+  return m ? `https://zalo-api.zadn.vn/api/emoticon/sticker/webpc?eid=${m[2]}&size=130` : '';
+}
+
+/** List preview: stickers read as "[Sticker]" instead of their raw code. */
+function previewText(text: string): string {
+  return STICKER_RE.test((text || '').trim()) ? '[Sticker]' : text;
 }
 
 const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
@@ -535,14 +551,27 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const handleSyncMessages = async (days?: number) => {
     if (!electronAPI?.zaloSyncMessages || bridgeState.status !== 'connected' || syncingMessages) return;
     setSyncingMessages(true);
-    setSyncProgressText('Đang gửi yêu cầu đồng bộ tới điện thoại...');
+    setSyncProgressText('Đang gửi yêu cầu đồng bộ tới điện thoại... Mở Zalo trên điện thoại và bấm Xác nhận.');
+    const openId = selectedThreadIdRef.current;
+    const oldestBefore = messagesRef.current[0];
     try {
       const res = await electronAPI.zaloSyncMessages(days ? { days } : undefined);
       await loadConversations();
-      if (selectedThreadId) await loadMessages(selectedThreadId);
-      addToast(`Đã đồng bộ ${res?.inserted || 0} tin nhắn từ ${res?.conversations || 0} hội thoại`, 'success');
+      if (openId) await loadMessages(openId);
+      addToast(`Đã đồng bộ ${res?.inserted || 0} tin nhắn mới từ ${res?.conversations || 0} hội thoại`, 'success');
+      // Say plainly when the phone had nothing older for the chat the user is looking at.
+      if (days && openId && oldestBefore) {
+        const older = await getZaloMessages(openId, 1, oldestBefore.id).catch(() => []);
+        if (older.length === 0) addToast('Điện thoại không có tin nào cũ hơn trong hội thoại này', 'info');
+      }
     } catch (e: any) {
-      addToast(e?.message || 'Đồng bộ tin nhắn thất bại (kiểm tra xác nhận trên điện thoại)', 'error');
+      const msg = String(e?.message || '');
+      addToast(
+        /not confirmed/i.test(msg)
+          ? 'Chưa bấm Xác nhận đồng bộ trên điện thoại trong 2 phút — hãy thử lại và xác nhận trên điện thoại.'
+          : msg || 'Đồng bộ tin nhắn thất bại (kiểm tra xác nhận trên điện thoại)',
+        'error'
+      );
     } finally {
       setSyncingMessages(false);
       setSyncProgressText('');
@@ -836,6 +865,8 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
               conversations.map((conv) => {
                 const isSelected = conv.thread_id === selectedThreadId;
                 const title = conv.driver_name || conv.display_name || conv.thread_id;
+                // Unread rows read like Zalo's: bold name + preview, blue time, count pill, tinted row.
+                const isUnread = conv.unread_count > 0;
                 return (
                   <button
                     key={conv.thread_id}
@@ -843,7 +874,9 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-blue-50/80 dark:bg-blue-950/40 border-l-2 border-blue-600'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        : isUnread
+                        ? 'bg-sky-50/70 dark:bg-sky-950/20 hover:bg-sky-100/70 dark:hover:bg-sky-950/40 border-l-2 border-sky-500'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40 border-l-2 border-transparent'
                     }`}
                   >
                     <div className="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-700 dark:text-slate-200 shrink-0 overflow-hidden">
@@ -855,25 +888,29 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                        <span
+                          className={`text-xs truncate ${
+                            isUnread ? 'font-bold text-slate-900 dark:text-white' : 'font-medium text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
                           {title}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
                           {conv.last_message_at && (
-                            <span className="text-[10px] text-slate-400">
+                            <span className={`text-[10px] ${isUnread ? 'font-semibold text-sky-600 dark:text-sky-400' : 'text-slate-400'}`}>
                               {formatZaloDateTime(conv.last_message_at, true)}
                             </span>
                           )}
-                          {conv.unread_count > 0 && (
-                            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white">
-                              {conv.unread_count}
+                          {isUnread && (
+                            <span className="min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full text-[10px] font-bold bg-rose-500 text-white">
+                              {conv.unread_count > 99 ? '99+' : conv.unread_count}
                             </span>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         {conv.driver_id !== null && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                             <Truck className="w-2.5 h-2.5" />
                             {conv.vehicle_plate || 'Tài xế'}
                           </span>
@@ -885,9 +922,13 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                           </span>
                         ) : null}
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
+                      <p
+                        className={`text-[11px] truncate mt-1 ${
+                          isUnread ? 'font-semibold text-slate-800 dark:text-slate-100' : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
                         {conv.last_direction === 'out' ? 'Bạn: ' : ''}
-                        {conv.last_message_preview || 'Chưa có tin nhắn'}
+                        {previewText(conv.last_message_preview) || 'Chưa có tin nhắn'}
                       </p>
                     </div>
                   </button>
@@ -959,19 +1000,32 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                         Xem tin cũ hơn
                       </button>
                     ) : (
-                      <>
-                        <span>Đã hiện hết tin đã lưu (từ {formatZaloDateTime(messages[0].created_at, true)}).</span>
-                        {isConnected && (
-                          <button
-                            onClick={() => handleSyncMessages(OLDER_SYNC_DAYS)}
-                            disabled={syncingMessages}
-                            className="font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 cursor-pointer"
-                            title="Zalo trên máy tính không giữ lịch sử: tin cũ phải lấy từ điện thoại (cần bấm Xác nhận trên điện thoại)"
-                          >
-                            Lấy tin {OLDER_SYNC_DAYS} ngày từ điện thoại
-                          </button>
+                      <div className="w-full max-w-md rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2.5 text-center space-y-1.5">
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          Đây là tin cũ nhất đang có trong app ({formatZaloDateTime(messages[0].created_at, true)})
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Zalo trên máy tính không giữ lịch sử cũ. Muốn xem tin trước đó, lấy từ điện thoại rồi bấm{' '}
+                          <b>Xác nhận đồng bộ</b> trong Zalo trên điện thoại (trong 2 phút).
+                        </p>
+                        {isConnected ? (
+                          <div className="flex items-center justify-center gap-2 pt-0.5">
+                            {OLDER_SYNC_OPTIONS.map((opt) => (
+                              <button
+                                key={opt.days}
+                                onClick={() => handleSyncMessages(opt.days)}
+                                disabled={syncingMessages}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[11px] font-semibold cursor-pointer"
+                              >
+                                <RefreshCw className={`w-3 h-3 ${syncingMessages ? 'animate-spin' : ''}`} />
+                                Lấy tin {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-rose-600 dark:text-rose-400">Kết nối Zalo trước để lấy tin cũ.</p>
                         )}
-                      </>
+                      </div>
                     )}
                   </div>
                 )}
@@ -982,6 +1036,30 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                 ) : (
                   messages.map((m) => {
                     const isOut = m.direction === 'out';
+                    const sticker = stickerImageUrl(m.content);
+                    if (sticker) {
+                      // Stickers stand on their own like in Zalo: no bubble, time underneath.
+                      return (
+                        <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`flex flex-col ${isOut ? 'items-end' : 'items-start'}`}>
+                            <img
+                              src={sticker}
+                              alt="Sticker"
+                              referrerPolicy="no-referrer"
+                              loading="lazy"
+                              className="w-28 h-28 object-contain"
+                              onError={(e) => {
+                                const span = document.createElement('span');
+                                span.textContent = '[Sticker]';
+                                span.className = 'text-xs text-slate-400';
+                                e.currentTarget.replaceWith(span);
+                              }}
+                            />
+                            <span className="text-[10px] text-slate-400 mt-0.5">{formatZaloDateTime(m.created_at)}</span>
+                          </div>
+                        </div>
+                      );
+                    }
                     return (
                       <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                         <div

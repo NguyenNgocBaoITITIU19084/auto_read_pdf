@@ -498,7 +498,7 @@ export interface ZaloMessage {
   direction: 'in' | 'out';
   sender_id: string;
   sender_name: string;
-  msg_type: 'text' | 'image' | 'file' | 'other';
+  msg_type: 'text' | 'image' | 'file' | 'sticker' | 'other';
   content: string;
   media_url: string;
   booking_no: string;
