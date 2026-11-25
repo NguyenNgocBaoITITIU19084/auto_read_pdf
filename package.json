@@ -94,6 +94,8 @@
     }
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "fzstd": "^0.1.1",
+    "zca-js": "^2.4.0"
   }
 }

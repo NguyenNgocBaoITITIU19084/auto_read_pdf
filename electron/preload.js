@@ -89,4 +89,46 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkForUpdates: () => ipcRenderer.invoke('update-check'),
   /** Quit and install a downloaded update. Resolves false when nothing is ready. */
   installUpdate: () => ipcRenderer.invoke('update-install'),
+
+  // --- Zalo messaging bridge ---
+  zaloGetState: () => ipcRenderer.invoke('zalo-get-state'),
+  zaloLoginQR: () => ipcRenderer.invoke('zalo-login-qr'),
+  zaloReconnect: () => ipcRenderer.invoke('zalo-reconnect'),
+  zaloLogout: () => ipcRenderer.invoke('zalo-logout'),
+  zaloSendMessage: (payload) => ipcRenderer.invoke('zalo-send-message', payload),
+  zaloSendBatch: (payload) => ipcRenderer.invoke('zalo-send-batch', payload),
+  zaloFindUser: (payload) => ipcRenderer.invoke('zalo-find-user', payload),
+  zaloSyncContacts: () => ipcRenderer.invoke('zalo-sync-contacts'),
+  zaloSyncMessages: (opts) => ipcRenderer.invoke('zalo-sync-messages', opts),
+  zaloFetchGroupHistory: (groupId) => ipcRenderer.invoke('zalo-fetch-group-history', groupId),
+  onZaloSyncProgress: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('zalo-sync-progress', listener);
+    return () => ipcRenderer.removeListener('zalo-sync-progress', listener);
+  },
+  onZaloStatus: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on('zalo-status', listener);
+    return () => ipcRenderer.removeListener('zalo-status', listener);
+  },
+  onZaloQR: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('zalo-qr', listener);
+    return () => ipcRenderer.removeListener('zalo-qr', listener);
+  },
+  onZaloMessageReceived: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('zalo-message-received', listener);
+    return () => ipcRenderer.removeListener('zalo-message-received', listener);
+  },
+  onZaloOpenThread: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on('zalo-open-thread', listener);
+    return () => ipcRenderer.removeListener('zalo-open-thread', listener);
+  },
 });

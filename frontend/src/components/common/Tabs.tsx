@@ -1,19 +1,20 @@
 import React from 'react';
-import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Container, Package, Truck, Users } from 'lucide-react';
+import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Container, Package, Truck, Users, MessageCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
-export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | 'logs';
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | 'zalo' | 'logs';
 
 interface TabsProps {
   activeTab: TabId;
   onChange: (tab: TabId) => void;
   onHoverTab?: (tab: TabId) => void;
+  zaloUnreadCount?: number;
 }
 
-export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab }) => {
+export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zaloUnreadCount = 0 }) => {
   const { t } = useApp();
 
-  const tabItems: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  const tabItems: { id: TabId; label: string; icon: React.ReactNode; badge?: number }[] = [
     {
       id: 'dashboard',
       label: t.tabs.dashboard,
@@ -60,6 +61,12 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab }) =
       icon: <Container className="w-4 h-4" />,
     },
     {
+      id: 'zalo',
+      label: t.tabs.zalo,
+      icon: <MessageCircle className="w-4 h-4" />,
+      badge: zaloUnreadCount > 0 ? zaloUnreadCount : undefined,
+    },
+    {
       id: 'logs',
       label: t.tabs.logs,
       icon: <ScrollText className="w-4 h-4" />,
@@ -84,6 +91,11 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab }) =
           >
             {tab.icon}
             <span>{tab.label}</span>
+            {tab.badge !== undefined && (
+              <span className="ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white leading-4">
+                {tab.badge > 99 ? '99+' : tab.badge}
+              </span>
+            )}
           </button>
         );
       })}

@@ -605,6 +605,10 @@ def init_db():
         from backend.app.core.fleet import create_fleet_tables
         create_fleet_tables(conn)
 
+        # Zalo messaging tables (conversations, messages, templates, session)
+        from backend.app.core.zalo import create_zalo_tables
+        create_zalo_tables(conn)
+
         # Create system_settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (

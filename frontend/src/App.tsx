@@ -8,6 +8,8 @@ import { extractClipboardFiles, isEditableTarget, isImageFile, isPdfFile } from 
 import { NotificationDetailModal } from './components/common/NotificationDetailModal';
 import { useMobileBridge } from './context/MobileBridgeContext';
 import { useNotifications } from './context/NotificationsContext';
+import { getZaloConversations } from './services/zaloApi';
+import type { ZaloDraftRequest } from './components/zalo/ZaloTab';
 
 const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').then((m) => ({ default: m.DashboardTab })));
 const BookingTab = lazy(() => import('./components/booking/BookingTab').then((m) => ({ default: m.BookingTab })));
@@ -16,6 +18,7 @@ const ContainerTab = lazy(() => import('./components/container/ContainerTab').th
 const TasksTab = lazy(() => import('./components/tasks/TasksTab').then((m) => ({ default: m.TasksTab })));
 const FleetTab = lazy(() => import('./components/fleet/FleetTab').then((m) => ({ default: m.FleetTab })));
 const TrailerTab = lazy(() => import('./components/fleet/TrailerTab').then((m) => ({ default: m.TrailerTab })));
+const ZaloTab = lazy(() => import('./components/zalo/ZaloTab').then((m) => ({ default: m.ZaloTab })));
 const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ default: m.LogsTab })));
 
 export const App: React.FC = () => {
@@ -33,6 +36,9 @@ export const App: React.FC = () => {
   }>({});
   const [pasteRequest, setPasteRequest] = useState<BookingPasteRequest | null>(null);
   const pasteSeqRef = useRef(0);
+  const [zaloUnreadCount, setZaloUnreadCount] = useState(0);
+  const [zaloThreadId, setZaloThreadId] = useState<string | undefined>(undefined);
+  const [zaloDraft, setZaloDraft] = useState<ZaloDraftRequest | null>(null);
 
   // A photo arriving from a paired phone should surface on the Booking tab, the same way a
   // pasted/dropped image does — the user is actively capturing a booking, so jump there for them.
@@ -46,6 +52,7 @@ export const App: React.FC = () => {
     if (tab === 'tasks') void import('./components/tasks/TasksTab');
     if (tab === 'fleet' || tab === 'trucks' || tab === 'drivers') void import('./components/fleet/FleetTab');
     if (tab === 'trailers') void import('./components/fleet/TrailerTab');
+    if (tab === 'zalo') void import('./components/zalo/ZaloTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -74,6 +81,25 @@ export const App: React.FC = () => {
       }
     });
   }, [handleNavigateTab, openDetail]);
+
+  // Keep Zalo unread badge updated on startup and incoming messages
+  useEffect(() => {
+    const refreshZaloUnread = () => {
+      getZaloConversations('unread')
+        .then((res) => setZaloUnreadCount(res.counts.unread_messages || 0))
+        .catch(() => {});
+    };
+    refreshZaloUnread();
+    const unsubMsg = window.electronAPI?.onZaloMessageReceived?.(() => refreshZaloUnread());
+    const unsubOpen = window.electronAPI?.onZaloOpenThread?.((data) => {
+      if (data?.threadId) setZaloThreadId(data.threadId);
+      setActiveTab('zalo');
+    });
+    return () => {
+      unsubMsg?.();
+      unsubOpen?.();
+    };
+  }, []);
 
   // A drill-down keyword is a one-shot hint for the tab it targets: drop it once the user leaves that
   // tab, otherwise every later visit re-applies the stale search (e.g. Vessel tab stuck on one vessel).
@@ -129,7 +155,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
       <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
       <NotificationDetailModal onNavigateTab={handleNavigateTab} />
-      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} />
+      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} zaloUnreadCount={zaloUnreadCount} />
       <main className="flex-1 overflow-hidden flex flex-col">
         <Suspense
           fallback={
@@ -164,6 +190,14 @@ export const App: React.FC = () => {
           {activeTab === 'trucks' && <FleetTab screen="trucks" initialSearchQuery={drilldownKeywords.trucks} />}
           {activeTab === 'drivers' && <FleetTab screen="drivers" initialSearchQuery={drilldownKeywords.drivers} />}
           {activeTab === 'trailers' && <TrailerTab initialSearchQuery={drilldownKeywords.trailers} />}
+          {activeTab === 'zalo' && (
+            <ZaloTab
+              initialThreadId={zaloThreadId}
+              draftRequest={zaloDraft}
+              onDraftHandled={(id) => setZaloDraft((prev) => (prev && prev.id === id ? null : prev))}
+              onUnreadCountChange={setZaloUnreadCount}
+            />
+          )}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

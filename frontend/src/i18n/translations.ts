@@ -13,6 +13,7 @@ export const translations = {
       trucks: "Xe tải",
       drivers: "Tài xế",
       trailers: "Rơ moóc",
+      zalo: "Zalo",
       logs: "Nhật ký"
     },
     settingsCenter: {
@@ -1833,6 +1834,7 @@ export const translations = {
       trucks: "Trucks",
       drivers: "Drivers",
       trailers: "Trailers",
+      zalo: "Zalo",
       logs: "Logs"
     },
     settingsCenter: {

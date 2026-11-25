@@ -443,6 +443,85 @@ export interface ElectronAPI {
   selectFolder?: (defaultPath?: string) => Promise<string | null>;
   /** Restart the backend owned by Electron. */
   restartBackend?: () => Promise<{ ok: boolean; reason?: 'not_owned' | 'busy' | 'failed' }>;
+  /** Zalo bridge (Electron only). */
+  zaloGetState?: () => Promise<ZaloBridgeState>;
+  zaloLoginQR?: () => Promise<ZaloBridgeState>;
+  zaloReconnect?: () => Promise<ZaloBridgeState>;
+  zaloLogout?: () => Promise<ZaloBridgeState>;
+  zaloSendMessage?: (payload: { threadId: string; threadType?: 'user' | 'group'; text: string; bookingNo?: string; displayName?: string; phone?: string }) => Promise<any>;
+  zaloSendBatch?: (payload: { recipients: { threadId: string; threadType?: 'user' | 'group'; displayName?: string; phone?: string }[]; text: string; bookingNo?: string }) => Promise<{ threadId: string; ok: boolean; error?: string }[]>;
+  zaloFindUser?: (payload: { phone: string; driverId?: number | null; driverName?: string }) => Promise<ZaloConversation>;
+  zaloSyncContacts?: () => Promise<{ synced: number }>;
+  zaloSyncMessages?: (opts?: { days?: number }) => Promise<{ conversations: number; inserted: number }>;
+  zaloFetchGroupHistory?: (groupId: string) => Promise<{ inserted: number }>;
+  onZaloSyncProgress?: (cb: (data: { stage: string; message: string }) => void) => () => void;
+  onZaloStatus?: (cb: (status: ZaloBridgeState) => void) => () => void;
+  onZaloQR?: (cb: (data: { stage: 'generated' | 'scanned' | 'expired' | 'declined'; image?: string; displayName?: string; avatar?: string }) => void) => () => void;
+  onZaloMessageReceived?: (cb: (data: any) => void) => () => void;
+  onZaloOpenThread?: (cb: (data: { threadId: string }) => void) => () => void;
+}
+
+export interface ZaloBridgeState {
+  status: 'disconnected' | 'qr_pending' | 'connected' | 'error';
+  uid: string;
+  displayName: string;
+  phone: string;
+  avatar: string;
+  lastError: string;
+  /** Saved credentials exist, so "Kết nối lại" can restore without a new QR scan. */
+  hasSavedSession?: boolean;
+}
+
+export interface ZaloConversation {
+  thread_id: string;
+  thread_type: 'user' | 'group';
+  display_name: string;
+  avatar: string;
+  phone: string;
+  driver_id: number | null;
+  driver_name?: string | null;
+  driver_phone?: string | null;
+  driver_status?: string | null;
+  vehicle_plate?: string | null;
+  unread_count: number;
+  needs_attention: number;
+  last_message_preview: string;
+  last_message_at: string;
+  last_direction: string;
+  updated_at: string;
+}
+
+export interface ZaloMessage {
+  id: number;
+  msg_id: string | null;
+  thread_id: string;
+  direction: 'in' | 'out';
+  sender_id: string;
+  sender_name: string;
+  msg_type: 'text' | 'image' | 'file' | 'other';
+  content: string;
+  media_url: string;
+  booking_no: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ZaloTemplate {
+  id: number;
+  name: string;
+  shortcut: string;
+  category: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ZaloUnlinkedDriver {
+  id: number;
+  name: string;
+  phone: string;
+  status: string;
+  vehicle_plate?: string | null;
 }
 
 export interface AppMetricsProcess {
