@@ -8,9 +8,11 @@ import { checkBookingDuplicatesApi, extractBookingImageDetailedApi, saveManualBo
 import { tf } from '../services/i18nFormat';
 import { isImageFile, isPdfFile } from '../components/booking/clipboard';
 import {
-  QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, dedupeIncoming, fieldErrorsFromSaveError, isPdfItem, makeQueueItem,
-  queueReducer, queueStats,
+  EMPTY_FIELDS, QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, classifyResult, dedupeIncoming,
+  fieldErrorsFromSaveError, findSameFile, isPdfItem, makeQueueItem, queueReducer, queueStats,
 } from '../services/imageQueueLogic';
+import { markZaloScanSaved } from '../services/zaloApi';
+import type { Booking, ImageExtractEngine } from '../types';
 
 export const MAX_QUEUE_ITEMS = 60;
 
@@ -41,6 +43,15 @@ export interface ImageQueueValue {
   savedVersion: number;
   lastSaved: { collectionId: number; bookingId: number } | null;
   enqueue: (files: File[], source: QueueSource) => EnqueueResult;
+  /** A booking already read elsewhere (the Zalo booking watch): added ready for review, not read again. */
+  enqueueReviewed: (input: {
+    file: File;
+    fields: Partial<Booking>;
+    engine: ImageExtractEngine;
+    warnings: string[];
+    collection: { id: number; name: string };
+    zaloMessageId?: number;
+  }) => string | null;
   pause: () => void;
   resume: () => void;
   retry: (id: string) => void;
@@ -199,6 +210,41 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return { ids: newItems.map((i) => i.id), added: newItems.length, duplicates, rejected };
   }, []);
 
+  const enqueueReviewed = useCallback<ImageQueueValue['enqueueReviewed']>((input) => {
+    // Already in the queue (opened twice from Zalo): just point at it
+    if (input.zaloMessageId !== undefined) {
+      const existing = itemsRef.current.find((i) => i.zaloMessageId === input.zaloMessageId);
+      if (existing) return existing.id;
+    }
+    // The same file was already added another way (dropped on the Booking tab): use that item, not a second copy
+    const same = findSameFile(itemsRef.current, input.file);
+    if (same) {
+      if (input.zaloMessageId !== undefined && same.status !== 'saved') {
+        dispatch({ type: 'linkZalo', id: same.id, zaloMessageId: input.zaloMessageId });
+      }
+      return same.id;
+    }
+    if (itemsRef.current.length >= MAX_QUEUE_ITEMS) {
+      addToastRef.current(tf(tRef.current.booking.imageQueue.tooMany, { max: MAX_QUEUE_ITEMS, count: 1 }), 'error');
+      return null;
+    }
+    const base = makeQueueItem(input.file, 'zalo', input.collection);
+    const fields = { ...EMPTY_FIELDS, ...input.fields, 'Tên file PDF': base.name } as Partial<Booking>;
+    const warnings = input.warnings.filter((w) => typeof w === 'string' && w.trim());
+    const item = {
+      ...base,
+      status: classifyResult({ data: fields, engine_used: input.engine, warnings }),
+      fields,
+      original: fields,
+      engine: input.engine,
+      warnings,
+      zaloMessageId: input.zaloMessageId,
+    } as QueueItem;
+    dispatch({ type: 'add', items: [item] });
+    void checkDbDuplicate(item.id, item.collectionId, item.fields);
+    return item.id;
+  }, [checkDbDuplicate]);
+
   const pause = useCallback(() => setPaused((p) => p ?? 'user'), []);
   const resume = useCallback(() => setPaused(null), []);
   const retry = useCallback((id: string) => dispatch({ type: 'retry', id }), []);
@@ -244,6 +290,10 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         dispatch({ type: 'saved', id: item.id, bookingId: saved.id });
         setLastSaved({ collectionId: item.collectionId, bookingId: saved.id });
         setSavedVersion((n) => n + 1);
+      }
+      // Came from a Zalo chat: mark that message's file as saved
+      if (item.zaloMessageId !== undefined) {
+        markZaloScanSaved(item.zaloMessageId, saved.id, item.collectionId).catch(() => {});
       }
       return true;
     } catch (e: any) {
@@ -315,9 +365,9 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const value = useMemo<ImageQueueValue>(() => ({
     items, stats, paused, room: Math.max(0, MAX_QUEUE_ITEMS - items.length), batchDuplicates, geminiIssue, savedVersion, lastSaved,
-    enqueue, pause, resume, retry, retryFailed, remove, clearSaved, setField, save, saveAllSuccessful,
+    enqueue, enqueueReviewed, pause, resume, retry, retryFailed, remove, clearSaved, setField, save, saveAllSuccessful,
   }), [items, stats, paused, batchDuplicates, geminiIssue, savedVersion, lastSaved,
-    enqueue, pause, resume, retry, retryFailed, remove, clearSaved, setField, save, saveAllSuccessful]);
+    enqueue, enqueueReviewed, pause, resume, retry, retryFailed, remove, clearSaved, setField, save, saveAllSuccessful]);
 
   return <ImageQueueContext.Provider value={value}>{children}</ImageQueueContext.Provider>;
 };

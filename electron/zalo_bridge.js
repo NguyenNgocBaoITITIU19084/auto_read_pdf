@@ -879,6 +879,16 @@ function createZaloBridge({ userDataDir, backendRequest, sendToRenderer, showMai
           status: 'sent',
         })
       );
+      // Zalo sends the file's link back later, and now and then not at all: hand the bytes we already have to the
+      // booking watch (used only when this chat is watched).
+      if (isImage || /\.pdf$/i.test(sources[i].filename)) {
+        backendRequest(
+          'POST',
+          '/api/v1/zalo/messages/local-copy',
+          { msg_id: msgId, file_name: sources[i].filename, data_b64: sources[i].data.toString('base64') },
+          60000
+        ).catch((e) => log(`local-copy warning: ${e.message}`));
+      }
     }
     if (cleanCaption && res?.message?.msgId) {
       recorded.push(

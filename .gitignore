@@ -84,6 +84,8 @@ frontend/dist/
 *.sqlite3
 booking_data.db
 backend/booking_data.db
+# Booking files downloaded from watched Zalo chats (kept next to the database)
+zalo-files/
 
 # graphify knowledge graph output
 graphify-out/

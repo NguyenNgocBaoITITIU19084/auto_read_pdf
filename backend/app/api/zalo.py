@@ -11,7 +11,10 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from fastapi.responses import FileResponse
+
 from backend.app.core import zalo as zalo_core
+from backend.app.services import zalo_booking
 
 router = APIRouter(prefix="/zalo", tags=["Zalo"])
 
@@ -106,7 +109,7 @@ def clear_on_logout():
 
 @router.get("/conversations")
 def list_conversations(
-    filter: str = Query("all", pattern="^(all|drivers|unread|pending|hidden)$"),
+    filter: str = Query("all", pattern="^(all|drivers|unread|pending|hidden|watching)$"),
     q: str = Query(""),
     limit: int = Query(300, ge=1, le=500),
 ):
@@ -157,17 +160,28 @@ def get_messages(
     limit: int = Query(50, ge=1, le=200),
     before_id: Optional[int] = Query(None),
 ):
-    return zalo_core.list_messages(thread_id, limit=limit, before_id=before_id)
+    rows = zalo_core.list_messages(thread_id, limit=limit, before_id=before_id)
+    scans = zalo_booking.scans_for_messages([r["id"] for r in rows])
+    for r in rows:
+        r["booking_scan"] = scans.get(r["id"])
+    return rows
+
+
+def _after_record(res: dict) -> dict:
+    # A booking file in a watched chat (sent by anyone, the user included) goes to the scan queue
+    if res.get("message") and not res.get("duplicate"):
+        zalo_booking.on_message(res["message"], res.get("conversation"))
+    return res
 
 
 @router.post("/messages/incoming")
 def record_incoming_message(body: MessageIn):
-    return zalo_core.record_message(direction="in", **body.model_dump())
+    return _after_record(zalo_core.record_message(direction="in", **body.model_dump()))
 
 
 @router.post("/messages/outgoing")
 def record_outgoing_message(body: OutgoingMessageIn):
-    return zalo_core.record_message(direction="out", **body.model_dump())
+    return _after_record(zalo_core.record_message(direction="out", **body.model_dump()))
 
 
 class BatchMessageItemIn(BaseModel):
@@ -288,3 +302,120 @@ def proxy_zalo_media(url: str = Query(...)):
             raw_jxl.unlink(missing_ok=True)
 
     return Response(content=resp.content, media_type=content_type or "image/jpeg")
+
+
+# ---------------------------------------------------------------------------
+# Watched chats and booking scans (services/zalo_booking.py)
+# ---------------------------------------------------------------------------
+class WatchIn(BaseModel):
+    watch: bool
+
+
+class ScanHistoryIn(BaseModel):
+    days: Optional[int] = None  # None = every file stored for the chat
+
+
+class BookingSettingsIn(BaseModel):
+    collection_id: Optional[int] = None
+    image_mode: str = zalo_booking.DEFAULT_IMAGE_MODE
+
+
+class ScanSavedIn(BaseModel):
+    booking_id: int
+    collection_id: Optional[int] = None
+
+
+@router.post("/conversations/{thread_id}/watch")
+def watch_conversation(thread_id: str, body: WatchIn):
+    if not zalo_booking.set_watch(thread_id, body.watch):
+        raise HTTPException(status_code=404, detail="Không tìm thấy hội thoại")
+    conv = zalo_core.get_conversation(thread_id)
+    # Turning it on: say how many older files there are, so the user can choose to scan them
+    return {"conversation": conv, "history": zalo_booking.history_counts(thread_id) if body.watch else None}
+
+
+@router.post("/conversations/{thread_id}/scan-history")
+def scan_conversation_history(thread_id: str, body: ScanHistoryIn):
+    if not zalo_core.get_conversation(thread_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy hội thoại")
+    if body.days is not None and body.days <= 0:
+        raise HTTPException(status_code=400, detail="Số ngày phải lớn hơn 0")
+    return {"queued": zalo_booking.scan_history(thread_id, body.days)}
+
+
+class LocalCopyIn(BaseModel):
+    msg_id: str
+    file_name: str
+    data_b64: str
+
+
+@router.post("/messages/local-copy")
+def message_local_copy(body: LocalCopyIn):
+    import base64
+    import binascii
+
+    try:
+        data = base64.b64decode(body.data_b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Dữ liệu tệp không hợp lệ")
+    return {"scan": zalo_booking.attach_local_copy(body.msg_id, body.file_name, data)}
+
+
+@router.post("/messages/{message_id}/scan")
+def scan_message(message_id: int):
+    try:
+        return zalo_booking.scan_now(message_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/booking-scans")
+def list_booking_scans(status: str = Query(zalo_booking.PENDING_REVIEW)):
+    if status not in zalo_booking.STATUSES:
+        raise HTTPException(status_code=400, detail="Trạng thái không hợp lệ")
+    return zalo_booking.list_queue(status)
+
+
+@router.get("/booking-scans/summary")
+def booking_scans_summary():
+    return zalo_booking.summary()
+
+
+@router.get("/booking-scans/{message_id}/file")
+def booking_scan_file(message_id: int):
+    path = zalo_booking.file_path(message_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Không còn tệp trên máy")
+    media = "application/pdf" if path.endswith(".pdf") else "image/jpeg"
+    return FileResponse(path, media_type=media)
+
+
+@router.post("/booking-scans/{message_id}/saved")
+def booking_scan_saved(message_id: int, body: ScanSavedIn):
+    res = zalo_booking.mark_saved(message_id, body.booking_id, body.collection_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lượt quét")
+    return res
+
+
+@router.post("/booking-scans/{message_id}/dismiss")
+def booking_scan_dismiss(message_id: int):
+    res = zalo_booking.dismiss(message_id)
+    if not res:
+        raise HTTPException(status_code=404, detail="Không tìm thấy lượt quét")
+    return res
+
+
+@router.get("/booking-settings")
+def get_booking_settings():
+    return zalo_booking.get_settings()
+
+
+@router.put("/booking-settings")
+def put_booking_settings(body: BookingSettingsIn):
+    try:
+        return zalo_booking.save_settings(body.collection_id, body.image_mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

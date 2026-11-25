@@ -1,7 +1,7 @@
 import { apiClient } from './api';
-import type { ZaloConversation, ZaloMessage, ZaloTemplate, ZaloUnlinkedDriver } from '../types';
+import type { ZaloBookingScan, ZaloConversation, ZaloMessage, ZaloTemplate, ZaloUnlinkedDriver } from '../types';
 
-export type ZaloFilter = 'all' | 'drivers' | 'unread' | 'pending' | 'hidden';
+export type ZaloFilter = 'all' | 'drivers' | 'unread' | 'pending' | 'watching' | 'hidden';
 
 export interface ZaloConversationsResponse {
   items: ZaloConversation[];
@@ -12,6 +12,7 @@ export interface ZaloConversationsResponse {
     pending: number;
     unread_messages: number;
     hidden?: number;
+    watching?: number;
   };
 }
 
@@ -116,4 +117,75 @@ export const getZaloMediaUrl = (url: string): string => {
     return `${base}/zalo/media?url=${encodeURIComponent(url)}`;
   }
   return url;
+};
+
+// ---- Watched chats and booking scans ----------------------------------------------------------
+export type ZaloImageScanMode = 'manual' | 'caption' | 'auto';
+
+export interface ZaloHistoryCounts {
+  '7': { pdf: number; image: number };
+  '30': { pdf: number; image: number };
+  all: { pdf: number; image: number };
+}
+
+export const setZaloWatch = async (
+  threadId: string,
+  watch: boolean
+): Promise<{ conversation: ZaloConversation; history: ZaloHistoryCounts | null }> => {
+  const res = await apiClient.post(`/zalo/conversations/${encodeURIComponent(threadId)}/watch`, { watch });
+  return res.data;
+};
+
+export const scanZaloHistory = async (threadId: string, days: number | null): Promise<{ queued: number }> => {
+  const res = await apiClient.post(`/zalo/conversations/${encodeURIComponent(threadId)}/scan-history`, { days });
+  return res.data;
+};
+
+export const scanZaloMessage = async (messageId: number): Promise<ZaloBookingScan> => {
+  const res = await apiClient.post<ZaloBookingScan>(`/zalo/messages/${messageId}/scan`);
+  return res.data;
+};
+
+export const getZaloBookingQueue = async (status = 'pending_review'): Promise<ZaloBookingScan[]> => {
+  const res = await apiClient.get<ZaloBookingScan[]>('/zalo/booking-scans', { params: { status } });
+  return res.data;
+};
+
+export const getZaloBookingSummary = async (): Promise<{ pending_review: number; in_progress: number; version: number }> => {
+  const res = await apiClient.get('/zalo/booking-scans/summary');
+  return res.data;
+};
+
+/** The booking file kept on this machine (Zalo's own link may have expired). */
+export const getZaloBookingFile = async (scan: Pick<ZaloBookingScan, 'message_id' | 'file_name' | 'kind'>): Promise<File> => {
+  const res = await apiClient.get(`/zalo/booking-scans/${scan.message_id}/file`, { responseType: 'blob' });
+  const isPdf = scan.kind === 'pdf';
+  const name = isPdf ? scan.file_name || 'booking.pdf' : (scan.file_name || 'zalo_booking').replace(/\.[^.]+$/, '') + '.jpg';
+  return new File([res.data], name, { type: isPdf ? 'application/pdf' : 'image/jpeg' });
+};
+
+export const getZaloBookingFileUrl = (messageId: number): string =>
+  `${apiClient.defaults.baseURL || ''}/zalo/booking-scans/${messageId}/file`;
+
+export const markZaloScanSaved = async (messageId: number, bookingId: number, collectionId?: number | null) => {
+  const res = await apiClient.post(`/zalo/booking-scans/${messageId}/saved`, {
+    booking_id: bookingId,
+    collection_id: collectionId ?? null,
+  });
+  return res.data as ZaloBookingScan;
+};
+
+export const dismissZaloScan = async (messageId: number): Promise<ZaloBookingScan> => {
+  const res = await apiClient.post<ZaloBookingScan>(`/zalo/booking-scans/${messageId}/dismiss`);
+  return res.data;
+};
+
+export const getZaloBookingSettings = async (): Promise<{ collection_id: number | null; image_mode: ZaloImageScanMode }> => {
+  const res = await apiClient.get('/zalo/booking-settings');
+  return res.data;
+};
+
+export const saveZaloBookingSettings = async (payload: { collection_id: number | null; image_mode: ZaloImageScanMode }) => {
+  const res = await apiClient.put('/zalo/booking-settings', payload);
+  return res.data as { collection_id: number | null; image_mode: ZaloImageScanMode };
 };

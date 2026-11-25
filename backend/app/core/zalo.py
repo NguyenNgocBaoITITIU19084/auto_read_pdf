@@ -90,6 +90,9 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
     if "hidden" not in conv_cols:
         # Personal chats and ads hidden from the work view: kept and still synced, just not shown or counted.
         conn.execute("ALTER TABLE zalo_conversations ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;")
+    if "watch_booking" not in conv_cols:
+        # Booking PDFs / photos sent in a watched chat are read into the review queue (services/zalo_booking.py).
+        conn.execute("ALTER TABLE zalo_conversations ADD COLUMN watch_booking INTEGER NOT NULL DEFAULT 0;")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_driver ON zalo_conversations(driver_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_last_at ON zalo_conversations(last_message_at DESC);")
 
@@ -110,6 +113,30 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
         );
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_msg_thread ON zalo_messages(thread_id, id DESC);")
+
+    # One row per message with a file: the booking read from it and where it stands (services/zalo_booking.py).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS zalo_booking_scans (
+            message_id INTEGER PRIMARY KEY REFERENCES zalo_messages(id) ON DELETE CASCADE,
+            thread_id TEXT NOT NULL,
+            file_name TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL DEFAULT '',
+            sha256 TEXT NOT NULL DEFAULT '',
+            local_path TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            data_json TEXT NOT NULL DEFAULT '',
+            engine_used TEXT NOT NULL DEFAULT '',
+            booking_no TEXT NOT NULL DEFAULT '',
+            db_duplicate INTEGER NOT NULL DEFAULT 0,
+            booking_id INTEGER,
+            collection_id INTEGER,
+            message TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_scan_status ON zalo_booking_scans(status);")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_scan_sha ON zalo_booking_scans(sha256);")
 
     # One row per (message, person): Zalo shows each person's latest reaction; an empty icon removes it.
     conn.execute("""
@@ -214,6 +241,7 @@ def save_session(
 def clear_zalo_data() -> dict[str, Any]:
     """Delete all synced Zalo conversations and messages and reset session (templates are kept)."""
     with _conn() as conn:
+        conn.execute("DELETE FROM zalo_booking_scans;")
         conn.execute("DELETE FROM zalo_reactions;")
         conn.execute("DELETE FROM zalo_messages;")
         conn.execute("DELETE FROM zalo_conversations;")
@@ -263,11 +291,14 @@ def list_conversations(filter_by: str = "all", q: str = "", limit: int = 300) ->
             "pending": sum(1 for r in visible if r.get("needs_attention")),
             "unread_messages": sum(int(r.get("unread_count") or 0) for r in visible),
             "hidden": len(all_rows) - len(visible),
+            "watching": sum(1 for r in visible if r.get("watch_booking")),
         }
 
         items = visible
         if filter_by == "hidden":
             items = [r for r in all_rows if r.get("hidden")]
+        elif filter_by == "watching":
+            items = [r for r in items if r.get("watch_booking")]
         elif filter_by == "drivers":
             items = [r for r in items if r.get("driver_id") is not None]
         elif filter_by == "unread":

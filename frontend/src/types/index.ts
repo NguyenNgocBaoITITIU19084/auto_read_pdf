@@ -495,6 +495,8 @@ export interface ZaloConversation {
   needs_attention: number;
   /** 1 = set aside (personal chat, ads): not listed or counted outside "Đã ẩn". */
   hidden?: number;
+  /** 1 = booking files sent here are read into the review queue. */
+  watch_booking?: number;
   last_message_preview: string;
   last_message_at: string;
   last_direction: string;
@@ -516,6 +518,36 @@ export interface ZaloMessage {
   created_at: string;
   /** Reactions grouped by icon, most used first (Zalo codes like "/-strong"). */
   reactions?: { icon: string; count: number; mine: boolean; names: string[] }[];
+  /** The booking read from this message's file, when it was scanned. */
+  booking_scan?: ZaloBookingScan | null;
+}
+
+export type ZaloBookingScanStatus =
+  | 'downloading' | 'scanning' | 'manual' | 'pending_review' | 'saved' | 'duplicate'
+  | 'no_data' | 'not_booking' | 'expired' | 'error' | 'dismissed';
+
+export interface ZaloBookingScan {
+  message_id: number;
+  thread_id: string;
+  file_name: string;
+  kind: 'pdf' | 'image' | '';
+  status: ZaloBookingScanStatus;
+  data: Partial<Booking> & { __warnings?: string[] };
+  engine_used: string;
+  booking_no: string;
+  db_duplicate: number;
+  booking_id: number | null;
+  collection_id: number | null;
+  message: string;
+  has_file: boolean;
+  created_at: string;
+  updated_at: string;
+  /** Queue listing only */
+  sent_at?: string;
+  sender_name?: string;
+  direction?: 'in' | 'out';
+  conversation_name?: string;
+  thread_type?: 'user' | 'group';
 }
 
 export interface ZaloTemplate {

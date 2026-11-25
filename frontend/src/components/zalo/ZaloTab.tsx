@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
   ChevronLeft,
+  ClipboardList,
   ChevronRight,
   Clock,
   ExternalLink,
@@ -16,8 +17,10 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  ScanLine,
   Search,
   Send,
+  Settings2,
   ShieldCheck,
   Trash2,
   Truck,
@@ -27,10 +30,18 @@ import {
 } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { useApp } from '../../context/AppContext';
+import { useImageQueue } from '../../context/ImageQueueContext';
+import { ImageBookingModal } from '../booking/ImageBookingModal';
 import { getBookingTasksApi } from '../../services/api';
 import {
   createZaloTemplate,
   deleteZaloTemplate,
+  dismissZaloScan,
+  getZaloBookingFile,
+  getZaloBookingFileUrl,
+  getZaloBookingQueue,
+  getZaloBookingSettings,
+  getZaloBookingSummary,
   getZaloConversation,
   getZaloConversations,
   getZaloLinkCandidates,
@@ -41,11 +52,19 @@ import {
   getZaloUnlinkedDrivers,
   markZaloConversationRead,
   patchZaloConversation,
+  saveZaloBookingSettings,
+  scanZaloHistory,
+  scanZaloMessage,
+  setZaloWatch,
   ZaloFilter,
+  ZaloHistoryCounts,
+  ZaloImageScanMode,
   ZaloLinkCandidate,
 } from '../../services/zaloApi';
 import type {
   BookingTask,
+  ImageExtractEngine,
+  ZaloBookingScan,
   ZaloBridgeState,
   ZaloConversation,
   ZaloMessage,
@@ -72,7 +91,22 @@ const FILTER_OPTIONS: { id: Exclude<ZaloFilter, 'hidden'>; label: string }[] = [
   { id: 'drivers', label: 'Tài xế' },
   { id: 'unread', label: 'Chưa đọc' },
   { id: 'pending', label: 'Chờ xử lý' },
+  { id: 'watching', label: 'Theo dõi' },
 ];
+
+const IMAGE_MODE_OPTIONS: { id: ZaloImageScanMode; label: string; desc: string }[] = [
+  { id: 'manual', label: 'Bấm tay (mặc định)', desc: 'Ảnh chỉ được đọc khi bấm "Quét booking". Không gửi ảnh lên Gemini khi chạy nền.' },
+  {
+    id: 'caption',
+    label: 'Tự quét khi lời nhắn có chữ booking',
+    desc: 'Tự đọc ảnh bằng Gemini nếu lời nhắn kèm theo có "booking", "BKG" hoặc số booking.',
+  },
+  { id: 'auto', label: 'Tự quét mọi ảnh', desc: 'Mọi ảnh trong hội thoại theo dõi đều gửi Gemini để đọc. Tốn quota khi tài xế gửi nhiều ảnh cont, seal.' },
+];
+
+/** A PDF file or a photo: what the booking watch can read. */
+const isBookingCandidate = (m: ZaloMessage) =>
+  !!m.media_url && (m.msg_type === 'image' || (m.msg_type === 'file' && /\.pdf$/i.test(m.content || '')));
 
 // Template fields a booking fills in. {driver_name}/{vehicle_plate} come from the conversation instead.
 const PLACEHOLDER_RE = /\{([a-z_]+)\}/g;
@@ -234,7 +268,8 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   onUnreadCountChange,
 }) => {
   const { addToast } = useToast();
-  const { t } = useApp();
+  const { t, collections, activeCollection } = useApp();
+  const imageQueue = useImageQueue();
   const electronAPI = typeof window !== 'undefined' ? window.electronAPI : undefined;
   const hasZaloBridge = !!electronAPI?.zaloLoginQR;
 
@@ -259,7 +294,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const [filter, setFilter] = useState<ZaloFilter>('all');
   const [search, setSearch] = useState('');
   const [conversations, setConversations] = useState<ZaloConversation[]>([]);
-  const [counts, setCounts] = useState({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0, hidden: 0 });
+  const [counts, setCounts] = useState({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0, hidden: 0, watching: 0 });
   const [selectedThreadId, setSelectedThreadId] = useState<string>('');
   // The open conversation can drop out of the filtered list (e.g. "Chưa đọc" once it is read): keep its
   // last known row so the chat stays open.
@@ -277,6 +312,17 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const [dragOver, setDragOver] = useState(false);
   const [lightboxId, setLightboxId] = useState<number | null>(null);
   const [linkTarget, setLinkTarget] = useState<ZaloConversation | null>(null);
+  const [bookingSummary, setBookingSummary] = useState({ pending_review: 0, in_progress: 0 });
+  // The Booking tab's "Đọc & Kiểm Tra Booking" window, opened here on bookings read from Zalo
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewFocusId, setReviewFocusId] = useState<string | null>(null);
+  const [loadingReview, setLoadingReview] = useState(false);
+  const [showBookingSettings, setShowBookingSettings] = useState(false);
+  const [bookingSettings, setBookingSettings] = useState<{ collection_id: number | null; image_mode: ZaloImageScanMode }>({
+    collection_id: null,
+    image_mode: 'manual',
+  });
+  const [historyPrompt, setHistoryPrompt] = useState<{ conv: ZaloConversation; counts: ZaloHistoryCounts } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; conv: ZaloConversation } | null>(null);
   const [linkCandidates, setLinkCandidates] = useState<ZaloLinkCandidate[]>([]);
   const [linkSearch, setLinkSearch] = useState('');
@@ -328,7 +374,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     try {
       const res = await getZaloConversations(filter, search);
       setConversations(res.items);
-      setCounts({ ...res.counts, hidden: res.counts.hidden || 0 });
+      setCounts({ ...res.counts, hidden: res.counts.hidden || 0, watching: res.counts.watching || 0 });
       onUnreadCountChange?.(res.counts.unread_messages);
     } catch {
       // ignore transient fetch errors
@@ -622,7 +668,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     setSelectedThreadId('');
     setMessages([]);
     setConversations([]);
-    setCounts({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0, hidden: 0 });
+    setCounts({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0, hidden: 0, watching: 0 });
     onUnreadCountChange?.(0);
     autoQrTriggeredRef.current = false;
     await Promise.all([loadConversations(), loadTemplatesAndDrivers()]);
@@ -878,6 +924,281 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     }
   };
 
+  // ---- Booking watch ------------------------------------------------------------------------------
+  useEffect(() => {
+    getZaloBookingSettings().then(setBookingSettings).catch(() => {});
+  }, []);
+
+  // Scans finish in the background: poll a cheap summary and redraw the open chat when anything moved.
+  useEffect(() => {
+    let alive = true;
+    let lastVersion: number | null = null;
+    const tick = async () => {
+      try {
+        const sum = await getZaloBookingSummary();
+        if (!alive) return;
+        setBookingSummary({ pending_review: sum.pending_review, in_progress: sum.in_progress });
+        if (lastVersion !== null && sum.version !== lastVersion) {
+          const open = selectedThreadIdRef.current;
+          if (open) loadMessagesRef.current(open, undefined, true);
+        }
+        lastVersion = sum.version;
+      } catch {
+        // backend busy or restarting
+      }
+    };
+    void tick();
+    const timer = window.setInterval(tick, 4000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const handleToggleWatch = async (target: ZaloConversation) => {
+    const on = !target.watch_booking;
+    try {
+      const res = await setZaloWatch(target.thread_id, on);
+      afterConvPatch(res.conversation);
+      await loadConversations();
+      if (!on) {
+        addToast(`Đã tắt theo dõi booking "${target.display_name}"`, 'info');
+        return;
+      }
+      addToast(`Đang theo dõi booking trong "${target.display_name}"`, 'success');
+      const h = res.history;
+      if (h && h.all.pdf + h.all.image > 0) setHistoryPrompt({ conv: res.conversation, counts: h });
+    } catch {
+      addToast('Không cập nhật được theo dõi', 'error');
+    }
+  };
+
+  const handleScanHistory = async (days: number | null) => {
+    const target = historyPrompt?.conv;
+    setHistoryPrompt(null);
+    if (!target || days === 0) return;
+    try {
+      const res = await scanZaloHistory(target.thread_id, days);
+      addToast(`Đang quét ${res.queued} tệp cũ trong "${target.display_name}"`, 'info');
+    } catch {
+      addToast('Không quét được tệp cũ', 'error');
+    }
+  };
+
+  const handleScanMessage = async (m: ZaloMessage) => {
+    try {
+      const scan = await scanZaloMessage(m.id);
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, booking_scan: scan } : x)));
+    } catch (e: any) {
+      addToast(e?.response?.data?.detail || 'Không quét được tệp này', 'error');
+    }
+  };
+
+  const reviewCollection = () => {
+    const colId = bookingSettings.collection_id ?? activeCollection?.id ?? null;
+    return collections.find((c) => c.id === colId) || null;
+  };
+
+  /** Adds a scanned booking to the shared reading queue, already read (not read again). Returns its queue id. */
+  const addScanToReview = async (scan: ZaloBookingScan, col: { id: number; name: string }): Promise<string | null> => {
+    if (!scan.has_file) return null;
+    const file = await getZaloBookingFile(scan);
+    const { __warnings, ...fields } = scan.data || {};
+    return imageQueue.enqueueReviewed({
+      file,
+      fields,
+      engine: (scan.engine_used || 'none') as ImageExtractEngine,
+      warnings: Array.isArray(__warnings) ? __warnings : [],
+      collection: { id: col.id, name: col.name },
+      zaloMessageId: scan.message_id,
+    });
+  };
+
+  const needCollection = () => {
+    addToast('Chọn bộ sưu tập nhận booking trong cài đặt Zalo (bánh răng) trước', 'error');
+    setShowBookingSettings(true);
+  };
+
+  /** One booking: open the review window on it. */
+  const openBookingReview = async (scan: ZaloBookingScan) => {
+    const col = reviewCollection();
+    if (!col) return needCollection();
+    if (!scan.has_file) {
+      addToast('Tệp không còn trên máy — hãy bấm quét lại', 'error');
+      return;
+    }
+    try {
+      const id = await addScanToReview(scan, col);
+      if (id) {
+        setReviewFocusId(id);
+        setReviewOpen(true);
+      }
+    } catch {
+      addToast('Không mở được tệp booking', 'error');
+    }
+  };
+
+  /** "Chờ duyệt": every booking waiting, listed on the left of the review window. */
+  const openAllPendingReviews = async () => {
+    const col = reviewCollection();
+    if (!col) return needCollection();
+    setLoadingReview(true);
+    try {
+      const pending = await getZaloBookingQueue();
+      let first: string | null = null;
+      for (const scan of pending) {
+        try {
+          const id = await addScanToReview(scan, col);
+          first = first ?? id;
+        } catch {
+          // a file that cannot be opened stays in the queue for later
+        }
+      }
+      if (!first && imageQueue.items.length === 0) {
+        addToast('Chưa có booking nào chờ duyệt. Bật "Theo dõi" cho hội thoại khách gửi booking (chuột phải).', 'info');
+        return;
+      }
+      setReviewFocusId(first);
+      setReviewOpen(true);
+    } catch {
+      addToast('Không tải được danh sách chờ duyệt', 'error');
+    } finally {
+      setLoadingReview(false);
+    }
+  };
+
+  const closeReview = () => {
+    setReviewOpen(false);
+    // Saving there marked the Zalo messages: redraw their labels
+    const open = selectedThreadIdRef.current;
+    if (open) loadMessagesRef.current(open, undefined, true);
+  };
+
+  const handleDismissScan = async (scan: ZaloBookingScan) => {
+    try {
+      await dismissZaloScan(scan.message_id);
+      const open = selectedThreadIdRef.current;
+      if (open) loadMessagesRef.current(open, undefined, true);
+    } catch {
+      addToast('Không bỏ qua được', 'error');
+    }
+  };
+
+  const handleSaveBookingSettings = async () => {
+    try {
+      setBookingSettings(await saveZaloBookingSettings(bookingSettings));
+      setShowBookingSettings(false);
+      addToast('Đã lưu cài đặt quét booking', 'success');
+    } catch (e: any) {
+      addToast(e?.response?.data?.detail || 'Không lưu được cài đặt', 'error');
+    }
+  };
+
+  /** The line under a message with a file: where its booking stands, or a button to read it. */
+  const renderBookingScan = (m: ZaloMessage, isOut: boolean) => {
+    const scan = m.booking_scan;
+    const align = isOut ? 'justify-end' : 'justify-start';
+    const chip = 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium';
+    if (!scan) {
+      if (!isBookingCandidate(m)) return null;
+      return (
+        <div className={`flex ${align} mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity`}>
+          <button
+            onClick={() => handleScanMessage(m)}
+            className={`${chip} text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer`}
+          >
+            <ScanLine className="w-3 h-3" /> Quét booking
+          </button>
+        </div>
+      );
+    }
+    const no = scan.booking_no ? ` · ${scan.booking_no}` : '';
+    let body: React.ReactNode;
+    switch (scan.status) {
+      case 'downloading':
+      case 'scanning':
+        body = (
+          <span className={`${chip} bg-slate-100 dark:bg-slate-800 text-slate-500`}>
+            <RefreshCw className="w-3 h-3 animate-spin" /> Đang quét booking…
+          </span>
+        );
+        break;
+      case 'manual':
+        body = (
+          <button onClick={() => handleScanMessage(m)} className={`${chip} bg-blue-600 hover:bg-blue-700 text-white cursor-pointer`}>
+            <ScanLine className="w-3 h-3" /> Quét booking
+          </button>
+        );
+        break;
+      case 'pending_review':
+        body = (
+          <button
+            onClick={() => openBookingReview(scan)}
+            className={`${chip} bg-amber-100 hover:bg-amber-200 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 cursor-pointer`}
+            title="Bấm để duyệt và lưu booking"
+          >
+            <ClipboardList className="w-3 h-3" /> Chờ duyệt{no}
+            {scan.db_duplicate ? ' · ⚠️ đã có trong bộ sưu tập' : ''}
+          </button>
+        );
+        body = (
+          <span className="inline-flex items-center gap-1.5">
+            {body}
+            <button
+              onClick={() => handleDismissScan(scan)}
+              className="text-[10px] text-slate-400 hover:text-rose-500 underline cursor-pointer"
+              title="Không lưu booking này"
+            >
+              Bỏ qua
+            </button>
+          </span>
+        );
+        break;
+      case 'saved':
+        body = (
+          <span className={`${chip} bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300`}>
+            <CheckCircle2 className="w-3 h-3" /> Đã lưu{no}
+          </span>
+        );
+        break;
+      case 'duplicate':
+        body = (
+          <span className={`${chip} bg-slate-100 dark:bg-slate-800 text-slate-500`} title={scan.message}>
+            ⚠️ Trùng{no} — {scan.message}
+          </span>
+        );
+        break;
+      case 'no_data':
+        body = (
+          <span className={`${chip} bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300`} title={scan.message}>
+            Không đọc được booking
+            <button onClick={() => openBookingReview(scan)} className="underline cursor-pointer">Nhập tay</button>
+          </span>
+        );
+        break;
+      case 'expired':
+        body = <span className={`${chip} bg-slate-100 dark:bg-slate-800 text-slate-500`}>⌛ {scan.message}</span>;
+        break;
+      case 'error':
+        body = (
+          <span className={`${chip} bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300`} title={scan.message}>
+            Lỗi quét
+            <button onClick={() => handleScanMessage(m)} className="underline cursor-pointer">Quét lại</button>
+          </span>
+        );
+        break;
+      case 'not_booking':
+        body = <span className={`${chip} text-slate-400`}>Không phải booking</span>;
+        break;
+      case 'dismissed':
+        body = <span className={`${chip} text-slate-400`}>Đã bỏ qua{no}</span>;
+        break;
+      default:
+        return null;
+    }
+    return <div className={`flex ${align} mt-1`}>{body}</div>;
+  };
+
   const filteredLinkCandidates = useMemo(() => {
     const q = linkSearch.trim().toLowerCase();
     if (!q) return linkCandidates;
@@ -1023,6 +1344,30 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={openAllPendingReviews}
+            disabled={loadingReview}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+              bookingSummary.pending_review > 0
+                ? 'bg-amber-100 hover:bg-amber-200 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+            }`}
+            title="Booking đọc được từ hội thoại theo dõi, chờ anh duyệt trước khi lưu"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            Chờ duyệt
+            {bookingSummary.pending_review > 0 && (
+              <span className="px-1.5 rounded-full bg-amber-500 text-white text-[10px] leading-4">{bookingSummary.pending_review}</span>
+            )}
+            {(bookingSummary.in_progress > 0 || loadingReview) && <RefreshCw className="w-3 h-3 animate-spin" />}
+          </button>
+          <button
+            onClick={() => setShowBookingSettings(true)}
+            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+            title="Cài đặt quét booking"
+          >
+            <Settings2 className="w-4 h-4" />
+          </button>
           <button
             onClick={() => {
               setBatchSelectedIds(conversations.filter((c) => c.driver_id !== null).slice(0, 3).map((c) => c.thread_id));
@@ -1230,6 +1575,15 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                             {conv.vehicle_plate || 'Tài xế'}
                           </span>
                         )}
+                        {conv.watch_booking ? (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                            title="Đang theo dõi booking"
+                          >
+                            <ClipboardList className="w-2.5 h-2.5" />
+                            Theo dõi
+                          </span>
+                        ) : null}
                         {conv.needs_attention ? (
                           <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
                             <Clock className="w-2.5 h-2.5" />
@@ -1338,6 +1692,22 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     </button>
                   ))}
                 <button
+                  onClick={() => handleToggleWatch(selectedConv)}
+                  title={
+                    selectedConv.watch_booking
+                      ? 'Đang theo dõi: tệp PDF / ảnh booking gửi vào đây được tự quét. Bấm để tắt.'
+                      : 'Theo dõi booking: tự quét tệp PDF / ảnh booking gửi vào hội thoại này'
+                  }
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                    selectedConv.watch_booking
+                      ? 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-950/60 dark:text-sky-300'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}
+                >
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  <span className="hidden xl:inline">{selectedConv.watch_booking ? 'Đang theo dõi' : 'Theo dõi'}</span>
+                </button>
+                <button
                   onClick={() => handleToggleHidden(selectedConv)}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
                   title={selectedConv.hidden ? 'Đưa hội thoại trở lại danh sách' : 'Ẩn hội thoại không liên quan công việc (không tính vào số chưa đọc)'}
@@ -1419,7 +1789,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     if (sticker) {
                       // Stickers stand on their own like in Zalo: no bubble, time underneath.
                       return (
-                        <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                        <div key={m.id} className={`group flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                           <div className={`flex flex-col ${isOut ? 'items-end' : 'items-start'}`}>
                             <img
                               src={sticker}
@@ -1436,13 +1806,14 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                               }}
                             />
                             <ReactionBar reactions={m.reactions} isOut={isOut} />
+                            {renderBookingScan(m, isOut)}
                             <span className="text-[10px] text-slate-400 mt-0.5">{formatZaloDateTime(m.created_at)}</span>
                           </div>
                         </div>
                       );
                     }
                     return (
-                      <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                      <div key={m.id} className={`group flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                         <div className={`flex flex-col max-w-[72%] ${isOut ? 'items-end' : 'items-start'}`}>
                         <div
                           className={`rounded-xl px-3.5 py-2 text-xs shadow-sm ${
@@ -1506,6 +1877,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                           </div>
                         </div>
                         <ReactionBar reactions={m.reactions} isOut={isOut} />
+                        {renderBookingScan(m, isOut)}
                         </div>
                       </div>
                     );
@@ -1689,6 +2061,126 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
       </div>
 
+      {/* Scan older files when a chat starts being watched */}
+      {historyPrompt && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 space-y-3">
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Quét các tệp đã gửi trước đó?</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              "{historyPrompt.conv.display_name}" đã có tệp PDF / ảnh gửi từ trước khi theo dõi. Booking đọc được sẽ vào hàng chờ duyệt, không tự lưu.
+              {bookingSettings.image_mode === 'manual' && ' Ảnh chỉ được liệt kê chờ bấm "Quét booking" (chế độ ảnh: bấm tay).'}
+              {' '}Link tệp Zalo cũ có thể đã hết hạn.
+            </p>
+            <div className="space-y-1.5">
+              {([
+                ['7', 7, '7 ngày gần đây'],
+                ['30', 30, '30 ngày gần đây'],
+                ['all', null, 'Tất cả tệp đã lưu'],
+              ] as const).map(([key, days, label]) => {
+                const c = historyPrompt.counts[key];
+                const total = c.pdf + c.image;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => handleScanHistory(days)}
+                    disabled={total === 0}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 text-xs cursor-pointer"
+                  >
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">{label}</span>
+                    <span className="text-slate-500">
+                      {c.pdf} PDF · {c.image} ảnh
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => handleScanHistory(0)}
+                className="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Không quét, chỉ theo dõi tệp mới
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bookings read from watched chats: the same review window as the Booking tab */}
+      <ImageBookingModal isOpen={reviewOpen} onClose={closeReview} focusItemId={reviewFocusId} />
+
+      {/* Booking scan settings */}
+      {showBookingSettings && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setShowBookingSettings(false)}>
+          <div
+            className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Cài đặt quét booking từ Zalo</h3>
+              <button onClick={() => setShowBookingSettings(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <label className="block space-y-1">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Bộ sưu tập nhận booking khi duyệt</span>
+              <select
+                value={bookingSettings.collection_id ?? ''}
+                onChange={(e) =>
+                  setBookingSettings((p) => ({ ...p, collection_id: e.target.value ? Number(e.target.value) : null }))
+                }
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100"
+              >
+                <option value="">— Bộ sưu tập đang mở —</option>
+                {collections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="space-y-1.5">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Ảnh booking trong hội thoại theo dõi</span>
+              {IMAGE_MODE_OPTIONS.map((opt) => (
+                <label
+                  key={opt.id}
+                  className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer ${
+                    bookingSettings.image_mode === opt.id
+                      ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-950/30'
+                      : 'border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="zalo-image-mode"
+                    checked={bookingSettings.image_mode === opt.id}
+                    onChange={() => setBookingSettings((p) => ({ ...p, image_mode: opt.id }))}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200">{opt.label}</span>
+                    <span className="block text-[11px] text-slate-500">{opt.desc}</span>
+                  </span>
+                </label>
+              ))}
+              {bookingSettings.image_mode !== 'manual' && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Ảnh sẽ được gửi lên Gemini từ nền để đọc, không cần anh bấm. PDF có chữ luôn đọc trên máy, không dùng AI.
+                </p>
+              )}
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleSaveBookingSettings}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                Lưu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Right-click menu on a conversation */}
       {ctxMenu && (
         <div
@@ -1735,6 +2227,9 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                 )}
                 <button className={item} onClick={run(() => handleToggleAttention(c))}>
                   <Clock className="w-3.5 h-3.5" /> {c.needs_attention ? 'Đánh dấu đã xử lý' : 'Đánh dấu chờ xử lý'}
+                </button>
+                <button className={item} onClick={run(() => handleToggleWatch(c))}>
+                  <ClipboardList className="w-3.5 h-3.5" /> {c.watch_booking ? 'Tắt theo dõi booking' : 'Theo dõi booking'}
                 </button>
                 <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
                 <button className={item} onClick={run(() => handleToggleHidden(c))}>
