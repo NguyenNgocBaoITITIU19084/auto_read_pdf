@@ -86,6 +86,10 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL DEFAULT ''
         );
     """)
+    conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(zalo_conversations);")}
+    if "hidden" not in conv_cols:
+        # Personal chats and ads hidden from the work view: kept and still synced, just not shown or counted.
+        conn.execute("ALTER TABLE zalo_conversations ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_driver ON zalo_conversations(driver_id);")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_last_at ON zalo_conversations(last_message_at DESC);")
 
@@ -250,16 +254,21 @@ def list_conversations(filter_by: str = "all", q: str = "", limit: int = 300) ->
                 COALESCE(NULLIF(d.name, ''), c.display_name) COLLATE NOCASE ASC;
             """,
         )
+        # Hidden chats leave every count and list except the "hidden" one, so they never raise the badge.
+        visible = [r for r in all_rows if not r.get("hidden")]
         counts = {
-            "all": len(all_rows),
-            "drivers": sum(1 for r in all_rows if r.get("driver_id") is not None),
-            "unread": sum(1 for r in all_rows if (r.get("unread_count") or 0) > 0),
-            "pending": sum(1 for r in all_rows if r.get("needs_attention")),
-            "unread_messages": sum(int(r.get("unread_count") or 0) for r in all_rows),
+            "all": len(visible),
+            "drivers": sum(1 for r in visible if r.get("driver_id") is not None),
+            "unread": sum(1 for r in visible if (r.get("unread_count") or 0) > 0),
+            "pending": sum(1 for r in visible if r.get("needs_attention")),
+            "unread_messages": sum(int(r.get("unread_count") or 0) for r in visible),
+            "hidden": len(all_rows) - len(visible),
         }
 
-        items = all_rows
-        if filter_by == "drivers":
+        items = visible
+        if filter_by == "hidden":
+            items = [r for r in all_rows if r.get("hidden")]
+        elif filter_by == "drivers":
             items = [r for r in items if r.get("driver_id") is not None]
         elif filter_by == "unread":
             items = [r for r in items if (r.get("unread_count") or 0) > 0]
@@ -400,6 +409,7 @@ def update_conversation(
     unlink_driver: bool = False,
     display_name: Optional[str] = None,
     phone: Optional[str] = None,
+    hidden: Optional[bool] = None,
 ) -> Optional[dict[str, Any]]:
     now = _now()
     with _conn() as conn:
@@ -411,6 +421,12 @@ def update_conversation(
         if needs_attention is not None:
             updates.append("needs_attention = ?")
             params.append(1 if needs_attention else 0)
+        if driver_id is not None and not unlink_driver:
+            ok = conn.execute(
+                "SELECT 1 FROM fleet_drivers WHERE id = ? AND deleted_at IS NULL;", (driver_id,)
+            ).fetchone()
+            if not ok:
+                raise ValueError("Không tìm thấy tài xế")
         if unlink_driver:
             updates.append("driver_id = NULL")
         elif driver_id is not None:
@@ -422,6 +438,12 @@ def update_conversation(
         if phone is not None:
             updates.append("phone = ?")
             params.append(phone.strip())
+        if hidden is not None:
+            updates.append("hidden = ?")
+            params.append(1 if hidden else 0)
+            if hidden:
+                # Nothing left to act on in a chat you set aside.
+                updates.append("needs_attention = 0")
         params.append(thread_id)
         conn.execute(f"UPDATE zalo_conversations SET {', '.join(updates)} WHERE thread_id = ?;", tuple(params))
     return get_conversation(thread_id)
@@ -515,7 +537,7 @@ def record_message(
             )
         else:
             unread_delta = 1 if mark_unread else 0
-            attention_sql = "1" if mark_unread else "needs_attention"
+            attention_sql = "CASE WHEN hidden = 1 THEN 0 ELSE 1 END" if mark_unread else "needs_attention"
             conn.execute(
                 f"""
                 UPDATE zalo_conversations
@@ -743,6 +765,27 @@ def list_messages(thread_id: str, limit: int = 50, before_id: Optional[int] = No
             )
         rows.reverse()
         _attach_reactions(conn, rows)
+        return rows
+
+
+def list_link_candidates() -> list[dict[str, Any]]:
+    """Working drivers for the "Gắn với tài xế" picker, with the chat each is already linked to (if any)."""
+    with _conn() as conn:
+        rows = _rows(
+            conn,
+            """
+            SELECT
+                d.id, d.name, d.phone, d.status,
+                v.plate AS vehicle_plate,
+                (SELECT c.thread_id FROM zalo_conversations c WHERE c.driver_id = d.id LIMIT 1) AS linked_thread_id,
+                (SELECT c.display_name FROM zalo_conversations c WHERE c.driver_id = d.id LIMIT 1) AS linked_name
+            FROM fleet_drivers d
+            LEFT JOIN fleet_assignments a ON a.driver_id = d.id AND a.ended_at IS NULL
+            LEFT JOIN fleet_vehicles v ON v.id = a.vehicle_id AND v.deleted_at IS NULL
+            WHERE d.deleted_at IS NULL AND d.status != 'left'
+            ORDER BY d.name COLLATE NOCASE ASC;
+            """,
+        )
         return rows
 
 

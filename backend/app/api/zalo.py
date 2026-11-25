@@ -40,6 +40,7 @@ class ConversationPatchIn(BaseModel):
     unlink_driver: bool = False
     display_name: Optional[str] = None
     phone: Optional[str] = None
+    hidden: Optional[bool] = None
 
 
 class MessageIn(BaseModel):
@@ -105,7 +106,7 @@ def clear_on_logout():
 
 @router.get("/conversations")
 def list_conversations(
-    filter: str = Query("all", pattern="^(all|drivers|unread|pending)$"),
+    filter: str = Query("all", pattern="^(all|drivers|unread|pending|hidden)$"),
     q: str = Query(""),
     limit: int = Query(300, ge=1, le=500),
 ):
@@ -141,7 +142,10 @@ def mark_read(thread_id: str):
 
 @router.patch("/conversations/{thread_id}")
 def patch_conversation(thread_id: str, body: ConversationPatchIn):
-    conv = zalo_core.update_conversation(thread_id, **body.model_dump())
+    try:
+        conv = zalo_core.update_conversation(thread_id, **body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not conv:
         raise HTTPException(status_code=404, detail="Không tìm thấy hội thoại")
     return conv
@@ -198,6 +202,11 @@ class ReactionIn(BaseModel):
 @router.post("/reactions")
 def record_reactions(items: list[ReactionIn]):
     return {"changed": zalo_core.record_reactions([i.model_dump() for i in items])}
+
+
+@router.get("/drivers/link-candidates")
+def list_link_candidates():
+    return zalo_core.list_link_candidates()
 
 
 @router.get("/drivers/unlinked")

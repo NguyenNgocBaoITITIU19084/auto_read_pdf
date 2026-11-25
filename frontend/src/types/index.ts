@@ -493,6 +493,8 @@ export interface ZaloConversation {
   vehicle_plate?: string | null;
   unread_count: number;
   needs_attention: number;
+  /** 1 = set aside (personal chat, ads): not listed or counted outside "Đã ẩn". */
+  hidden?: number;
   last_message_preview: string;
   last_message_at: string;
   last_direction: string;

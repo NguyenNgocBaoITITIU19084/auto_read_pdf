@@ -202,3 +202,39 @@ def test_zalo_outgoing_message_does_not_rename_the_chat(client):
     })
     conv = client.get(f"/api/v1/zalo/conversations/{tid}").json()
     assert conv["display_name"] == "Ngân"
+
+
+def test_zalo_manual_driver_link_and_hidden_chats(client):
+    driver_id = fleet.create_driver({"name": "Tài Xế Gắn Tay", "phone": "0900000999"})
+    client.post("/api/v1/zalo/messages/incoming", json={"thread_id": "uid_manual", "msg_id": "ml_1", "display_name": "Zalo phụ", "content": "alo"})
+
+    picker = client.get("/api/v1/zalo/drivers/link-candidates").json()
+    row = next(d for d in picker if d["id"] == driver_id)
+    assert row["linked_thread_id"] is None
+
+    linked = client.patch("/api/v1/zalo/conversations/uid_manual", json={"driver_id": driver_id}).json()
+    assert linked["driver_id"] == driver_id and linked["driver_name"] == "Tài Xế Gắn Tay"
+    picker = client.get("/api/v1/zalo/drivers/link-candidates").json()
+    assert next(d for d in picker if d["id"] == driver_id)["linked_thread_id"] == "uid_manual"
+    assert client.patch("/api/v1/zalo/conversations/uid_manual", json={"driver_id": 999999}).status_code == 400
+
+    unlinked = client.patch("/api/v1/zalo/conversations/uid_manual", json={"unlink_driver": True}).json()
+    assert unlinked["driver_id"] is None
+
+    # Hidden: out of the normal list and counts, listed under "hidden", new messages don't flag it
+    client.post("/api/v1/zalo/messages/incoming", json={"thread_id": "uid_ads", "msg_id": "ad_1", "content": "Khuyến mãi"})
+    before = client.get("/api/v1/zalo/conversations").json()["counts"]
+    hid = client.patch("/api/v1/zalo/conversations/uid_ads", json={"hidden": True}).json()
+    assert hid["hidden"] == 1 and hid["needs_attention"] == 0
+    after = client.get("/api/v1/zalo/conversations").json()
+    assert "uid_ads" not in [c["thread_id"] for c in after["items"]]
+    assert after["counts"]["all"] == before["all"] - 1
+    assert after["counts"]["unread_messages"] == before["unread_messages"] - 1
+    assert after["counts"]["hidden"] == before.get("hidden", 0) + 1
+    assert [c["thread_id"] for c in client.get("/api/v1/zalo/conversations?filter=hidden").json()["items"]] == ["uid_ads"]
+
+    client.post("/api/v1/zalo/messages/incoming", json={"thread_id": "uid_ads", "msg_id": "ad_2", "content": "Mua ngay"})
+    assert client.get("/api/v1/zalo/conversations/uid_ads").json()["needs_attention"] == 0
+
+    shown = client.patch("/api/v1/zalo/conversations/uid_ads", json={"hidden": False}).json()
+    assert shown["hidden"] == 0

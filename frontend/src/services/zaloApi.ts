@@ -1,7 +1,7 @@
 import { apiClient } from './api';
 import type { ZaloConversation, ZaloMessage, ZaloTemplate, ZaloUnlinkedDriver } from '../types';
 
-export type ZaloFilter = 'all' | 'drivers' | 'unread' | 'pending';
+export type ZaloFilter = 'all' | 'drivers' | 'unread' | 'pending' | 'hidden';
 
 export interface ZaloConversationsResponse {
   items: ZaloConversation[];
@@ -11,6 +11,7 @@ export interface ZaloConversationsResponse {
     unread: number;
     pending: number;
     unread_messages: number;
+    hidden?: number;
   };
 }
 
@@ -29,14 +30,21 @@ export const getZaloConversation = async (threadId: string): Promise<ZaloConvers
   return res.data;
 };
 
-export const markZaloConversationRead =async (threadId: string): Promise<ZaloConversation> => {
+export const markZaloConversationRead = async (threadId: string): Promise<ZaloConversation> => {
   const res = await apiClient.post<ZaloConversation>(`/zalo/conversations/${encodeURIComponent(threadId)}/read`);
   return res.data;
 };
 
 export const patchZaloConversation = async (
   threadId: string,
-  payload: { needs_attention?: boolean; driver_id?: number | null; unlink_driver?: boolean; display_name?: string; phone?: string }
+  payload: {
+    needs_attention?: boolean;
+    driver_id?: number | null;
+    unlink_driver?: boolean;
+    display_name?: string;
+    phone?: string;
+    hidden?: boolean;
+  }
 ): Promise<ZaloConversation> => {
   const res = await apiClient.patch<ZaloConversation>(`/zalo/conversations/${encodeURIComponent(threadId)}`, payload);
   return res.data;
@@ -58,6 +66,21 @@ export const recordOutgoingZaloMessage = async (payload: {
   booking_no?: string;
 }) => {
   const res = await apiClient.post('/zalo/messages/outgoing', payload);
+  return res.data;
+};
+
+export interface ZaloLinkCandidate {
+  id: number;
+  name: string;
+  phone: string;
+  status: string;
+  vehicle_plate?: string | null;
+  linked_thread_id?: string | null;
+  linked_name?: string | null;
+}
+
+export const getZaloLinkCandidates = async (): Promise<ZaloLinkCandidate[]> => {
+  const res = await apiClient.get<ZaloLinkCandidate[]>('/zalo/drivers/link-candidates');
   return res.data;
 };
 

@@ -5,7 +5,11 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileText,
+  Link2,
+  Unlink,
   LogOut,
   MessageCircle,
   Paperclip,
@@ -29,6 +33,7 @@ import {
   deleteZaloTemplate,
   getZaloConversation,
   getZaloConversations,
+  getZaloLinkCandidates,
   getZaloMediaUrl,
   getZaloMessages,
   getZaloSession,
@@ -37,6 +42,7 @@ import {
   markZaloConversationRead,
   patchZaloConversation,
   ZaloFilter,
+  ZaloLinkCandidate,
 } from '../../services/zaloApi';
 import type {
   BookingTask,
@@ -61,7 +67,7 @@ interface ZaloTabProps {
   onUnreadCountChange?: (count: number) => void;
 }
 
-const FILTER_OPTIONS: { id: ZaloFilter; label: string }[] = [
+const FILTER_OPTIONS: { id: Exclude<ZaloFilter, 'hidden'>; label: string }[] = [
   { id: 'all', label: 'Tất cả' },
   { id: 'drivers', label: 'Tài xế' },
   { id: 'unread', label: 'Chưa đọc' },
@@ -253,7 +259,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const [filter, setFilter] = useState<ZaloFilter>('all');
   const [search, setSearch] = useState('');
   const [conversations, setConversations] = useState<ZaloConversation[]>([]);
-  const [counts, setCounts] = useState({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0 });
+  const [counts, setCounts] = useState({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0, hidden: 0 });
   const [selectedThreadId, setSelectedThreadId] = useState<string>('');
   // The open conversation can drop out of the filtered list (e.g. "Chưa đọc" once it is read): keep its
   // last known row so the chat stays open.
@@ -270,6 +276,11 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [lightboxId, setLightboxId] = useState<number | null>(null);
+  const [linkTarget, setLinkTarget] = useState<ZaloConversation | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; conv: ZaloConversation } | null>(null);
+  const [linkCandidates, setLinkCandidates] = useState<ZaloLinkCandidate[]>([]);
+  const [linkSearch, setLinkSearch] = useState('');
+  const [linkingDriverId, setLinkingDriverId] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
 
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
@@ -317,7 +328,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     try {
       const res = await getZaloConversations(filter, search);
       setConversations(res.items);
-      setCounts(res.counts);
+      setCounts({ ...res.counts, hidden: res.counts.hidden || 0 });
       onUnreadCountChange?.(res.counts.unread_messages);
     } catch {
       // ignore transient fetch errors
@@ -611,7 +622,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     setSelectedThreadId('');
     setMessages([]);
     setConversations([]);
-    setCounts({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0 });
+    setCounts({ all: 0, drivers: 0, unread: 0, pending: 0, unread_messages: 0, hidden: 0 });
     onUnreadCountChange?.(0);
     autoQrTriggeredRef.current = false;
     await Promise.all([loadConversations(), loadTemplatesAndDrivers()]);
@@ -786,12 +797,123 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [lightboxMsg, lightboxIndex, imageMessages]);
 
-  const handleToggleAttention = async () => {
-    if (!selectedConv) return;
-    const next = !selectedConv.needs_attention;
-    await patchZaloConversation(selectedConv.thread_id, { needs_attention: next });
-    await loadConversations();
+  // Each action takes the chat it acts on, so the header and the right-click menu share them.
+  // The snapshot is refreshed only when that chat is the open one.
+  const afterConvPatch = (conv: ZaloConversation) => {
+    if (conv.thread_id === selectedThreadIdRef.current) setSelectedConvSnapshot(conv);
   };
+
+  const openLinkModal = async (conv: ZaloConversation) => {
+    setLinkSearch('');
+    setLinkTarget(conv);
+    try {
+      setLinkCandidates(await getZaloLinkCandidates());
+    } catch {
+      addToast('Không tải được danh sách tài xế', 'error');
+    }
+  };
+
+  const handleLinkDriver = async (d: ZaloLinkCandidate) => {
+    if (!linkTarget || linkingDriverId) return;
+    setLinkingDriverId(d.id);
+    try {
+      const conv = await patchZaloConversation(linkTarget.thread_id, { driver_id: d.id });
+      afterConvPatch(conv);
+      setLinkTarget(null);
+      addToast(`Đã gắn "${linkTarget.display_name}" với tài xế ${d.name}`, 'success');
+      await Promise.all([loadConversations(), loadTemplatesAndDrivers()]);
+    } catch (e: any) {
+      addToast(e?.response?.data?.detail || 'Không gắn được tài xế', 'error');
+    } finally {
+      setLinkingDriverId(null);
+    }
+  };
+
+  const handleUnlinkDriver = async (target: ZaloConversation) => {
+    if (target.driver_id === null) return;
+    const name = target.driver_name || 'tài xế';
+    if (!window.confirm(`Bỏ gắn hội thoại này khỏi ${name}?`)) return;
+    try {
+      afterConvPatch(await patchZaloConversation(target.thread_id, { unlink_driver: true }));
+      addToast(`Đã bỏ gắn ${name}`, 'info');
+      await Promise.all([loadConversations(), loadTemplatesAndDrivers()]);
+    } catch {
+      addToast('Không bỏ gắn được', 'error');
+    }
+  };
+
+  const handleToggleHidden = async (target: ZaloConversation) => {
+    const hide = !target.hidden;
+    try {
+      const conv = await patchZaloConversation(target.thread_id, { hidden: hide });
+      afterConvPatch(conv);
+      if (hide) {
+        // Set aside: close it if open, like archiving a chat.
+        if (conv.thread_id === selectedThreadIdRef.current) setSelectedThreadId('');
+        addToast(`Đã ẩn "${conv.display_name}". Xem lại trong mục "Đã ẩn".`, 'info');
+      } else {
+        addToast(`Đã hiện lại "${conv.display_name}"`, 'success');
+      }
+      await loadConversations();
+    } catch {
+      addToast('Không cập nhật được hội thoại', 'error');
+    }
+  };
+
+  const handleToggleAttention = async (target: ZaloConversation) => {
+    try {
+      afterConvPatch(await patchZaloConversation(target.thread_id, { needs_attention: !target.needs_attention }));
+      await loadConversations();
+    } catch {
+      addToast('Không cập nhật được hội thoại', 'error');
+    }
+  };
+
+  const handleMarkRead = async (target: ZaloConversation) => {
+    try {
+      afterConvPatch(await markZaloConversationRead(target.thread_id));
+      await loadConversations();
+    } catch {
+      addToast('Không đánh dấu đã đọc được', 'error');
+    }
+  };
+
+  const filteredLinkCandidates = useMemo(() => {
+    const q = linkSearch.trim().toLowerCase();
+    if (!q) return linkCandidates;
+    return linkCandidates.filter(
+      (d) =>
+        d.name.toLowerCase().includes(q) ||
+        (d.phone || '').includes(q) ||
+        (d.vehicle_plate || '').toLowerCase().includes(q)
+    );
+  }, [linkCandidates, linkSearch]);
+
+  useEffect(() => {
+    if (!linkTarget) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setLinkTarget(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [linkTarget]);
+
+  // Right-click menu on a conversation row.
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('scroll', close, true);
+    };
+  }, [ctxMenu]);
 
   const handleFindDriverZalo = async (d: ZaloUnlinkedDriver) => {
     if (!electronAPI?.zaloFindUser || bridgeState.status !== 'connected') {
@@ -994,7 +1116,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                 className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div className="grid grid-cols-4 gap-1">
+            <div className="flex flex-wrap gap-1">
               {FILTER_OPTIONS.map((opt) => {
                 const active = filter === opt.id;
                 const count = counts[opt.id];
@@ -1002,17 +1124,45 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                   <button
                     key={opt.id}
                     onClick={() => setFilter(opt.id)}
-                    className={`px-1.5 py-1 rounded text-[11px] font-semibold truncate cursor-pointer transition-colors ${
+                    title={`${opt.label}${count > 0 ? `: ${count}` : ''}`}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap cursor-pointer transition-colors ${
                       active
                         ? 'bg-blue-600 text-white'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
-                    {opt.label} {count > 0 ? `(${count})` : ''}
+                    {opt.label}
+                    {count > 0 && (
+                      <span
+                        className={`px-1 min-w-[16px] text-center rounded text-[10px] leading-4 ${
+                          active ? 'bg-white/25' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
+                        }`}
+                      >
+                        {count > 999 ? '999+' : count}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
+            {filter === 'hidden' ? (
+              <button
+                onClick={() => setFilter('all')}
+                className="w-full text-left text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+              >
+                ← Đang xem hội thoại đã ẩn ({counts.hidden}) — quay lại danh sách
+              </button>
+            ) : (
+              counts.hidden > 0 && (
+                <button
+                  onClick={() => setFilter('hidden')}
+                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 hover:text-blue-600 cursor-pointer"
+                >
+                  <EyeOff className="w-3 h-3" />
+                  Đã ẩn ({counts.hidden})
+                </button>
+              )
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/70">
@@ -1030,6 +1180,12 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                   <button
                     key={conv.thread_id}
                     onClick={() => setSelectedThreadId(conv.thread_id)}
+                    onContextMenu={(e) => {
+                      // Our own menu instead of the app's native one (Copy/Inspect).
+                      e.preventDefault();
+                      setCtxMenu({ x: e.clientX, y: e.clientY, conv });
+                    }}
+                    title={`${title}${conv.vehicle_plate ? ` • ${conv.vehicle_plate}` : ''} — chuột phải để gắn tài xế, ẩn...`}
                     className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 transition-colors cursor-pointer ${
                       isSelected
                         ? 'bg-blue-50/80 dark:bg-blue-950/40 border-l-2 border-blue-600'
@@ -1134,34 +1290,76 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
           ) : (
             <>
               {/* Chat Header */}
-              <div className="px-4 py-2.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+              <div className="px-4 py-2.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3
+                      className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate"
+                      title={selectedConv.driver_name || selectedConv.display_name}
+                    >
                       {selectedConv.driver_name || selectedConv.display_name}
                     </h3>
                     {selectedConv.vehicle_plate && (
-                      <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[11px] font-semibold">
+                      <span className="shrink-0 px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[11px] font-semibold">
                         {selectedConv.vehicle_plate}
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    SĐT: {selectedConv.driver_phone || selectedConv.phone || 'Chưa có'} • Thread: {selectedConv.thread_id}
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate" title={`Thread: ${selectedConv.thread_id}`}>
+                    SĐT: {selectedConv.driver_phone || selectedConv.phone || 'Chưa có'}
+                    {selectedConv.driver_id !== null && selectedConv.driver_name !== selectedConv.display_name
+                      ? ` • Zalo: ${selectedConv.display_name}`
+                      : ''}
                   </p>
                 </div>
 
+                <div className="flex items-center gap-1.5 shrink-0">
+                {selectedConv.thread_type === 'user' &&
+                  (selectedConv.driver_id !== null ? (
+                    <span className="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-lg text-xs font-semibold whitespace-nowrap bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                      <Truck className="w-3.5 h-3.5" />
+                      {selectedConv.driver_name}
+                      <button
+                        onClick={() => handleUnlinkDriver(selectedConv)}
+                        className="ml-0.5 p-0.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900 cursor-pointer"
+                        title="Bỏ gắn tài xế"
+                      >
+                        <Unlink className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => openLinkModal(selectedConv)}
+                      title="Gắn hội thoại với tài xế"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      <span className="hidden xl:inline">Gắn tài xế</span>
+                    </button>
+                  ))}
                 <button
-                  onClick={handleToggleAttention}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer ${
+                  onClick={() => handleToggleHidden(selectedConv)}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 cursor-pointer"
+                  title={selectedConv.hidden ? 'Đưa hội thoại trở lại danh sách' : 'Ẩn hội thoại không liên quan công việc (không tính vào số chưa đọc)'}
+                >
+                  {selectedConv.hidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  <span className="hidden xl:inline">{selectedConv.hidden ? 'Hiện lại' : 'Ẩn'}</span>
+                </button>
+                <button
+                  onClick={() => handleToggleAttention(selectedConv)}
+                  title={selectedConv.needs_attention ? 'Đánh dấu đã xử lý' : 'Đánh dấu chờ xử lý'}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
                     selectedConv.needs_attention
                       ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300'
                       : 'bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300'
                   }`}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {selectedConv.needs_attention ? 'Đánh dấu đã xử lý' : 'Đánh dấu chờ xử lý'}
+                  <span className="hidden xl:inline">
+                    {selectedConv.needs_attention ? 'Đánh dấu đã xử lý' : 'Đánh dấu chờ xử lý'}
+                  </span>
                 </button>
+                </div>
               </div>
 
               {/* Messages */}
@@ -1490,6 +1688,129 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Right-click menu on a conversation */}
+      {ctxMenu && (
+        <div
+          className="fixed z-[70] w-56 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl text-xs"
+          style={{ left: Math.min(ctxMenu.x, window.innerWidth - 232), top: Math.min(ctxMenu.y, window.innerHeight - 230) }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+          role="menu"
+        >
+          {(() => {
+            const c = ctxMenu.conv;
+            const run = (fn: () => void) => () => {
+              setCtxMenu(null);
+              fn();
+            };
+            const item = 'w-full flex items-center gap-2 px-3 py-1.5 text-left text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer';
+            return (
+              <>
+                <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 truncate" title={c.driver_name || c.display_name}>
+                  {c.driver_name || c.display_name}
+                </div>
+                <button className={item} onClick={run(() => setSelectedThreadId(c.thread_id))}>
+                  <MessageCircle className="w-3.5 h-3.5" /> Mở hội thoại
+                </button>
+                {c.thread_type === 'user' &&
+                  (c.driver_id !== null ? (
+                    <>
+                      <button className={item} onClick={run(() => openLinkModal(c))}>
+                        <Link2 className="w-3.5 h-3.5" /> Đổi tài xế
+                      </button>
+                      <button className={item} onClick={run(() => handleUnlinkDriver(c))}>
+                        <Unlink className="w-3.5 h-3.5" /> Bỏ gắn {c.driver_name}
+                      </button>
+                    </>
+                  ) : (
+                    <button className={item} onClick={run(() => openLinkModal(c))}>
+                      <Link2 className="w-3.5 h-3.5" /> Gắn với tài xế
+                    </button>
+                  ))}
+                {c.unread_count > 0 && (
+                  <button className={item} onClick={run(() => handleMarkRead(c))}>
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Đánh dấu đã đọc
+                  </button>
+                )}
+                <button className={item} onClick={run(() => handleToggleAttention(c))}>
+                  <Clock className="w-3.5 h-3.5" /> {c.needs_attention ? 'Đánh dấu đã xử lý' : 'Đánh dấu chờ xử lý'}
+                </button>
+                <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                <button className={item} onClick={run(() => handleToggleHidden(c))}>
+                  {c.hidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {c.hidden ? 'Hiện lại hội thoại' : 'Ẩn hội thoại'}
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Link a chat to a driver */}
+      {linkTarget && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setLinkTarget(null)}>
+          <div
+            className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Gắn hội thoại với tài xế</h3>
+                <p className="text-[11px] text-slate-500">
+                  Hội thoại: <b>{linkTarget.display_name}</b>
+                </p>
+              </div>
+              <button onClick={() => setLinkTarget(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <input
+                autoFocus
+                value={linkSearch}
+                onChange={(e) => setLinkSearch(e.target.value)}
+                placeholder="Tìm tên, SĐT, biển số..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {filteredLinkCandidates.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center">Không có tài xế phù hợp.</p>
+              ) : (
+                filteredLinkCandidates.map((d) => {
+                  const elsewhere = d.linked_thread_id && d.linked_thread_id !== linkTarget.thread_id;
+                  return (
+                    <button
+                      key={d.id}
+                      onClick={() => handleLinkDriver(d)}
+                      disabled={linkingDriverId !== null}
+                      className="w-full text-left py-2.5 px-1 flex items-center justify-between gap-2 hover:bg-slate-50 dark:hover:bg-slate-800/60 disabled:opacity-50 cursor-pointer"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">{d.name}</div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {d.phone || 'Chưa có SĐT'}
+                          {d.vehicle_plate ? ` • ${d.vehicle_plate}` : ''}
+                        </div>
+                        {elsewhere && (
+                          <div className="text-[10px] text-amber-600 dark:text-amber-400 truncate">
+                            Đang gắn với: {d.linked_name || d.linked_thread_id}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 shrink-0">
+                        {linkingDriverId === d.id ? 'Đang gắn...' : 'Gắn'}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image viewer */}
       {lightboxMsg && (
