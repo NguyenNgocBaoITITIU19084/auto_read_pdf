@@ -552,7 +552,7 @@ export const ImageBookingModal: React.FC<ImageBookingModalProps> = ({ isOpen, on
               {selected && (
                 <button
                   type="button"
-                  onClick={() => queue.remove(selected.id)}
+                  onClick={() => queue.discard(selected.id)}
                   aria-label={q.remove}
                   title={q.remove}
                   className="p-2 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 transition-colors"

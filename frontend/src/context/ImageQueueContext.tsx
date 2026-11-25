@@ -11,7 +11,7 @@ import {
   EMPTY_FIELDS, QueueItem, QueueSource, QueueStats, batchDuplicateIds, bookingKey, classifyResult, dedupeIncoming,
   fieldErrorsFromSaveError, findSameFile, isPdfItem, makeQueueItem, queueReducer, queueStats,
 } from '../services/imageQueueLogic';
-import { markZaloScanSaved } from '../services/zaloApi';
+import { dismissZaloScan, markZaloScanSaved } from '../services/zaloApi';
 import type { Booking, ImageExtractEngine } from '../types';
 
 export const MAX_QUEUE_ITEMS = 60;
@@ -57,6 +57,8 @@ export interface ImageQueueValue {
   retry: (id: string) => void;
   retryFailed: () => void;
   remove: (id: string) => void;
+  /** The user's "remove from queue": also marks a booking read from Zalo as dismissed, so it leaves "Chờ duyệt" */
+  discard: (id: string) => void;
   clearSaved: () => void;
   setField: (id: string, key: string, value: string) => void;
   /** Saves one item; asks first when its Booking No is a duplicate. Resolves true when saved. */
@@ -260,6 +262,15 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     dispatch({ type: 'remove', id });
   }, []);
 
+  const discard = useCallback((id: string) => {
+    const item = itemsRef.current.find((i) => i.id === id);
+    remove(id);
+    if (item?.zaloMessageId !== undefined && item.status !== 'saved') {
+      dismissZaloScan(item.zaloMessageId).catch(() =>
+        addToastRef.current(tRef.current.booking.imageQueue.zaloDismissFailed, 'error'));
+    }
+  }, [remove]);
+
   const setField = useCallback((id: string, key: string, value: string) => {
     dispatch({ type: 'setField', id, key, value });
     if (key !== 'Booking No') return;
@@ -365,9 +376,9 @@ export const ImageQueueProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const value = useMemo<ImageQueueValue>(() => ({
     items, stats, paused, room: Math.max(0, MAX_QUEUE_ITEMS - items.length), batchDuplicates, geminiIssue, savedVersion, lastSaved,
-    enqueue, enqueueReviewed, pause, resume, retry, retryFailed, remove, clearSaved, setField, save, saveAllSuccessful,
+    enqueue, enqueueReviewed, pause, resume, retry, retryFailed, remove, discard, clearSaved, setField, save, saveAllSuccessful,
   }), [items, stats, paused, batchDuplicates, geminiIssue, savedVersion, lastSaved,
-    enqueue, enqueueReviewed, pause, resume, retry, retryFailed, remove, clearSaved, setField, save, saveAllSuccessful]);
+    enqueue, enqueueReviewed, pause, resume, retry, retryFailed, remove, discard, clearSaved, setField, save, saveAllSuccessful]);
 
   return <ImageQueueContext.Provider value={value}>{children}</ImageQueueContext.Provider>;
 };

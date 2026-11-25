@@ -1359,9 +1359,10 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
               setShowBatchModal(true);
             }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer"
+            title="Gửi cùng một tin cho nhiều tài xế, lần lượt từng người"
           >
             <Users className="w-3.5 h-3.5" />
-            Gửi 2–3 tài xế
+            Gửi nhiều tài xế
           </button>
 
           <button
@@ -2569,7 +2570,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
       )}
 
-      {/* Batch Send Modal (2-3 drivers) */}
+      {/* Batch Send Modal (one message to several drivers) */}
       {showBatchModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 w-full max-w-lg p-5 space-y-3">
