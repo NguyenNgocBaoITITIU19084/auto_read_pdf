@@ -118,6 +118,40 @@ function previewText(text: string): string {
   return STICKER_RE.test((text || '').trim()) ? '[Sticker]' : text;
 }
 
+// Zalo reaction codes (zca-js `Reactions`) to the emoji Zalo draws for them.
+const REACTION_EMOJI: Record<string, string> = {
+  '/-heart': '❤️', '/-strong': '👍', ':>': '😆', ':o': '😮', ':-((': '😭', ':-h': '😡', ':-*': '😘',
+  ":')": '😂', '/-shit': '💩', '/-rose': '🌹', '/-break': '💔', '/-weak': '👎', ';xx': '😍', ';-/': '😕',
+  ';-)': '😉', '/-fade': '🥀', '/-li': '☀️', '/-bd': '🎂', '/-bome': '💣', '/-ok': '👌', '/-v': '✌️',
+  '/-thanks': '🙏', '/-punch': '👊', '/-share': '🔗', '_()_': '🙏', '/-no': '🙅', '/-bad': '👎',
+  '/-loveu': '🥰', '--b': '😓', ':((': '😢', 'x-)': '😎', '8-)': '🤓', ';-d': '😁', 'b-)': '😎',
+  ':--|': '😐', 'p-(': '😞', ':-bye': '👋', '|-)': '😴', ':wipe': '😅', ':-dig': '🤔', '&-(': '😧',
+  ':handclap': '👏', '>-|': '😠', ':-f': '🪑', ':-l': '🪑', ':-r': '🪑', ';-x': '🤐', ':-o': '😲',
+  ';-s': '😳', ';-a': '😨', ':-<': '☹️', ':))': '🤣', '$-)': '🤑', '/-beer': '🍺',
+};
+
+/** Zalo-style reaction chip under a message: up to 3 emoji, then the total. */
+const ReactionBar: React.FC<{ reactions?: ZaloMessage['reactions']; isOut: boolean }> = ({ reactions, isOut }) => {
+  if (!reactions || reactions.length === 0) return null;
+  const total = reactions.reduce((n, r) => n + r.count, 0);
+  const title = reactions
+    .map((r) => `${REACTION_EMOJI[r.icon] || r.icon} ${r.count}${r.mine ? ' (có bạn)' : ''}${r.names.length ? ` — ${r.names.join(', ')}` : ''}`)
+    .join('\n');
+  return (
+    <div className={`-mt-2 relative z-10 flex ${isOut ? 'justify-end pr-2' : 'justify-start pl-2'}`}>
+      <span
+        title={title}
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-sm text-[11px] leading-none"
+      >
+        {reactions.slice(0, 3).map((r) => (
+          <span key={r.icon}>{REACTION_EMOJI[r.icon] || r.icon}</span>
+        ))}
+        {total > 1 && <span className="ml-0.5 text-slate-500 dark:text-slate-300 font-medium">{total}</span>}
+      </span>
+    </div>
+  );
+};
+
 const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
 
 /** Message text with http(s) links clickable; Electron opens them in the system browser. */
@@ -257,7 +291,9 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
       }
       if (!silent) setLoadingMessages(true);
       try {
-        let rows = await getZaloMessages(threadId, MESSAGE_PAGE);
+        // A silent refresh re-reads what is on screen (up to 200), so reactions on older loaded messages update too.
+        const want = silent ? Math.min(200, Math.max(MESSAGE_PAGE, messagesRef.current.length)) : MESSAGE_PAGE;
+        let rows = await getZaloMessages(threadId, want);
         if (rows.length === 0 && conv?.thread_type === 'group' && electronAPI?.zaloFetchGroupHistory && bridgeState.status === 'connected') {
           const fetched = await electronAPI.zaloFetchGroupHistory(threadId).catch(() => ({ inserted: 0 }));
           if (fetched.inserted > 0) {
@@ -1055,6 +1091,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                                 e.currentTarget.replaceWith(span);
                               }}
                             />
+                            <ReactionBar reactions={m.reactions} isOut={isOut} />
                             <span className="text-[10px] text-slate-400 mt-0.5">{formatZaloDateTime(m.created_at)}</span>
                           </div>
                         </div>
@@ -1062,8 +1099,9 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     }
                     return (
                       <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`flex flex-col max-w-[72%] ${isOut ? 'items-end' : 'items-start'}`}>
                         <div
-                          className={`max-w-[72%] rounded-xl px-3.5 py-2 text-xs shadow-sm ${
+                          className={`rounded-xl px-3.5 py-2 text-xs shadow-sm ${
                             isOut
                               ? 'bg-blue-600 text-white rounded-br-none'
                               : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-bl-none'
@@ -1110,6 +1148,8 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                             <span>{formatZaloDateTime(m.created_at)}</span>
                             {m.booking_no && <span className="font-semibold">#{m.booking_no}</span>}
                           </div>
+                        </div>
+                        <ReactionBar reactions={m.reactions} isOut={isOut} />
                         </div>
                       </div>
                     );

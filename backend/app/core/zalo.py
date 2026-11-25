@@ -107,6 +107,19 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_msg_thread ON zalo_messages(thread_id, id DESC);")
 
+    # One row per (message, person): Zalo shows each person's latest reaction; an empty icon removes it.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS zalo_reactions (
+            msg_id TEXT NOT NULL,
+            thread_id TEXT NOT NULL DEFAULT '',
+            sender_id TEXT NOT NULL,
+            sender_name TEXT NOT NULL DEFAULT '',
+            icon TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (msg_id, sender_id)
+        );
+    """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS zalo_templates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -197,6 +210,7 @@ def save_session(
 def clear_zalo_data() -> dict[str, Any]:
     """Delete all synced Zalo conversations and messages and reset session (templates are kept)."""
     with _conn() as conn:
+        conn.execute("DELETE FROM zalo_reactions;")
         conn.execute("DELETE FROM zalo_messages;")
         conn.execute("DELETE FROM zalo_conversations;")
     return save_session(status="disconnected")
@@ -607,6 +621,71 @@ def record_messages_batch(items: list[dict[str, Any]]) -> int:
     return inserted
 
 
+def record_reactions(items: list[dict[str, Any]]) -> int:
+    """Apply reactions (live or the recent list Zalo sends on connect). Idempotent; an older event never
+    overrides a newer one, and an empty icon removes that person's reaction."""
+    now = _now()
+    changed = 0
+    with _conn() as conn:
+        for item in items:
+            msg_id = str(item.get("msg_id") or "").strip()
+            sender_id = str(item.get("sender_id") or "").strip()
+            if not msg_id or not sender_id:
+                continue
+            icon = str(item.get("icon") or "")
+            ts = str(item.get("created_at") or now)
+            existing = conn.execute(
+                "SELECT updated_at FROM zalo_reactions WHERE msg_id = ? AND sender_id = ?;", (msg_id, sender_id)
+            ).fetchone()
+            if existing and existing[0] > ts:
+                continue
+            if not icon:
+                cur = conn.execute("DELETE FROM zalo_reactions WHERE msg_id = ? AND sender_id = ?;", (msg_id, sender_id))
+                changed += cur.rowcount
+                continue
+            conn.execute(
+                """
+                INSERT INTO zalo_reactions (msg_id, thread_id, sender_id, sender_name, icon, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(msg_id, sender_id) DO UPDATE SET
+                    icon = excluded.icon,
+                    sender_name = COALESCE(NULLIF(excluded.sender_name, ''), sender_name),
+                    thread_id = COALESCE(NULLIF(excluded.thread_id, ''), thread_id),
+                    updated_at = excluded.updated_at;
+                """,
+                (msg_id, str(item.get("thread_id") or ""), sender_id, str(item.get("sender_name") or ""), icon, ts),
+            )
+            changed += 1
+    return changed
+
+
+def _attach_reactions(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+    """Add `reactions`: [{icon, count, mine, names}] to each message, most used icon first."""
+    ids = [r["msg_id"] for r in rows if r.get("msg_id")]
+    for r in rows:
+        r["reactions"] = []
+    if not ids:
+        return
+    own = conn.execute("SELECT uid FROM zalo_sessions WHERE id = 1;").fetchone()
+    own_uid = str(own[0]) if own and own[0] else ""
+    placeholders = ",".join("?" * len(ids))
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    for msg_id, sender_id, sender_name, icon in conn.execute(
+        f"SELECT msg_id, sender_id, sender_name, icon FROM zalo_reactions WHERE msg_id IN ({placeholders}) ORDER BY updated_at;",
+        tuple(ids),
+    ):
+        entry = grouped.setdefault(msg_id, {}).setdefault(icon, {"icon": icon, "count": 0, "mine": False, "names": []})
+        entry["count"] += 1
+        if own_uid and sender_id == own_uid:
+            entry["mine"] = True
+        if sender_name:
+            entry["names"].append(sender_name)
+    for r in rows:
+        by_icon = grouped.get(r.get("msg_id") or "")
+        if by_icon:
+            r["reactions"] = sorted(by_icon.values(), key=lambda e: -e["count"])
+
+
 def list_messages(thread_id: str, limit: int = 50, before_id: Optional[int] = None) -> list[dict[str, Any]]:
     with _conn() as conn:
         lim = max(1, min(limit, 200))
@@ -634,6 +713,7 @@ def list_messages(thread_id: str, limit: int = 50, before_id: Optional[int] = No
                 (thread_id, lim),
             )
         rows.reverse()
+        _attach_reactions(conn, rows)
         return rows
 
 

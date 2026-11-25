@@ -145,3 +145,28 @@ def test_zalo_messages_page_by_time_even_when_history_is_inserted_later(client):
         f"/api/v1/zalo/conversations/{tid}/messages", params={"limit": 10, "before_id": page2[0]["id"]}
     ).json()
     assert [m["content"] for m in page3] == ["old 0", "old 1"]
+
+
+def test_zalo_reactions_attach_to_messages_and_newest_wins(client):
+    tid = "uid_react"
+    client.post("/api/v1/zalo/session", json={"uid": "me_uid", "status": "connected"})
+    client.post("/api/v1/zalo/messages/incoming", json={"thread_id": tid, "msg_id": "m_react", "content": "Em tới cảng rồi"})
+
+    r = client.post("/api/v1/zalo/reactions", json=[
+        {"msg_id": "m_react", "thread_id": tid, "sender_id": "me_uid", "icon": "/-strong", "created_at": "2026-11-25 10:00:00"},
+        {"msg_id": "m_react", "thread_id": tid, "sender_id": "other", "sender_name": "A", "icon": "/-strong", "created_at": "2026-11-25 10:00:01"},
+        {"msg_id": "m_react", "thread_id": tid, "sender_id": "third", "icon": ":>", "created_at": "2026-11-25 10:00:02"},
+        # An older event for the same person must not override the newer one
+        {"msg_id": "m_react", "thread_id": tid, "sender_id": "third", "icon": "/-heart", "created_at": "2026-11-25 09:00:00"},
+    ])
+    assert r.status_code == 200
+
+    msgs = client.get(f"/api/v1/zalo/conversations/{tid}/messages").json()
+    reactions = msgs[-1]["reactions"]
+    assert reactions[0] == {"icon": "/-strong", "count": 2, "mine": True, "names": ["A"]}
+    assert reactions[1]["icon"] == ":>" and reactions[1]["count"] == 1
+
+    # Empty icon removes that person's reaction
+    client.post("/api/v1/zalo/reactions", json=[{"msg_id": "m_react", "sender_id": "third", "icon": "", "created_at": "2026-11-25 10:05:00"}])
+    msgs = client.get(f"/api/v1/zalo/conversations/{tid}/messages").json()
+    assert [x["icon"] for x in msgs[-1]["reactions"]] == ["/-strong"]

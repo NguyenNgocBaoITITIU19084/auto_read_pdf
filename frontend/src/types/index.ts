@@ -504,6 +504,8 @@ export interface ZaloMessage {
   booking_no: string;
   status: string;
   created_at: string;
+  /** Reactions grouped by icon, most used first (Zalo codes like "/-strong"). */
+  reactions?: { icon: string; count: number; mine: boolean; names: string[] }[];
 }
 
 export interface ZaloTemplate {

@@ -141,6 +141,25 @@ function stickerToken(obj) {
   return `[^${obj.catId},${obj.id}^]`;
 }
 
+// One row per reacted message. Zalo reports a reaction by the target's global id (gMsgID), which is the
+// msg_id we store; an empty icon means the person took the reaction back.
+function reactionItems(reaction, ownId) {
+  const data = reaction?.data || {};
+  const content = data.content || {};
+  const senderId = reaction?.isSelf ? String(ownId || data.uidFrom || '') : String(data.uidFrom || '');
+  const targets = Array.isArray(content.rMsg) ? content.rMsg : [];
+  return targets
+    .map((t) => ({
+      msg_id: String(t?.gMsgID || ''),
+      thread_id: String(reaction?.threadId || ''),
+      sender_id: senderId,
+      sender_name: reaction?.isSelf ? '' : String(data.dName || ''),
+      icon: String(content.rIcon || ''),
+      created_at: formatTs(data.ts),
+    }))
+    .filter((it) => it.msg_id && it.msg_id !== '0' && it.sender_id);
+}
+
 function parseIncomingMessage(msg) {
   const data = msg?.data || {};
   const isGroup = msg?.type === ThreadType.Group;
@@ -320,6 +339,43 @@ function createZaloBridge({ userDataDir, backendRequest, sendToRenderer, showMai
       if (!isCurrent()) return;
       listenerConnected = true;
       log('Zalo listener connected');
+      // Ask once for the recent reactions Zalo keeps (what Zalo Web shows on open); answered by `old_reactions`.
+      try {
+        listener.requestOldReactions?.(ThreadType.User);
+        listener.requestOldReactions?.(ThreadType.Group);
+      } catch (e) {
+        log(`requestOldReactions warning: ${e.message}`);
+      }
+    });
+
+    const saveReactions = async (reactions) => {
+      const ownId = String(connectedApi.getOwnId?.() || state.uid || '');
+      const items = reactions.flatMap((r) => reactionItems(r, ownId));
+      if (items.length === 0) return;
+      const res = await backendRequest('POST', '/api/v1/zalo/reactions', items);
+      if (Number(res?.changed || 0) > 0) {
+        for (const threadId of new Set(items.map((it) => it.thread_id))) {
+          sendToRenderer('zalo-message-received', { reaction: true, conversation: { thread_id: threadId } });
+        }
+      }
+    };
+
+    listener.on('reaction', async (reaction) => {
+      if (!isCurrent()) return;
+      try {
+        await saveReactions([reaction]);
+      } catch (e) {
+        log(`Reaction error: ${e.message}`);
+      }
+    });
+
+    listener.on('old_reactions', async (reactions) => {
+      if (!isCurrent() || !Array.isArray(reactions)) return;
+      try {
+        await saveReactions(reactions);
+      } catch (e) {
+        log(`Old reactions error: ${e.message}`);
+      }
     });
 
     listener.on('old_messages', async (messages) => {

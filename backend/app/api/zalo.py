@@ -186,6 +186,20 @@ def record_messages_batch(items: list[BatchMessageItemIn]):
     return {"inserted": inserted}
 
 
+class ReactionIn(BaseModel):
+    msg_id: str
+    thread_id: str = ""
+    sender_id: str
+    sender_name: str = ""
+    icon: str = ""
+    created_at: Optional[str] = None
+
+
+@router.post("/reactions")
+def record_reactions(items: list[ReactionIn]):
+    return {"changed": zalo_core.record_reactions([i.model_dump() for i in items])}
+
+
 @router.get("/drivers/unlinked")
 def list_unlinked_drivers():
     return zalo_core.list_unlinked_drivers()
