@@ -97,6 +97,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   zaloLogout: () => ipcRenderer.invoke('zalo-logout'),
   zaloSendMessage: (payload) => ipcRenderer.invoke('zalo-send-message', payload),
   zaloSendBatch: (payload) => ipcRenderer.invoke('zalo-send-batch', payload),
+  zaloSendFiles: (payload) => ipcRenderer.invoke('zalo-send-files', payload),
   zaloFindUser: (payload) => ipcRenderer.invoke('zalo-find-user', payload),
   zaloSyncContacts: () => ipcRenderer.invoke('zalo-sync-contacts'),
   zaloSyncMessages: (opts) => ipcRenderer.invoke('zalo-sync-messages', opts),

@@ -427,6 +427,23 @@ def update_conversation(
     return get_conversation(thread_id)
 
 
+def _fill_missing_media(conn: sqlite3.Connection, msg_id: str, msg_type: str, content: str, media_url: str) -> None:
+    """A file sent from the app is recorded before Zalo has a link for it; its echo from the listener
+    arrives with the same msg_id and the CDN link, so copy the link onto the existing row."""
+    if not msg_id or not media_url:
+        return
+    conn.execute(
+        """
+        UPDATE zalo_messages
+        SET media_url = ?,
+            msg_type = CASE WHEN ? IN ('image', 'file') THEN ? ELSE msg_type END,
+            content = CASE WHEN content = '' THEN ? ELSE content END
+        WHERE msg_id = ? AND media_url = '';
+        """,
+        (media_url, msg_type, msg_type, content or "", msg_id),
+    )
+
+
 def record_message(
     *,
     thread_id: str,
@@ -451,6 +468,11 @@ def record_message(
         if msg_id:
             dup = _rows(conn, "SELECT * FROM zalo_messages WHERE msg_id = ?;", (msg_id,))
             if dup:
+                if media_url and not dup[0].get("media_url"):
+                    _fill_missing_media(conn, msg_id, msg_type, content, media_url)
+                    dup = _rows(conn, "SELECT * FROM zalo_messages WHERE msg_id = ?;", (msg_id,))
+                    # Not a new message, but the open chat should redraw the now-visible image.
+                    return {"message": dup[0], "duplicate": False, "updated": True, "conversation": get_conversation(thread_id)}
                 return {"message": dup[0], "duplicate": True, "conversation": get_conversation(thread_id)}
 
         existing = _rows(conn, "SELECT * FROM zalo_conversations WHERE thread_id = ?;", (thread_id,))
@@ -464,6 +486,9 @@ def record_message(
         preview = preview[:140]
 
         mark_unread = (direction == "in") and (not is_history)
+        # An outgoing message names its sender (us), not the chat: never rename an existing chat from it.
+        if direction == "out" and existing:
+            display_name = ""
 
         if not existing:
             conn.execute(
@@ -553,6 +578,10 @@ def record_messages_batch(items: list[dict[str, Any]]) -> int:
             if msg_id:
                 dup = conn.execute("SELECT 1 FROM zalo_messages WHERE msg_id = ?;", (str(msg_id),)).fetchone()
                 if dup:
+                    _fill_missing_media(
+                        conn, str(msg_id), str(item.get("msg_type") or ""), str(item.get("content") or ""),
+                        str(item.get("media_url") or ""),
+                    )
                     continue
 
             direction = str(item.get("direction") or "in")

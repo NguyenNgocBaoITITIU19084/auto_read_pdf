@@ -134,6 +134,8 @@ export const App: React.FC = () => {
       if (images.length === 0 && pdfs.length === 0) return;
       // On the Container tab a pasted photo is read as a container photo (handled by ContainerTab)
       if (activeTabRef.current === 'container' && pdfs.length === 0) return;
+      // The Zalo tab attaches pasted files to the open chat itself.
+      if (activeTabRef.current === 'zalo') return;
 
       // Pasting into a text field: when the clipboard also carries text (e.g. cells copied from
       // Excel/Word include a bitmap rendition) keep the normal text paste — unless PDFs are present.

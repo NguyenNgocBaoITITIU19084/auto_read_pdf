@@ -67,7 +67,7 @@ class OutgoingMessageIn(BaseModel):
     display_name: str = ""
     phone: str = ""
     msg_type: str = "text"
-    content: str
+    content: str = ""
     media_url: str = ""
     booking_no: str = ""
     status: str = "sent"

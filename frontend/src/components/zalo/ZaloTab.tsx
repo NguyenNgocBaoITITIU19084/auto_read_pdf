@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
+  ExternalLink,
   FileText,
   LogOut,
   MessageCircle,
+  Paperclip,
   Plus,
   QrCode,
   RefreshCw,
@@ -90,6 +94,39 @@ function fillPlaceholders(text: string, values: Record<string, string>): string 
 }
 
 const MESSAGE_PAGE = 50;
+const MAX_ATTACHMENTS = 10;
+const MAX_ATTACHMENT_MB = 50;
+
+interface PendingAttachment {
+  id: number;
+  file: File;
+  /** Object URL for an image thumbnail; revoked when the attachment is removed or sent. */
+  previewUrl?: string;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function readAttachment(file: File) {
+  const data = new Uint8Array(await file.arrayBuffer());
+  let width: number | undefined;
+  let height: number | undefined;
+  if (file.type.startsWith('image/')) {
+    // Zalo wants an image's pixel size with the upload.
+    try {
+      const bmp = await createImageBitmap(file);
+      width = bmp.width;
+      height = bmp.height;
+      bmp.close();
+    } catch {
+      // not decodable here: sent without size
+    }
+  }
+  return { name: file.name, data, size: file.size, width, height };
+}
 const OLDER_SYNC_OPTIONS = [
   { days: 90, label: '90 ngày' },
   { days: 365, label: '1 năm' },
@@ -228,6 +265,11 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const [loadingOlder, setLoadingOlder] = useState(false);
 
   const [composerText, setComposerText] = useState('');
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const attachmentSeqRef = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [lightboxId, setLightboxId] = useState<number | null>(null);
   const [sending, setSending] = useState(false);
 
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
@@ -342,6 +384,12 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
       setLoadingOlder(false);
     }
   }, [addToast]);
+
+  // Images and stickers get their height only once loaded: stay pinned to the newest message.
+  const keepPinnedToBottom = () => {
+    const box = messagesBoxRef.current;
+    if (box && stickToBottomRef.current) box.scrollTop = box.scrollHeight;
+  };
 
   const handleMessagesScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const box = e.currentTarget;
@@ -632,9 +680,51 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     });
   };
 
+  const addAttachments = (files: File[]) => {
+    if (files.length === 0) return;
+    const tooBig = files.filter((f) => f.size > MAX_ATTACHMENT_MB * 1024 * 1024);
+    if (tooBig.length > 0) addToast(`Bỏ qua tệp lớn hơn ${MAX_ATTACHMENT_MB} MB: ${tooBig.map((f) => f.name).join(', ')}`, 'error');
+    const ok = files.filter((f) => f.size <= MAX_ATTACHMENT_MB * 1024 * 1024 && f.size > 0);
+    setAttachments((prev) => {
+      const room = MAX_ATTACHMENTS - prev.length;
+      if (ok.length > room) addToast(`Mỗi lần gửi tối đa ${MAX_ATTACHMENTS} tệp`, 'info');
+      return [
+        ...prev,
+        ...ok.slice(0, Math.max(0, room)).map((file) => ({
+          id: ++attachmentSeqRef.current,
+          file,
+          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+        })),
+      ];
+    });
+  };
+
+  const removeAttachment = (id: number) => {
+    setAttachments((prev) => {
+      const gone = prev.find((a) => a.id === id);
+      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  };
+
+  const clearAttachments = () => {
+    setAttachments((prev) => {
+      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      return [];
+    });
+  };
+
+  // Attachments belong to the chat they were picked in.
+  useEffect(() => {
+    clearAttachments();
+    setLightboxId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThreadId]);
+
   const handleSend = async () => {
     const text = composerText.trim();
-    if (!text || !selectedConv || sending) return;
+    const files = attachments;
+    if ((!text && files.length === 0) || !selectedConv || sending) return;
     if (!isConnected || !electronAPI?.zaloSendMessage) {
       addToast('Zalo chưa kết nối — tin nhắn CHƯA được gửi. Hãy kết nối lại rồi gửi.', 'error');
       return;
@@ -644,15 +734,32 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
       addToast(`Tin còn ô chưa điền: ${missing.join(', ')}`, 'error');
       return;
     }
+    if (files.length > 0 && !electronAPI.zaloSendFiles) {
+      addToast('Bản app này chưa hỗ trợ gửi tệp — hãy khởi động lại ứng dụng', 'error');
+      return;
+    }
     setSending(true);
     try {
-      await electronAPI.zaloSendMessage({
-        threadId: selectedConv.thread_id,
-        threadType: selectedConv.thread_type,
-        text,
-        displayName: selectedConv.display_name,
-        phone: selectedConv.phone,
-      });
+      if (files.length > 0) {
+        const payload = await Promise.all(files.map((a) => readAttachment(a.file)));
+        await electronAPI.zaloSendFiles!({
+          threadId: selectedConv.thread_id,
+          threadType: selectedConv.thread_type,
+          caption: text,
+          files: payload,
+          displayName: selectedConv.display_name,
+          phone: selectedConv.phone,
+        });
+        clearAttachments();
+      } else {
+        await electronAPI.zaloSendMessage({
+          threadId: selectedConv.thread_id,
+          threadType: selectedConv.thread_type,
+          text,
+          displayName: selectedConv.display_name,
+          phone: selectedConv.phone,
+        });
+      }
       setComposerText('');
       stickToBottomRef.current = true;
       await loadMessages(selectedConv.thread_id, selectedConv, true);
@@ -662,6 +769,22 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
       setSending(false);
     }
   };
+
+  // Images of the open chat in order, for the viewer's previous/next.
+  const imageMessages = useMemo(() => messages.filter((m) => m.msg_type === 'image' && m.media_url), [messages]);
+  const lightboxIndex = lightboxId === null ? -1 : imageMessages.findIndex((m) => m.id === lightboxId);
+  const lightboxMsg = lightboxIndex >= 0 ? imageMessages[lightboxIndex] : null;
+
+  useEffect(() => {
+    if (!lightboxMsg) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxId(null);
+      else if (e.key === 'ArrowLeft' && lightboxIndex > 0) setLightboxId(imageMessages[lightboxIndex - 1].id);
+      else if (e.key === 'ArrowRight' && lightboxIndex < imageMessages.length - 1) setLightboxId(imageMessages[lightboxIndex + 1].id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxMsg, lightboxIndex, imageMessages]);
 
   const handleToggleAttention = async () => {
     if (!selectedConv) return;
@@ -975,7 +1098,29 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
 
         {/* Center: Chat stream & composer */}
-        <div className="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950 min-w-0">
+        <div
+          className="relative flex-1 flex flex-col bg-slate-50 dark:bg-slate-950 min-w-0"
+          onDragOver={(e) => {
+            if (!selectedConv || !e.dataTransfer.types.includes('Files')) return;
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+          }}
+          onDrop={(e) => {
+            if (!selectedConv) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setDragOver(false);
+            addAttachments(Array.from(e.dataTransfer.files || []));
+          }}
+        >
+          {dragOver && (
+            <div className="absolute inset-2 z-20 rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/80 dark:bg-blue-950/70 flex items-center justify-center pointer-events-none">
+              <span className="text-sm font-semibold text-blue-700 dark:text-blue-200">Thả tệp vào đây để gửi</span>
+            </div>
+          )}
           {!selectedConv ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
               <MessageCircle className="w-12 h-12 mb-3 opacity-30" />
@@ -1083,6 +1228,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                               alt="Sticker"
                               referrerPolicy="no-referrer"
                               loading="lazy"
+                              onLoad={keepPinnedToBottom}
                               className="w-28 h-28 object-contain"
                               onError={(e) => {
                                 const span = document.createElement('span');
@@ -1107,18 +1253,30 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                               : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-bl-none'
                           }`}
                         >
+                          {m.msg_type === 'image' && !m.media_url && (
+                            <div className={`mb-1 inline-flex items-center gap-1.5 text-[11px] ${isOut ? 'text-blue-100' : 'text-slate-400'}`}>
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              Đang tải ảnh lên Zalo...
+                            </div>
+                          )}
                           {m.msg_type === 'image' && m.media_url && (
-                            <a href={getZaloMediaUrl(m.media_url)} target="_blank" rel="noreferrer" className="block mb-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setLightboxId(m.id)}
+                              className="block mb-1.5 cursor-zoom-in"
+                              title="Bấm để xem ảnh lớn"
+                            >
                               <img
                                 src={getZaloMediaUrl(m.media_url)}
                                 referrerPolicy="no-referrer"
                                 alt="Zalo media"
+                                onLoad={keepPinnedToBottom}
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none';
                                 }}
                                 className="max-h-64 rounded-lg object-contain bg-slate-100 dark:bg-slate-900"
                               />
-                            </a>
+                            </button>
                           )}
                           {m.msg_type === 'file' && m.media_url && (
                             <a
@@ -1198,10 +1356,66 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     Còn ô chưa điền: {composerPlaceholders.join(', ')} — bấm "+ Chèn vào tin" ở booking bên phải hoặc sửa tay.
                   </p>
                 )}
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map((a) => (
+                      <div
+                        key={a.id}
+                        className="relative flex items-center gap-2 pl-1 pr-6 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 max-w-[220px]"
+                      >
+                        {a.previewUrl ? (
+                          <img src={a.previewUrl} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+                        ) : (
+                          <div className="w-10 h-10 rounded bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                            <FileText className="w-5 h-5 text-slate-500" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-medium text-slate-700 dark:text-slate-200 truncate">{a.file.name}</div>
+                          <div className="text-[10px] text-slate-400">{formatBytes(a.file.size)}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a.id)}
+                          className="absolute top-1 right-1 text-slate-400 hover:text-rose-500 cursor-pointer"
+                          title="Bỏ tệp này"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-end gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      addAttachments(Array.from(e.target.files || []));
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={sending}
+                    className="p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 cursor-pointer shrink-0"
+                    title="Đính kèm ảnh / tệp (hoặc kéo thả, dán ảnh vào ô nhập)"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
                   <textarea
                     rows={3}
                     value={composerText}
+                    onPaste={(e) => {
+                      const files = Array.from(e.clipboardData?.files || []);
+                      if (files.length === 0) return;
+                      // Keep the paste here: stop the app-wide handler from sending images to the Booking tab.
+                      e.preventDefault();
+                      addAttachments(files);
+                    }}
                     onChange={(e) => setComposerText(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
@@ -1209,12 +1423,18 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                         handleSend();
                       }
                     }}
-                    placeholder="Nhập tin nhắn gửi tài xế... (Enter để gửi, Shift+Enter xuống dòng)"
+                    placeholder={
+                      attachments.length > 0
+                        ? 'Thêm lời nhắn kèm tệp (không bắt buộc)... Enter để gửi'
+                        : 'Nhập tin nhắn gửi tài xế... (Enter để gửi, Shift+Enter xuống dòng)'
+                    }
                     className="flex-1 resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     onClick={handleSend}
-                    disabled={!composerText.trim() || sending || !isConnected || composerPlaceholders.length > 0}
+                    disabled={
+                      (!composerText.trim() && attachments.length === 0) || sending || !isConnected || composerPlaceholders.length > 0
+                    }
                     className="px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
                   >
                     <Send className="w-3.5 h-3.5" />
@@ -1270,6 +1490,68 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Image viewer */}
+      {lightboxMsg && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/85 flex flex-col"
+          onClick={() => setLightboxId(null)}
+          role="dialog"
+          aria-label="Xem ảnh"
+        >
+          <div className="flex items-center justify-between px-4 py-3 text-white/90 text-xs" onClick={(e) => e.stopPropagation()}>
+            <span>
+              {lightboxIndex + 1}/{imageMessages.length} • {lightboxMsg.direction === 'out' ? 'Bạn gửi' : lightboxMsg.sender_name || selectedConv?.driver_name || selectedConv?.display_name || ''} •{' '}
+              {formatZaloDateTime(lightboxMsg.created_at)}
+            </span>
+            <div className="flex items-center gap-2">
+              <a
+                href={getZaloMediaUrl(lightboxMsg.media_url)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Mở bằng trình duyệt
+              </a>
+              <button onClick={() => setLightboxId(null)} className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 cursor-pointer" title="Đóng (Esc)">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="flex-1 flex items-center justify-center gap-3 px-4 pb-6 min-h-0">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (lightboxIndex > 0) setLightboxId(imageMessages[lightboxIndex - 1].id);
+              }}
+              disabled={lightboxIndex <= 0}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white disabled:opacity-20 cursor-pointer shrink-0"
+              title="Ảnh trước (←)"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <img
+              src={getZaloMediaUrl(lightboxMsg.media_url)}
+              referrerPolicy="no-referrer"
+              alt="Ảnh Zalo"
+              onClick={(e) => e.stopPropagation()}
+              className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
+            />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (lightboxIndex < imageMessages.length - 1) setLightboxId(imageMessages[lightboxIndex + 1].id);
+              }}
+              disabled={lightboxIndex >= imageMessages.length - 1}
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white disabled:opacity-20 cursor-pointer shrink-0"
+              title="Ảnh sau (→)"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 3-Step Setup & Guide Modal */}
       {qrModalOpen && (

@@ -170,3 +170,35 @@ def test_zalo_reactions_attach_to_messages_and_newest_wins(client):
     client.post("/api/v1/zalo/reactions", json=[{"msg_id": "m_react", "sender_id": "third", "icon": "", "created_at": "2026-11-25 10:05:00"}])
     msgs = client.get(f"/api/v1/zalo/conversations/{tid}/messages").json()
     assert [x["icon"] for x in msgs[-1]["reactions"]] == ["/-strong"]
+
+
+def test_zalo_sent_file_gets_link_from_its_echo(client):
+    tid = "uid_file"
+    # Recorded by the app right after sending: Zalo has no link yet
+    first = client.post("/api/v1/zalo/messages/outgoing", json={
+        "thread_id": tid, "msg_id": "att_1", "msg_type": "image", "content": "", "status": "sent",
+    }).json()
+    assert first["duplicate"] is False and first["message"]["media_url"] == ""
+
+    # The listener's self-echo of the same message carries the CDN link
+    echo = client.post("/api/v1/zalo/messages/outgoing", json={
+        "thread_id": tid, "msg_id": "att_1", "msg_type": "image", "content": "",
+        "media_url": "https://f1.photo.talk.zdn.vn/abc.jpg",
+    }).json()
+    assert echo["message"]["media_url"] == "https://f1.photo.talk.zdn.vn/abc.jpg"
+    msgs = client.get(f"/api/v1/zalo/conversations/{tid}/messages").json()
+    assert len(msgs) == 1 and msgs[0]["media_url"].endswith("abc.jpg")
+
+    # A plain repeat is still a duplicate
+    again = client.post("/api/v1/zalo/messages/outgoing", json={"thread_id": tid, "msg_id": "att_1", "content": ""}).json()
+    assert again["duplicate"] is True
+
+
+def test_zalo_outgoing_message_does_not_rename_the_chat(client):
+    tid = "uid_rename"
+    client.post("/api/v1/zalo/messages/incoming", json={"thread_id": tid, "msg_id": "rn_1", "display_name": "Ngân", "content": "hi"})
+    client.post("/api/v1/zalo/messages/outgoing", json={
+        "thread_id": tid, "msg_id": "rn_2", "display_name": "Chủ tài khoản", "content": "chào",
+    })
+    conv = client.get(f"/api/v1/zalo/conversations/{tid}").json()
+    assert conv["display_name"] == "Ngân"

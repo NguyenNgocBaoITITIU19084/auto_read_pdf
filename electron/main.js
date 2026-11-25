@@ -502,6 +502,10 @@ function registerIpc() {
     if (!isFromMainWindow(event)) throw new Error('Forbidden');
     return zaloBridge.sendMessage(payload || {});
   });
+  ipcMain.handle('zalo-send-files', async (event, payload) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.sendFiles(payload || {});
+  });
   ipcMain.handle('zalo-send-batch', async (event, payload) => {
     if (!isFromMainWindow(event)) throw new Error('Forbidden');
     return zaloBridge.sendBatch(payload || {});

@@ -201,7 +201,8 @@ function parseIncomingMessage(msg) {
     thread_id: threadId,
     msg_id: msgId || undefined,
     thread_type: isGroup ? 'group' : 'user',
-    display_name: isGroup ? '' : senderName,
+    // dName on a message you sent (from the phone or here) is your own name, not the chat's.
+    display_name: isGroup || msg?.isSelf ? '' : senderName,
     sender_id: senderId,
     sender_name: senderName,
     msg_type: msgType,
@@ -838,6 +839,65 @@ function createZaloBridge({ userDataDir, backendRequest, sendToRenderer, showMai
     return recorded;
   }
 
+  const IMAGE_EXT = /\.(jpe?g|png|webp)$/i;
+
+  // Files come from the renderer as bytes (no disk path needed). Each attachment is recorded right away
+  // under the msgId Zalo returns; the self-echo from the listener later fills in its CDN link.
+  async function sendFiles({ threadId, threadType = 'user', caption = '', files = [], displayName = '', phone = '' }) {
+    if (!api) throw new Error('Chưa kết nối tài khoản Zalo');
+    if (!Array.isArray(files) || files.length === 0) throw new Error('Chưa chọn tệp nào');
+    const sources = files.map((f, i) => {
+      const data = Buffer.from(f.data);
+      let filename = String(f.name || `tep_${i + 1}`).replace(/[\\/:*?"<>|]/g, '_');
+      if (!/\.[^.]+$/.test(filename)) filename += '.bin';
+      const metadata = { totalSize: data.length };
+      if (IMAGE_EXT.test(filename) && f.width && f.height) {
+        metadata.width = Number(f.width);
+        metadata.height = Number(f.height);
+      }
+      return { data, filename, metadata };
+    });
+
+    const zType = threadType === 'group' ? ThreadType.Group : ThreadType.User;
+    const cleanCaption = String(caption || '').trim();
+    const res = await api.sendMessage({ msg: cleanCaption, attachments: sources }, String(threadId), zType);
+
+    const ids = Array.isArray(res?.attachment) ? res.attachment : [];
+    const recorded = [];
+    for (let i = 0; i < sources.length; i++) {
+      const isImage = IMAGE_EXT.test(sources[i].filename);
+      const msgId = ids[i]?.msgId ? String(ids[i].msgId) : `local_${Date.now()}_${i}`;
+      recorded.push(
+        await backendRequest('POST', '/api/v1/zalo/messages/outgoing', {
+          thread_id: String(threadId),
+          msg_id: msgId,
+          thread_type: threadType,
+          display_name: displayName,
+          phone,
+          msg_type: isImage ? 'image' : 'file',
+          content: isImage ? '' : sources[i].filename,
+          status: 'sent',
+        })
+      );
+    }
+    if (cleanCaption && res?.message?.msgId) {
+      recorded.push(
+        await backendRequest('POST', '/api/v1/zalo/messages/outgoing', {
+          thread_id: String(threadId),
+          msg_id: String(res.message.msgId),
+          thread_type: threadType,
+          display_name: displayName,
+          phone,
+          msg_type: 'text',
+          content: cleanCaption,
+          status: 'sent',
+        })
+      );
+    }
+    sendToRenderer('zalo-message-received', { conversation: { thread_id: String(threadId) } });
+    return { sent: sources.length, recorded };
+  }
+
   async function sendBatch({ recipients = [], text, bookingNo = '' }) {
     if (!api) throw new Error('Chưa kết nối tài khoản Zalo');
     const results = [];
@@ -888,6 +948,7 @@ function createZaloBridge({ userDataDir, backendRequest, sendToRenderer, showMai
     logout,
     sendMessage,
     sendBatch,
+    sendFiles,
     findUserByPhone,
     syncContacts,
     syncMessagesFromPhone,

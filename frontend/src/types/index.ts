@@ -449,6 +449,14 @@ export interface ElectronAPI {
   zaloReconnect?: () => Promise<ZaloBridgeState>;
   zaloLogout?: () => Promise<ZaloBridgeState>;
   zaloSendMessage?: (payload: { threadId: string; threadType?: 'user' | 'group'; text: string; bookingNo?: string; displayName?: string; phone?: string }) => Promise<any>;
+  zaloSendFiles?: (payload: {
+    threadId: string;
+    threadType?: 'user' | 'group';
+    caption?: string;
+    files: { name: string; data: Uint8Array; size: number; width?: number; height?: number }[];
+    displayName?: string;
+    phone?: string;
+  }) => Promise<{ sent: number }>;
   zaloSendBatch?: (payload: { recipients: { threadId: string; threadType?: 'user' | 'group'; displayName?: string; phone?: string }[]; text: string; bookingNo?: string }) => Promise<{ threadId: string; ok: boolean; error?: string }[]>;
   zaloFindUser?: (payload: { phone: string; driverId?: number | null; driverName?: string }) => Promise<ZaloConversation>;
   zaloSyncContacts?: () => Promise<{ synced: number }>;
