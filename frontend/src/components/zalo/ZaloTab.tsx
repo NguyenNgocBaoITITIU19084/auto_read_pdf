@@ -22,7 +22,6 @@ import {
   Send,
   Settings2,
   ShieldCheck,
-  Trash2,
   Truck,
   UserPlus,
   Users,
@@ -33,9 +32,10 @@ import { useApp } from '../../context/AppContext';
 import { useImageQueue } from '../../context/ImageQueueContext';
 import { ImageBookingModal } from '../booking/ImageBookingModal';
 import { getBookingTasksApi } from '../../services/api';
+import { ZaloTemplateManager, type TemplateSelection } from './ZaloTemplateManager';
+import { BookingFillSearch } from './BookingFillSearch';
+import { TEMPLATE_FIELDS, categoryOf, shortcutMatches } from './zaloTemplates';
 import {
-  createZaloTemplate,
-  deleteZaloTemplate,
   dismissZaloScan,
   getZaloBookingFile,
   getZaloBookingFileUrl,
@@ -110,6 +110,7 @@ const isBookingCandidate = (m: ZaloMessage) =>
 
 // Template fields a booking fills in. {driver_name}/{vehicle_plate} come from the conversation instead.
 const PLACEHOLDER_RE = /\{([a-z_]+)\}/g;
+const BOOKING_FIELD_KEYS = new Set(TEMPLATE_FIELDS.filter((f) => f.source === 'booking').map((f) => f.key));
 
 function findPlaceholders(text: string): string[] {
   return [...new Set([...text.matchAll(PLACEHOLDER_RE)].map((m) => m[0]))];
@@ -121,7 +122,7 @@ function taskPlaceholderValues(task: BookingTask): Record<string, string> {
   return {
     booking_no: task['Booking No'] || '',
     qty_type: qty && eq ? `${qty}x${eq}` : eq,
-    empty_pickup_cy: task['Empty pickup CY'] || '',
+    empty_pickup_cy: task['Empty Pick Up CY'] || '',
     full_return_cy: task['Full return CY'] || '',
     cutoff_time: task['Hạn cut-off'] || '',
     vessel: task.Vessel || '',
@@ -330,10 +331,8 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   const [sending, setSending] = useState(false);
 
   const [templates, setTemplates] = useState<ZaloTemplate[]>([]);
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [newTplName, setNewTplName] = useState('');
-  const [newTplShortcut, setNewTplShortcut] = useState('');
-  const [newTplContent, setNewTplContent] = useState('');
+  const [templateManager, setTemplateManager] = useState<TemplateSelection | null>(null);
+  const [shortcutPick, setShortcutPick] = useState(0);
 
   const [unlinkedDrivers, setUnlinkedDrivers] = useState<ZaloUnlinkedDriver[]>([]);
   const [showFindDriverModal, setShowFindDriverModal] = useState(false);
@@ -369,6 +368,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
   );
   const isConnected = bridgeState.status === 'connected' && !!electronAPI?.zaloSendMessage;
   const composerPlaceholders = useMemo(() => findPlaceholders(composerText), [composerText]);
+  const composerNeedsBooking = composerPlaceholders.some((p) => BOOKING_FIELD_KEYS.has(p.slice(1, -1)));
 
   const loadConversations = useCallback(async () => {
     try {
@@ -719,13 +719,21 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     }
   };
 
-  const applyTemplate = (tpl: ZaloTemplate) => {
-    const text = fillPlaceholders(tpl.content, {
+  const fillFromChat = (tpl: ZaloTemplate) =>
+    fillPlaceholders(tpl.content, {
       driver_name: selectedConv?.driver_name || selectedConv?.display_name || '',
       vehicle_plate: selectedConv?.vehicle_plate || '',
     });
+
+  const applyTemplate = (tpl: ZaloTemplate) => {
+    const text = fillFromChat(tpl);
     setComposerText((prev) => (prev ? `${prev}\n${text}` : text));
   };
+
+  // "/cutoff" typed alone in the composer offers the templates with that shortcut.
+  const shortcutOptions = useMemo(() => shortcutMatches(templates, composerText), [templates, composerText]);
+  useEffect(() => setShortcutPick(0), [shortcutOptions.length]);
+  const pickShortcut = (tpl: ZaloTemplate) => setComposerText(fillFromChat(tpl));
 
   // With a template's booking fields still open, a booking fills them; otherwise it adds a summary line.
   const insertTaskIntoComposer = (task: BookingTask) => {
@@ -1295,29 +1303,6 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     }
   };
 
-  const handleCreateTemplate = async () => {
-    if (!newTplName.trim() || !newTplContent.trim()) return;
-    try {
-      await createZaloTemplate({
-        name: newTplName,
-        shortcut: newTplShortcut,
-        content: newTplContent,
-      });
-      setNewTplName('');
-      setNewTplShortcut('');
-      setNewTplContent('');
-      setShowTemplateModal(false);
-      await loadTemplatesAndDrivers();
-      addToast('Đã thêm mẫu tin nhắn', 'success');
-    } catch {
-      addToast('Không thể tạo mẫu tin nhắn', 'error');
-    }
-  };
-
-  const handleDeleteTemplate = async (id: number) => {
-    await deleteZaloTemplate(id);
-    await loadTemplatesAndDrivers();
-  };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950">
@@ -1890,29 +1875,35 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
                   <span className="text-[11px] font-semibold text-slate-400 shrink-0">Mẫu nhanh:</span>
                   {templates.map((tpl) => (
-                    <div key={tpl.id} className="inline-flex items-center shrink-0 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                      <button
-                        onClick={() => applyTemplate(tpl)}
-                        className="px-2 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:text-blue-600 cursor-pointer"
-                        title={tpl.content}
-                      >
-                        {tpl.name}
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTemplate(tpl.id)}
-                        className="pr-1.5 text-slate-400 hover:text-rose-500 cursor-pointer"
-                        title="Xóa mẫu"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
+                    <button
+                      key={tpl.id}
+                      onClick={() => applyTemplate(tpl)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setTemplateManager(tpl.id);
+                      }}
+                      className="inline-flex items-center gap-1.5 shrink-0 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:text-blue-600 hover:border-blue-400 cursor-pointer"
+                      title={`${tpl.shortcut ? tpl.shortcut + ' — ' : ''}${tpl.content}\n\n(Chuột phải để sửa)`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${categoryOf(tpl.category).dot}`} />
+                      {tpl.name}
+                    </button>
                   ))}
                   <button
-                    onClick={() => setShowTemplateModal(true)}
+                    onClick={() => setTemplateManager('new')}
                     className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40 shrink-0 cursor-pointer"
+                    title="Thêm mẫu mới"
                   >
                     <Plus className="w-3 h-3" />
-                    Thêm mẫu
+                    Thêm
+                  </button>
+                  <button
+                    onClick={() => setTemplateManager(templates[0]?.id ?? 'new')}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 shrink-0 cursor-pointer"
+                    title="Sửa, xóa, sắp xếp các mẫu tin nhắn nhanh"
+                  >
+                    <Settings2 className="w-3 h-3" />
+                    Quản lý mẫu
                   </button>
                 </div>
 
@@ -1922,9 +1913,15 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                   </p>
                 )}
                 {composerPlaceholders.length > 0 && (
-                  <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                    Còn ô chưa điền: {composerPlaceholders.join(', ')} — bấm "+ Chèn vào tin" ở booking bên phải hoặc sửa tay.
-                  </p>
+                  <div className="space-y-1.5">
+                    <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                      Còn ô chưa điền: {composerPlaceholders.join(', ')} —{' '}
+                      {composerNeedsBooking
+                        ? 'tìm booking ở ô dưới, bấm "+ Chèn vào tin" ở booking bên phải, hoặc sửa tay.'
+                        : 'sửa tay trong ô soạn tin.'}
+                    </p>
+                    {composerNeedsBooking && <BookingFillSearch onPick={insertTaskIntoComposer} />}
+                  </div>
                 )}
                 {attachments.length > 0 && (
                   <div className="flex flex-wrap gap-2">
@@ -1976,6 +1973,33 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                   >
                     <Paperclip className="w-4 h-4" />
                   </button>
+                  <div className="relative flex-1 flex">
+                  {shortcutOptions.length > 0 && (
+                    <ul className="absolute bottom-full left-0 mb-1 w-80 max-h-56 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg p-1 z-20">
+                      {shortcutOptions.map((tpl, i) => (
+                        <li key={tpl.id}>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              pickShortcut(tpl);
+                            }}
+                            onMouseEnter={() => setShortcutPick(i)}
+                            className={`w-full text-left rounded-md px-2 py-1.5 cursor-pointer ${
+                              i === shortcutPick ? 'bg-blue-50 dark:bg-blue-950/40' : ''
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 text-[11px]">
+                              <code className="text-blue-600 dark:text-blue-400">{tpl.shortcut}</code>
+                              <span className="font-semibold text-slate-700 dark:text-slate-200 truncate">{tpl.name}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate">{tpl.content}</div>
+                          </button>
+                        </li>
+                      ))}
+                      <li className="px-2 pt-1 text-[10px] text-slate-400">↑↓ chọn · Tab / Enter chèn</li>
+                    </ul>
+                  )}
                   <textarea
                     rows={3}
                     value={composerText}
@@ -1988,6 +2012,19 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     }}
                     onChange={(e) => setComposerText(e.target.value)}
                     onKeyDown={(e) => {
+                      if (shortcutOptions.length > 0) {
+                        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          const step = e.key === 'ArrowDown' ? 1 : -1;
+                          setShortcutPick((i) => (i + step + shortcutOptions.length) % shortcutOptions.length);
+                          return;
+                        }
+                        if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+                          e.preventDefault();
+                          pickShortcut(shortcutOptions[Math.min(shortcutPick, shortcutOptions.length - 1)]);
+                          return;
+                        }
+                      }
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         handleSend();
@@ -2000,6 +2037,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
                     }
                     className="flex-1 resize-none rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                  </div>
                   <button
                     onClick={handleSend}
                     disabled={
@@ -2582,49 +2620,18 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
       )}
 
-      {/* New Template Modal */}
-      {showTemplateModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Thêm mẫu tin nhắn nhanh</h3>
-              <button onClick={() => setShowTemplateModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <input
-              type="text"
-              value={newTplName}
-              onChange={(e) => setNewTplName(e.target.value)}
-              placeholder="Tên mẫu (vd: Báo lấy rỗng)"
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs"
-            />
-            <input
-              type="text"
-              value={newTplShortcut}
-              onChange={(e) => setNewTplShortcut(e.target.value)}
-              placeholder="Phím tắt (vd: /lay-rong)"
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-xs"
-            />
-            <textarea
-              rows={4}
-              value={newTplContent}
-              onChange={(e) => setNewTplContent(e.target.value)}
-              placeholder="Nội dung mẫu... Hỗ trợ {driver_name}, {vehicle_plate}"
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2.5 text-xs"
-            />
-            <div className="flex justify-end">
-              <button
-                onClick={handleCreateTemplate}
-                disabled={!newTplName.trim() || !newTplContent.trim()}
-                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
-              >
-                Lưu mẫu
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ZaloTemplateManager
+        isOpen={templateManager !== null}
+        initial={templateManager ?? 'new'}
+        onClose={() => setTemplateManager(null)}
+        templates={templates}
+        chatValues={{
+          driver_name: selectedConv?.driver_name || selectedConv?.display_name || undefined,
+          vehicle_plate: selectedConv?.vehicle_plate || undefined,
+        }}
+        onChanged={loadTemplatesAndDrivers}
+        addToast={addToast}
+      />
     </div>
   );
 };

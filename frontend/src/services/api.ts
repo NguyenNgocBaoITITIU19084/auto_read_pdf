@@ -4,7 +4,7 @@ import {
   AutoSyncStatus, AutoSyncMode, ImageExtractResult, ContainerImageResult, BulkEntity,
   VesselWatchlistBatchItem, ContainerWatchlistBatchItem, ResyncResult, RunSyncNowStatus,
   PageResult, ContainerPageResult, TableQuery, MobileSession, AppNotification, NotificationSettings,
-  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTasks,
+  AutoImportSettings, AutoImportFile, AutoImportRunResult, AutoImportSchedule, BookingPageResult, BookingTask, BookingTasks,
   FleetVehicle, FleetDriver, FleetAssignment, FleetDocument, VehicleCategory, VehicleStatus, VehicleStatusResult, FleetHistoryPage,
   FleetTrashedVehicle, FleetTrashedDriver, FleetTrashedTrailer, DriverDocument, VehicleDocument, FleetTrailer, FleetHitch, FleetHitchPage, HitchResult, VehicleTrailerResult,
 } from '../types';
@@ -139,6 +139,9 @@ export const getBookingTasksApi = async (collectionId?: number | null): Promise<
   (await apiClient.get<BookingTasks>('/bookings/today', {
     params: collectionId ? { collection_id: collectionId } : {}, timeout: 15000,
   })).data;
+/** Bookings of every collection whose booking no, vessel or carrier contains `q`, open ones first */
+export const lookupBookingTasksApi = async (q: string, limit = 12): Promise<BookingTask[]> =>
+  (await apiClient.get<BookingTask[]>('/bookings/lookup', { params: { q, limit } })).data;
 export const getBookingStatuses = async (collectionId: number): Promise<ColumnValueCount[]> =>
   (await apiClient.get<{ status: string; count: number }[]>('/bookings/statuses', { params: { collection_id: collectionId } }))
     .data.map((s) => ({ carrier: s.status, count: s.count }));

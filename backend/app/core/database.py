@@ -2780,6 +2780,40 @@ def get_booking_tasks(col_id: int | None = None, now: datetime | None = None) ->
             "generated_at": now.strftime("%d/%m/%Y %H:%M"), **groups}
 
 
+def search_booking_tasks(query: str, limit: int = 12) -> list[dict]:
+    """Bookings of every collection whose booking no, vessel or carrier contains `query`, shaped like the items of
+    get_booking_tasks (with "Hạn cut-off", "Bộ sưu tập", "collection_id"), for filling a Zalo message template.
+    Open bookings come first, then the newest. "Hạn cut-off" is '' when the booking has no readable cut-off."""
+    q = " ".join(str(query or "").split()).upper()
+    if not q:
+        return []
+    like = f"%{q}%"
+    open_list = ",".join(f"'{s}'" for s in _BOOKING_OPEN_STATUSES)
+    with get_connection() as conn:
+        rows = _select_dicts(
+            conn,
+            f"""SELECT * FROM bookings
+                WHERE UPPER(COALESCE(booking_no, '')) LIKE ? OR UPPER(COALESCE(vessel, '')) LIKE ?
+                   OR UPPER(COALESCE(carrier, '')) LIKE ?
+                ORDER BY CASE WHEN {_STATUS_EXPR} IN ({open_list}) THEN 0 ELSE 1 END,
+                         CASE WHEN UPPER(COALESCE(booking_no, '')) LIKE ? THEN 0 ELSE 1 END, id DESC
+                LIMIT ?;""",
+            (like, like, like, f"{q}%", max(1, min(int(limit), 50))),
+        )
+        names = {c_id: name for c_id, name in conn.execute("SELECT id, name FROM collections;").fetchall()}
+    out = []
+    for r in rows:
+        deadline = _cutoff_deadline(r.get("eport_cutoff") or r.get("cutoff_time"))
+        item = _booking_row_to_api(r)
+        item["Hạn cut-off"] = deadline.strftime("%d/%m/%Y %H:%M") if deadline else ""
+        item["Cut-off cả ngày"] = bool(deadline) and not _SORT_TIME.search(
+            str(r.get("eport_cutoff") or r.get("cutoff_time") or ""))
+        item["Bộ sưu tập"] = names.get(r["collection_id"], "")
+        item["collection_id"] = r["collection_id"]
+        out.append(item)
+    return out
+
+
 def run_reminders(now: datetime | None = None) -> dict:
     """The periodic reminder pass: cut-off reminders, the morning brief when it is due, the fleet's paper lock (expired
     papers make a truck / trailer "Không sẵn sàng"), then fleet document expiry."""

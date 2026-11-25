@@ -247,6 +247,8 @@ def create_template(body: TemplateIn):
 
 @router.put("/templates/{template_id}")
 def update_template(template_id: int, body: TemplatePatchIn):
+    if (body.name is not None and not body.name.strip()) or (body.content is not None and not body.content.strip()):
+        raise HTTPException(status_code=400, detail="Tên và nội dung mẫu không được để trống")
     tpl = zalo_core.update_template(template_id, **body.model_dump())
     if not tpl:
         raise HTTPException(status_code=404, detail="Không tìm thấy mẫu tin nhắn")

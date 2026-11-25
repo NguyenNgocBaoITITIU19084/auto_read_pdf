@@ -105,6 +105,14 @@ export const createZaloTemplate = async (payload: {
   return res.data;
 };
 
+export const updateZaloTemplate = async (
+  id: number,
+  payload: { name?: string; shortcut?: string; category?: string; content?: string },
+): Promise<ZaloTemplate> => {
+  const res = await apiClient.put<ZaloTemplate>(`/zalo/templates/${id}`, payload);
+  return res.data;
+};
+
 export const deleteZaloTemplate = async (id: number): Promise<void> => {
   await apiClient.delete(`/zalo/templates/${id}`);
 };
