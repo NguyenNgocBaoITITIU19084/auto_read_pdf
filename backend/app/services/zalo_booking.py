@@ -187,6 +187,12 @@ def is_candidate(msg: dict) -> bool:
     return msg.get("msg_type") == "file" and bool(_DOC_NAME.search(str(msg.get("content") or "")))
 
 
+def _uid(conn) -> str:
+    """The Zalo account logged in now: reads and the review queue show only its chats ('' = nobody, nothing)."""
+    row = conn.execute("SELECT uid FROM zalo_sessions WHERE id = 1;").fetchone()
+    return str(row[0]) if row and row[0] else ""
+
+
 def _file_name(msg: dict) -> str:
     if msg.get("msg_type") == "file":
         return str(msg.get("content") or "booking.pdf")
@@ -195,7 +201,10 @@ def _file_name(msg: dict) -> str:
 
 def set_watch(thread_id: str, watch: bool) -> Optional[dict]:
     with db.get_connection() as conn:
-        cur = conn.execute("UPDATE zalo_conversations SET watch_booking = ? WHERE thread_id = ?;", (1 if watch else 0, thread_id))
+        cur = conn.execute(
+            "UPDATE zalo_conversations SET watch_booking = ? WHERE account_uid = ? AND thread_id = ?;",
+            (1 if watch else 0, _uid(conn), thread_id),
+        )
         if cur.rowcount == 0:
             return None
     _bump()
@@ -211,9 +220,9 @@ def history_counts(thread_id: str) -> dict:
             SELECT m.id, m.msg_type, m.content, m.media_url, m.created_at
             FROM zalo_messages m
             LEFT JOIN zalo_booking_scans s ON s.message_id = m.id
-            WHERE m.thread_id = ? AND s.message_id IS NULL AND m.media_url != '';
+            WHERE m.account_uid = ? AND m.thread_id = ? AND s.message_id IS NULL AND m.media_url != '';
             """,
-            (thread_id,),
+            (_uid(conn), thread_id),
         )
     rows = [r for r in rows if is_candidate(r)]
 
@@ -246,10 +255,11 @@ def scan_history(thread_id: str, days: Optional[int]) -> int:
             """
             SELECT m.* FROM zalo_messages m
             LEFT JOIN zalo_booking_scans s ON s.message_id = m.id
-            WHERE m.thread_id = ? AND s.message_id IS NULL AND m.media_url != '' AND m.created_at >= ?
+            WHERE m.account_uid = ? AND m.thread_id = ? AND s.message_id IS NULL AND m.media_url != ''
+              AND m.created_at >= ?
             ORDER BY m.created_at ASC, m.id ASC;
             """,
-            (thread_id, since),
+            (_uid(conn), thread_id, since),
         )
     queued = 0
     for msg in rows:
@@ -283,11 +293,12 @@ def enqueue_message(msg: dict, force: bool) -> dict:
     with db.get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO zalo_booking_scans (message_id, thread_id, file_name, kind, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO zalo_booking_scans
+                (message_id, account_uid, thread_id, file_name, kind, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(message_id) DO UPDATE SET status = excluded.status, message = '', updated_at = excluded.updated_at;
             """,
-            (message_id, msg["thread_id"], _file_name(msg), "pdf" if msg.get("msg_type") == "file" else "image",
+            (message_id, msg.get("account_uid") or "", msg["thread_id"], _file_name(msg), "pdf" if msg.get("msg_type") == "file" else "image",
              DOWNLOADING, now, now),
         )
     _bump()
@@ -306,10 +317,10 @@ def attach_local_copy(msg_id: str, file_name: str, data: bytes) -> Optional[dict
             conn,
             """
             SELECT m.*, c.watch_booking FROM zalo_messages m
-            LEFT JOIN zalo_conversations c ON c.thread_id = m.thread_id
-            WHERE m.msg_id = ?;
+            LEFT JOIN zalo_conversations c ON c.account_uid = m.account_uid AND c.thread_id = m.thread_id
+            WHERE m.account_uid = ? AND m.msg_id = ?;
             """,
-            (msg_id,),
+            (_uid(conn), msg_id),
         )
     if not rows or not rows[0].get("watch_booking"):
         return None
@@ -329,10 +340,10 @@ def attach_local_copy(msg_id: str, file_name: str, data: bytes) -> Optional[dict
         conn.execute(
             """
             INSERT OR IGNORE INTO zalo_booking_scans
-                (message_id, thread_id, file_name, kind, sha256, local_path, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                (message_id, account_uid, thread_id, file_name, kind, sha256, local_path, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
-            (int(msg["id"]), msg["thread_id"], file_name, "pdf" if kind == PDF else "image", sha, local, DOWNLOADING, now, now),
+            (int(msg["id"]), msg.get("account_uid") or "", msg["thread_id"], file_name, "pdf" if kind == PDF else "image", sha, local, DOWNLOADING, now, now),
         )
     _bump()
     _queue.put((int(msg["id"]), False))
@@ -559,18 +570,20 @@ def list_queue(status: str = PENDING_REVIEW) -> list[dict]:
                    c.display_name AS conversation_name, c.thread_type
             FROM zalo_booking_scans s
             JOIN zalo_messages m ON m.id = s.message_id
-            LEFT JOIN zalo_conversations c ON c.thread_id = s.thread_id
-            WHERE s.status = ?
+            LEFT JOIN zalo_conversations c ON c.account_uid = m.account_uid AND c.thread_id = m.thread_id
+            WHERE s.status = ? AND m.account_uid = ?
             ORDER BY m.created_at DESC, s.message_id DESC;
             """,
-            (status,),
+            (status, _uid(conn)),
         )
     return [_public(r) for r in rows]
 
 
 def summary() -> dict:
     with db.get_connection() as conn:
-        counts = dict(conn.execute("SELECT status, COUNT(*) FROM zalo_booking_scans GROUP BY status;").fetchall())
+        counts = dict(conn.execute(
+            "SELECT status, COUNT(*) FROM zalo_booking_scans WHERE account_uid = ? GROUP BY status;", (_uid(conn),)
+        ).fetchall())
     return {
         "pending_review": int(counts.get(PENDING_REVIEW, 0)),
         "in_progress": int(counts.get(DOWNLOADING, 0)) + int(counts.get(SCANNING, 0)),
@@ -609,7 +622,8 @@ def _notify(message_id: int, booking_no: str) -> None:
             row = conn.execute(
                 """
                 SELECT c.display_name, s.file_name FROM zalo_booking_scans s
-                LEFT JOIN zalo_conversations c ON c.thread_id = s.thread_id WHERE s.message_id = ?;
+                LEFT JOIN zalo_conversations c ON c.account_uid = s.account_uid AND c.thread_id = s.thread_id
+                WHERE s.message_id = ?;
                 """,
                 (message_id,),
             ).fetchone()

@@ -1,7 +1,9 @@
 """Zalo messaging persistence: sessions, conversations, messages, templates, and driver matching."""
 import logging
+import os
 import re
 import sqlite3
+from datetime import datetime
 from typing import Any, Optional
 
 logger = logging.getLogger("backend.zalo")
@@ -56,6 +58,70 @@ def normalize_phone(phone: Optional[str]) -> str:
     return digits
 
 
+# Every conversation, message and reaction belongs to the Zalo account (its uid) that received it, so two accounts
+# never mix and logging out does not have to delete anything. '' = not assigned to an account yet.
+_CONVERSATIONS_SQL = """
+    CREATE TABLE IF NOT EXISTS {name} (
+        account_uid TEXT NOT NULL DEFAULT '',
+        thread_id TEXT NOT NULL,
+        thread_type TEXT NOT NULL DEFAULT 'user',
+        display_name TEXT NOT NULL DEFAULT '',
+        avatar TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        driver_id INTEGER REFERENCES fleet_drivers(id) ON DELETE SET NULL,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        needs_attention INTEGER NOT NULL DEFAULT 0,
+        last_message_preview TEXT NOT NULL DEFAULT '',
+        last_message_at TEXT NOT NULL DEFAULT '',
+        last_direction TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT '',
+        hidden INTEGER NOT NULL DEFAULT 0,
+        watch_booking INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_uid, thread_id)
+    );
+"""
+
+_MESSAGES_SQL = """
+    CREATE TABLE IF NOT EXISTS {name} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_uid TEXT NOT NULL DEFAULT '',
+        msg_id TEXT,
+        thread_id TEXT NOT NULL,
+        direction TEXT NOT NULL DEFAULT 'in',
+        sender_id TEXT NOT NULL DEFAULT '',
+        sender_name TEXT NOT NULL DEFAULT '',
+        msg_type TEXT NOT NULL DEFAULT 'text',
+        content TEXT NOT NULL DEFAULT '',
+        media_url TEXT NOT NULL DEFAULT '',
+        booking_no TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'received',
+        created_at TEXT NOT NULL,
+        UNIQUE (account_uid, msg_id),
+        FOREIGN KEY (account_uid, thread_id) REFERENCES zalo_conversations(account_uid, thread_id) ON DELETE CASCADE
+    );
+"""
+
+# One row per (account, message, person): Zalo shows each person's latest reaction; an empty icon removes it.
+_REACTIONS_SQL = """
+    CREATE TABLE IF NOT EXISTS {name} (
+        account_uid TEXT NOT NULL DEFAULT '',
+        msg_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL DEFAULT '',
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL DEFAULT '',
+        icon TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (account_uid, msg_id, sender_id)
+    );
+"""
+
+_CONV_COLS = ("thread_id, thread_type, display_name, avatar, phone, driver_id, unread_count, needs_attention, "
+              "last_message_preview, last_message_at, last_direction, updated_at, hidden, watch_booking")
+_MSG_COLS = ("id, msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url, booking_no, "
+             "status, created_at")
+_REACTION_COLS = "msg_id, thread_id, sender_id, sender_name, icon, updated_at"
+
+
 def create_zalo_tables(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS zalo_sessions (
@@ -70,54 +136,35 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
         );
     """)
 
+    # Every Zalo account that has logged in on this computer.
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS zalo_conversations (
-            thread_id TEXT PRIMARY KEY,
-            thread_type TEXT NOT NULL DEFAULT 'user',
+        CREATE TABLE IF NOT EXISTS zalo_accounts (
+            uid TEXT PRIMARY KEY,
             display_name TEXT NOT NULL DEFAULT '',
-            avatar TEXT NOT NULL DEFAULT '',
             phone TEXT NOT NULL DEFAULT '',
-            driver_id INTEGER REFERENCES fleet_drivers(id) ON DELETE SET NULL,
-            unread_count INTEGER NOT NULL DEFAULT 0,
-            needs_attention INTEGER NOT NULL DEFAULT 0,
-            last_message_preview TEXT NOT NULL DEFAULT '',
-            last_message_at TEXT NOT NULL DEFAULT '',
-            last_direction TEXT NOT NULL DEFAULT '',
-            updated_at TEXT NOT NULL DEFAULT ''
+            avatar TEXT NOT NULL DEFAULT '',
+            first_login_at TEXT NOT NULL DEFAULT '',
+            last_login_at TEXT NOT NULL DEFAULT '',
+            last_sync_at TEXT NOT NULL DEFAULT ''
         );
     """)
-    conv_cols = {row[1] for row in conn.execute("PRAGMA table_info(zalo_conversations);")}
-    if "hidden" not in conv_cols:
-        # Personal chats and ads hidden from the work view: kept and still synced, just not shown or counted.
-        conn.execute("ALTER TABLE zalo_conversations ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;")
-    if "watch_booking" not in conv_cols:
-        # Booking PDFs / photos sent in a watched chat are read into the review queue (services/zalo_booking.py).
-        conn.execute("ALTER TABLE zalo_conversations ADD COLUMN watch_booking INTEGER NOT NULL DEFAULT 0;")
-    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_driver ON zalo_conversations(driver_id);")
-    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_last_at ON zalo_conversations(last_message_at DESC);")
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS zalo_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            msg_id TEXT UNIQUE,
-            thread_id TEXT NOT NULL REFERENCES zalo_conversations(thread_id) ON DELETE CASCADE,
-            direction TEXT NOT NULL DEFAULT 'in',
-            sender_id TEXT NOT NULL DEFAULT '',
-            sender_name TEXT NOT NULL DEFAULT '',
-            msg_type TEXT NOT NULL DEFAULT 'text',
-            content TEXT NOT NULL DEFAULT '',
-            media_url TEXT NOT NULL DEFAULT '',
-            booking_no TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'received',
-            created_at TEXT NOT NULL
-        );
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_msg_thread ON zalo_messages(thread_id, id DESC);")
+    # A database from before accounts: the old one-account tables are rebuilt with an account on every row.
+    if _table_exists(conn, "zalo_conversations") and "account_uid" not in _columns(conn, "zalo_conversations"):
+        migrate_to_accounts(conn)
+
+    conn.execute(_CONVERSATIONS_SQL.format(name="zalo_conversations"))
+    conn.execute(_MESSAGES_SQL.format(name="zalo_messages"))
+    conn.execute(_REACTIONS_SQL.format(name="zalo_reactions"))
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_driver ON zalo_conversations(driver_id);")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_conv_last_at ON zalo_conversations(account_uid, last_message_at DESC);")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_msg_thread ON zalo_messages(account_uid, thread_id, id DESC);")
 
     # One row per message with a file: the booking read from it and where it stands (services/zalo_booking.py).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS zalo_booking_scans (
             message_id INTEGER PRIMARY KEY REFERENCES zalo_messages(id) ON DELETE CASCADE,
+            account_uid TEXT NOT NULL DEFAULT '',
             thread_id TEXT NOT NULL,
             file_name TEXT NOT NULL DEFAULT '',
             kind TEXT NOT NULL DEFAULT '',
@@ -135,21 +182,8 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
             updated_at TEXT NOT NULL
         );
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_scan_status ON zalo_booking_scans(status);")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_scan_status ON zalo_booking_scans(account_uid, status);")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_zalo_scan_sha ON zalo_booking_scans(sha256);")
-
-    # One row per (message, person): Zalo shows each person's latest reaction; an empty icon removes it.
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS zalo_reactions (
-            msg_id TEXT NOT NULL,
-            thread_id TEXT NOT NULL DEFAULT '',
-            sender_id TEXT NOT NULL,
-            sender_name TEXT NOT NULL DEFAULT '',
-            icon TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (msg_id, sender_id)
-        );
-    """)
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS zalo_templates (
@@ -176,10 +210,121 @@ def create_zalo_tables(conn: sqlite3.Connection) -> None:
             )
 
 
-def _rows(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?;", (name,)).fetchone() is not None
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table});")}
+
+
+def _backup_before_migration(conn: sqlite3.Connection, tag: str) -> Optional[str]:
+    """Copy the whole database next to it (booking_data.db.bak-<tag>-<time>) with SQLite's backup API, which is safe
+    with WAL and an open connection. Returns the copy's path, or None for a database that is not a file."""
+    row = conn.execute("PRAGMA database_list;").fetchone()
+    path = row[2] if row else ""
+    if not path or not os.path.exists(path):
+        return None
+    dest_path = f"{path}.bak-{tag}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    dest = sqlite3.connect(dest_path)
+    try:
+        conn.backup(dest)
+        dest.execute("PRAGMA journal_mode = DELETE;")  # one self-contained file, no -wal / -shm beside it
+    finally:
+        dest.close()
+    return dest_path
+
+
+def migrate_to_accounts(conn: sqlite3.Connection) -> None:
+    """Rebuild the one-account Zalo tables so every conversation, message and reaction names its Zalo account.
+    Existing rows go to the account logged in now ('' when none: claimed by the next login). Runs once, in one
+    transaction, after a full copy of the database; any mismatch rolls everything back."""
+    uid_row = conn.execute("SELECT uid FROM zalo_sessions WHERE id = 1;").fetchone()
+    uid = str(uid_row[0]) if uid_row and uid_row[0] else ""
+    counts = {t: conn.execute(f"SELECT COUNT(*) FROM {t};").fetchone()[0]
+              for t in ("zalo_conversations", "zalo_messages", "zalo_reactions", "zalo_booking_scans")
+              if _table_exists(conn, t)}
+    # Commit what init_db did so far first: a backup from a connection with an open write never finishes.
+    conn.commit()
+    backup = _backup_before_migration(conn, "zalo-accounts") if any(counts.values()) else None
+
+    # Off while the tables are swapped: dropping the old ones must not cascade into messages / booking scans.
+    conn.execute("PRAGMA foreign_keys = OFF;")
+    try:
+        conn.execute("BEGIN;")
+        conn.execute(_CONVERSATIONS_SQL.format(name="zalo_conversations_new"))
+        conn.execute(_MESSAGES_SQL.format(name="zalo_messages_new"))
+        conn.execute(_REACTIONS_SQL.format(name="zalo_reactions_new"))
+
+        old_conv = _columns(conn, "zalo_conversations")
+        conv_select = ", ".join(c if c in old_conv else "0" for c in (x.strip() for x in _CONV_COLS.split(",")))
+        conn.execute(f"INSERT INTO zalo_conversations_new (account_uid, {_CONV_COLS}) "
+                     f"SELECT ?, {conv_select} FROM zalo_conversations;", (uid,))
+        if _table_exists(conn, "zalo_messages"):
+            conn.execute(f"INSERT INTO zalo_messages_new (account_uid, {_MSG_COLS}) "
+                         f"SELECT ?, {_MSG_COLS} FROM zalo_messages;", (uid,))
+        if _table_exists(conn, "zalo_reactions"):
+            conn.execute(f"INSERT INTO zalo_reactions_new (account_uid, {_REACTION_COLS}) "
+                         f"SELECT ?, {_REACTION_COLS} FROM zalo_reactions;", (uid,))
+
+        for old, new in (("zalo_conversations", "zalo_conversations_new"), ("zalo_messages", "zalo_messages_new"),
+                         ("zalo_reactions", "zalo_reactions_new")):
+            if old in counts:
+                moved = conn.execute(f"SELECT COUNT(*) FROM {new};").fetchone()[0]
+                if moved != counts[old]:
+                    raise RuntimeError(f"{old}: {counts[old]} rows before, {moved} after")
+
+        # Messages first: their old table points at the old conversations.
+        conn.execute("DROP TABLE IF EXISTS zalo_messages;")
+        conn.execute("DROP TABLE zalo_conversations;")
+        conn.execute("DROP TABLE IF EXISTS zalo_reactions;")
+        conn.execute("ALTER TABLE zalo_conversations_new RENAME TO zalo_conversations;")
+        conn.execute("ALTER TABLE zalo_messages_new RENAME TO zalo_messages;")
+        conn.execute("ALTER TABLE zalo_reactions_new RENAME TO zalo_reactions;")
+
+        if _table_exists(conn, "zalo_booking_scans"):
+            if "account_uid" not in _columns(conn, "zalo_booking_scans"):
+                conn.execute("ALTER TABLE zalo_booking_scans ADD COLUMN account_uid TEXT NOT NULL DEFAULT '';")
+            conn.execute("""
+                UPDATE zalo_booking_scans
+                SET account_uid = COALESCE((SELECT m.account_uid FROM zalo_messages m WHERE m.id = message_id), '');
+            """)
+            conn.execute("DROP INDEX IF EXISTS ix_zalo_scan_status;")  # recreated with the account first
+
+        if uid:
+            sess = conn.execute("SELECT display_name, phone, avatar, updated_at FROM zalo_sessions WHERE id = 1;").fetchone()
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO zalo_accounts (uid, display_name, phone, avatar, first_login_at, last_login_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (uid, sess[0], sess[1], sess[2], sess[3] or _now(), sess[3] or _now()),
+            )
+
+        broken = conn.execute("PRAGMA foreign_key_check;").fetchall()
+        broken = [b for b in broken if str(b[0]).startswith("zalo_")]
+        if broken:
+            raise RuntimeError(f"foreign key check failed: {broken[:5]}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception("Zalo account migration failed; nothing changed (backup: %s)", backup)
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON;")
+    logger.info("Zalo data moved to account %r: %s (backup: %s)", uid or "(none)", counts, backup)
+
+
+def _rows(conn: sqlite3.Connection, sql: str, params: tuple | dict = ()) -> list[dict[str, Any]]:
     cur = conn.execute(sql, params)
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def _active_uid(conn: sqlite3.Connection) -> str:
+    """The Zalo account logged in now: new rows belong to it."""
+    row = conn.execute("SELECT uid FROM zalo_sessions WHERE id = 1;").fetchone()
+    return str(row[0]) if row and row[0] else ""
 
 
 def _match_driver_id(conn: sqlite3.Connection, phone: Optional[str]) -> Optional[int]:
@@ -235,17 +380,40 @@ def save_session(
             """,
             (uid, display_name, phone, avatar, status, last_error, now),
         )
+        if uid:
+            conn.execute(
+                """
+                INSERT INTO zalo_accounts (uid, display_name, phone, avatar, first_login_at, last_login_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(uid) DO UPDATE SET
+                    display_name = COALESCE(NULLIF(excluded.display_name, ''), display_name),
+                    phone = COALESCE(NULLIF(excluded.phone, ''), phone),
+                    avatar = COALESCE(NULLIF(excluded.avatar, ''), avatar),
+                    last_login_at = excluded.last_login_at;
+                """,
+                (uid, display_name, phone, avatar, now, now),
+            )
     return get_session()
 
 
-def clear_zalo_data() -> dict[str, Any]:
-    """Delete all synced Zalo conversations and messages and reset session (templates are kept)."""
-    with _conn() as conn:
-        conn.execute("DELETE FROM zalo_booking_scans;")
-        conn.execute("DELETE FROM zalo_reactions;")
-        conn.execute("DELETE FROM zalo_messages;")
-        conn.execute("DELETE FROM zalo_conversations;")
+def logout_session() -> dict[str, Any]:
+    """Log out: no account is active any more, so nothing of any account is shown. The account's chats, messages,
+    links and flags stay on this computer and come back when it logs in again."""
     return save_session(status="disconnected")
+
+
+def active_uid() -> str:
+    """The Zalo account logged in now ('' = none: every read returns nothing)."""
+    with _conn() as conn:
+        return _active_uid(conn)
+
+
+def message_in_active_account(message_id: int) -> bool:
+    with _conn() as conn:
+        uid = _active_uid(conn)
+        return bool(uid) and conn.execute(
+            "SELECT 1 FROM zalo_messages WHERE id = ? AND account_uid = ?;", (message_id, uid)
+        ).fetchone() is not None
 
 
 _CONV_SELECT = """
@@ -264,16 +432,21 @@ _CONV_SELECT = """
 
 def get_conversation(thread_id: str) -> Optional[dict[str, Any]]:
     with _conn() as conn:
-        rows = _rows(conn, _CONV_SELECT + " WHERE c.thread_id = ?;", (thread_id,))
+        uid = _active_uid(conn)
+        if not uid:
+            return None
+        rows = _rows(conn, _CONV_SELECT + " WHERE c.account_uid = ? AND c.thread_id = ?;", (uid, thread_id))
         return rows[0] if rows else None
 
 
 def list_conversations(filter_by: str = "all", q: str = "", limit: int = 300) -> dict[str, Any]:
     with _conn() as conn:
-        all_rows = _rows(
+        uid = _active_uid(conn)
+        all_rows = [] if not uid else _rows(
             conn,
             _CONV_SELECT
             + """
+            WHERE c.account_uid = ?
             ORDER BY
                 CASE WHEN c.last_message_at != '' THEN 0 ELSE 1 END,
                 c.last_message_at DESC,
@@ -281,6 +454,7 @@ def list_conversations(filter_by: str = "all", q: str = "", limit: int = 300) ->
                 (c.driver_id IS NOT NULL) DESC,
                 COALESCE(NULLIF(d.name, ''), c.display_name) COLLATE NOCASE ASC;
             """,
+            (uid,),
         )
         # Hidden chats leave every count and list except the "hidden" one, so they never raise the badge.
         visible = [r for r in all_rows if not r.get("hidden")]
@@ -332,7 +506,8 @@ def upsert_conversation(
 ) -> dict[str, Any]:
     now = _now()
     with _conn() as conn:
-        existing = _rows(conn, "SELECT * FROM zalo_conversations WHERE thread_id = ?;", (thread_id,))
+        uid = _active_uid(conn)
+        existing = _rows(conn, "SELECT * FROM zalo_conversations WHERE account_uid = ? AND thread_id = ?;", (uid, thread_id))
         resolved_driver_id = driver_id
         if resolved_driver_id is None and existing:
             resolved_driver_id = existing[0].get("driver_id")
@@ -350,7 +525,7 @@ def upsert_conversation(
                     phone = COALESCE(NULLIF(?, ''), phone),
                     driver_id = ?,
                     updated_at = ?
-                WHERE thread_id = ?;
+                WHERE account_uid = ? AND thread_id = ?;
                 """,
                 (
                     thread_type or cur["thread_type"],
@@ -359,6 +534,7 @@ def upsert_conversation(
                     phone,
                     resolved_driver_id,
                     now,
+                    uid,
                     thread_id,
                 ),
             )
@@ -366,10 +542,11 @@ def upsert_conversation(
             conn.execute(
                 """
                 INSERT INTO zalo_conversations
-                    (thread_id, thread_type, display_name, avatar, phone, driver_id, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?);
+                    (account_uid, thread_id, thread_type, display_name, avatar, phone, driver_id, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (thread_id, thread_type or "user", display_name or thread_id, avatar, phone, resolved_driver_id, now),
+                (uid, thread_id, thread_type or "user", display_name or thread_id, avatar, phone,
+                 resolved_driver_id, now),
             )
     return get_conversation(thread_id)  # type: ignore[return-value]
 
@@ -381,6 +558,7 @@ def upsert_conversations_batch(items: list[dict[str, Any]]) -> int:
     now = _now()
     count = 0
     with _conn() as conn:
+        uid = _active_uid(conn)
         for item in items:
             thread_id = str(item.get("thread_id") or "").strip()
             if not thread_id:
@@ -389,7 +567,8 @@ def upsert_conversations_batch(items: list[dict[str, Any]]) -> int:
             display_name = str(item.get("display_name") or "").strip()
             avatar = str(item.get("avatar") or "").strip()
             phone = str(item.get("phone") or "").strip()
-            existing = _rows(conn, "SELECT driver_id FROM zalo_conversations WHERE thread_id = ?;", (thread_id,))
+            existing = _rows(conn, "SELECT driver_id FROM zalo_conversations WHERE account_uid = ? AND thread_id = ?;",
+                             (uid, thread_id))
             driver_id = item.get("driver_id")
             if driver_id is None and existing:
                 driver_id = existing[0].get("driver_id")
@@ -406,18 +585,18 @@ def upsert_conversations_batch(items: list[dict[str, Any]]) -> int:
                         phone = COALESCE(NULLIF(?, ''), phone),
                         driver_id = ?,
                         updated_at = ?
-                    WHERE thread_id = ?;
+                    WHERE account_uid = ? AND thread_id = ?;
                     """,
-                    (thread_type, display_name, avatar, phone, driver_id, now, thread_id),
+                    (thread_type, display_name, avatar, phone, driver_id, now, uid, thread_id),
                 )
             else:
                 conn.execute(
                     """
                     INSERT INTO zalo_conversations
-                        (thread_id, thread_type, display_name, avatar, phone, driver_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?);
+                        (account_uid, thread_id, thread_type, display_name, avatar, phone, driver_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                     """,
-                    (thread_id, thread_type, display_name or thread_id, avatar, phone, driver_id, now),
+                    (uid, thread_id, thread_type, display_name or thread_id, avatar, phone, driver_id, now),
                 )
             count += 1
     return count
@@ -426,8 +605,8 @@ def upsert_conversations_batch(items: list[dict[str, Any]]) -> int:
 def mark_conversation_read(thread_id: str) -> Optional[dict[str, Any]]:
     with _conn() as conn:
         conn.execute(
-            "UPDATE zalo_conversations SET unread_count = 0 WHERE thread_id = ? AND unread_count > 0;",
-            (thread_id,),
+            "UPDATE zalo_conversations SET unread_count = 0 WHERE account_uid = ? AND thread_id = ? AND unread_count > 0;",
+            (_active_uid(conn), thread_id),
         )
     return get_conversation(thread_id)
 
@@ -444,7 +623,9 @@ def update_conversation(
 ) -> Optional[dict[str, Any]]:
     now = _now()
     with _conn() as conn:
-        existing = _rows(conn, "SELECT thread_id FROM zalo_conversations WHERE thread_id = ?;", (thread_id,))
+        uid = _active_uid(conn)
+        existing = _rows(conn, "SELECT thread_id FROM zalo_conversations WHERE account_uid = ? AND thread_id = ?;",
+                         (uid, thread_id))
         if not existing:
             return None
         updates: list[str] = ["updated_at = ?"]
@@ -475,8 +656,9 @@ def update_conversation(
             if hidden:
                 # Nothing left to act on in a chat you set aside.
                 updates.append("needs_attention = 0")
-        params.append(thread_id)
-        conn.execute(f"UPDATE zalo_conversations SET {', '.join(updates)} WHERE thread_id = ?;", tuple(params))
+        params.extend([uid, thread_id])
+        conn.execute(f"UPDATE zalo_conversations SET {', '.join(updates)} WHERE account_uid = ? AND thread_id = ?;",
+                     tuple(params))
     return get_conversation(thread_id)
 
 
@@ -491,9 +673,9 @@ def _fill_missing_media(conn: sqlite3.Connection, msg_id: str, msg_type: str, co
         SET media_url = ?,
             msg_type = CASE WHEN ? IN ('image', 'file') THEN ? ELSE msg_type END,
             content = CASE WHEN content = '' THEN ? ELSE content END
-        WHERE msg_id = ? AND media_url = '';
+        WHERE account_uid = ? AND msg_id = ? AND media_url = '';
         """,
-        (media_url, msg_type, msg_type, content or "", msg_id),
+        (media_url, msg_type, msg_type, content or "", _active_uid(conn), msg_id),
     )
 
 
@@ -518,17 +700,18 @@ def record_message(
 ) -> dict[str, Any]:
     now = created_at or _now()
     with _conn() as conn:
+        uid = _active_uid(conn)
         if msg_id:
-            dup = _rows(conn, "SELECT * FROM zalo_messages WHERE msg_id = ?;", (msg_id,))
+            dup = _rows(conn, "SELECT * FROM zalo_messages WHERE account_uid = ? AND msg_id = ?;", (uid, msg_id))
             if dup:
                 if media_url and not dup[0].get("media_url"):
                     _fill_missing_media(conn, msg_id, msg_type, content, media_url)
-                    dup = _rows(conn, "SELECT * FROM zalo_messages WHERE msg_id = ?;", (msg_id,))
+                    dup = _rows(conn, "SELECT * FROM zalo_messages WHERE account_uid = ? AND msg_id = ?;", (uid, msg_id))
                     # Not a new message, but the open chat should redraw the now-visible image.
                     return {"message": dup[0], "duplicate": False, "updated": True, "conversation": get_conversation(thread_id)}
                 return {"message": dup[0], "duplicate": True, "conversation": get_conversation(thread_id)}
 
-        existing = _rows(conn, "SELECT * FROM zalo_conversations WHERE thread_id = ?;", (thread_id,))
+        existing = _rows(conn, "SELECT * FROM zalo_conversations WHERE account_uid = ? AND thread_id = ?;", (uid, thread_id))
         driver_id = existing[0].get("driver_id") if existing else None
         if driver_id is None and phone:
             driver_id = _match_driver_id(conn, phone)
@@ -547,11 +730,12 @@ def record_message(
             conn.execute(
                 """
                 INSERT INTO zalo_conversations
-                    (thread_id, thread_type, display_name, avatar, phone, driver_id,
+                    (account_uid, thread_id, thread_type, display_name, avatar, phone, driver_id,
                      unread_count, needs_attention, last_message_preview, last_message_at, last_direction, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 (
+                    uid,
                     thread_id,
                     thread_type or "user",
                     display_name or sender_name or thread_id,
@@ -582,7 +766,7 @@ def record_message(
                     last_message_at = ?,
                     last_direction = ?,
                     updated_at = ?
-                WHERE thread_id = ?;
+                WHERE account_uid = ? AND thread_id = ?;
                 """,
                 (
                     display_name,
@@ -594,6 +778,7 @@ def record_message(
                     now,
                     direction,
                     now,
+                    uid,
                     thread_id,
                 ),
             )
@@ -602,14 +787,16 @@ def record_message(
             cur = conn.execute(
                 """
                 INSERT INTO zalo_messages
-                    (msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url, booking_no, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    (account_uid, msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url,
+                     booking_no, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url, booking_no, status, now),
+                (uid, msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url, booking_no,
+                 status, now),
             )
             msg_row = _rows(conn, "SELECT * FROM zalo_messages WHERE id = ?;", (cur.lastrowid,))[0]
         except sqlite3.IntegrityError:
-            dup_rows = _rows(conn, "SELECT * FROM zalo_messages WHERE msg_id = ?;", (msg_id,))
+            dup_rows = _rows(conn, "SELECT * FROM zalo_messages WHERE account_uid = ? AND msg_id = ?;", (uid, msg_id))
             return {"message": dup_rows[0] if dup_rows else None, "duplicate": True, "conversation": get_conversation(thread_id)}
     return {"message": msg_row, "duplicate": False, "conversation": get_conversation(thread_id)}
 
@@ -623,13 +810,15 @@ def record_messages_batch(items: list[dict[str, Any]]) -> int:
     latest_by_thread: dict[str, tuple[str, str, str, str, str]] = {}
 
     with _conn() as conn:
+        uid = _active_uid(conn)
         for item in items:
             thread_id = str(item.get("thread_id") or "").strip()
             if not thread_id:
                 continue
             msg_id = item.get("msg_id")
             if msg_id:
-                dup = conn.execute("SELECT 1 FROM zalo_messages WHERE msg_id = ?;", (str(msg_id),)).fetchone()
+                dup = conn.execute("SELECT 1 FROM zalo_messages WHERE account_uid = ? AND msg_id = ?;",
+                                   (uid, str(msg_id))).fetchone()
                 if dup:
                     _fill_missing_media(
                         conn, str(msg_id), str(item.get("msg_type") or ""), str(item.get("content") or ""),
@@ -648,25 +837,27 @@ def record_messages_batch(items: list[dict[str, Any]]) -> int:
             created_at = str(item.get("created_at") or now)
 
             existing_conv = conn.execute(
-                "SELECT last_message_at FROM zalo_conversations WHERE thread_id = ?;", (thread_id,)
+                "SELECT last_message_at FROM zalo_conversations WHERE account_uid = ? AND thread_id = ?;", (uid, thread_id)
             ).fetchone()
             if not existing_conv:
                 conn.execute(
                     """
                     INSERT INTO zalo_conversations
-                        (thread_id, thread_type, display_name, updated_at)
-                    VALUES (?, ?, ?, ?);
+                        (account_uid, thread_id, thread_type, display_name, updated_at)
+                    VALUES (?, ?, ?, ?, ?);
                     """,
-                    (thread_id, thread_type, display_name or sender_name or thread_id, now),
+                    (uid, thread_id, thread_type, display_name or sender_name or thread_id, now),
                 )
 
             conn.execute(
                 """
                 INSERT INTO zalo_messages
-                    (msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url, booking_no, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?);
+                    (account_uid, msg_id, thread_id, direction, sender_id, sender_name, msg_type, content, media_url,
+                     booking_no, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?);
                 """,
                 (
+                    uid,
                     str(msg_id) if msg_id else None,
                     thread_id,
                     direction,
@@ -696,9 +887,9 @@ def record_messages_batch(items: list[dict[str, Any]]) -> int:
                     last_direction = CASE WHEN last_message_at = '' OR ? >= last_message_at THEN ? ELSE last_direction END,
                     last_message_at = CASE WHEN last_message_at = '' OR ? >= last_message_at THEN ? ELSE last_message_at END,
                     updated_at = ?
-                WHERE thread_id = ?;
+                WHERE account_uid = ? AND thread_id = ?;
                 """,
-                (ttype, dname, ts, preview, ts, direction, ts, ts, now, tid),
+                (ttype, dname, ts, preview, ts, direction, ts, ts, now, uid, tid),
             )
     return inserted
 
@@ -709,6 +900,7 @@ def record_reactions(items: list[dict[str, Any]]) -> int:
     now = _now()
     changed = 0
     with _conn() as conn:
+        uid = _active_uid(conn)
         for item in items:
             msg_id = str(item.get("msg_id") or "").strip()
             sender_id = str(item.get("sender_id") or "").strip()
@@ -717,25 +909,27 @@ def record_reactions(items: list[dict[str, Any]]) -> int:
             icon = str(item.get("icon") or "")
             ts = str(item.get("created_at") or now)
             existing = conn.execute(
-                "SELECT updated_at FROM zalo_reactions WHERE msg_id = ? AND sender_id = ?;", (msg_id, sender_id)
+                "SELECT updated_at FROM zalo_reactions WHERE account_uid = ? AND msg_id = ? AND sender_id = ?;",
+                (uid, msg_id, sender_id),
             ).fetchone()
             if existing and existing[0] > ts:
                 continue
             if not icon:
-                cur = conn.execute("DELETE FROM zalo_reactions WHERE msg_id = ? AND sender_id = ?;", (msg_id, sender_id))
+                cur = conn.execute("DELETE FROM zalo_reactions WHERE account_uid = ? AND msg_id = ? AND sender_id = ?;",
+                                   (uid, msg_id, sender_id))
                 changed += cur.rowcount
                 continue
             conn.execute(
                 """
-                INSERT INTO zalo_reactions (msg_id, thread_id, sender_id, sender_name, icon, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(msg_id, sender_id) DO UPDATE SET
+                INSERT INTO zalo_reactions (account_uid, msg_id, thread_id, sender_id, sender_name, icon, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_uid, msg_id, sender_id) DO UPDATE SET
                     icon = excluded.icon,
                     sender_name = COALESCE(NULLIF(excluded.sender_name, ''), sender_name),
                     thread_id = COALESCE(NULLIF(excluded.thread_id, ''), thread_id),
                     updated_at = excluded.updated_at;
                 """,
-                (msg_id, str(item.get("thread_id") or ""), sender_id, str(item.get("sender_name") or ""), icon, ts),
+                (uid, msg_id, str(item.get("thread_id") or ""), sender_id, str(item.get("sender_name") or ""), icon, ts),
             )
             changed += 1
     return changed
@@ -748,13 +942,13 @@ def _attach_reactions(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> N
         r["reactions"] = []
     if not ids:
         return
-    own = conn.execute("SELECT uid FROM zalo_sessions WHERE id = 1;").fetchone()
-    own_uid = str(own[0]) if own and own[0] else ""
+    own_uid = _active_uid(conn)
     placeholders = ",".join("?" * len(ids))
     grouped: dict[str, dict[str, dict[str, Any]]] = {}
     for msg_id, sender_id, sender_name, icon in conn.execute(
-        f"SELECT msg_id, sender_id, sender_name, icon FROM zalo_reactions WHERE msg_id IN ({placeholders}) ORDER BY updated_at;",
-        tuple(ids),
+        f"SELECT msg_id, sender_id, sender_name, icon FROM zalo_reactions "
+        f"WHERE account_uid = ? AND msg_id IN ({placeholders}) ORDER BY updated_at;",
+        (own_uid, *ids),
     ):
         entry = grouped.setdefault(msg_id, {}).setdefault(icon, {"icon": icon, "count": 0, "mine": False, "names": []})
         entry["count"] += 1
@@ -770,11 +964,15 @@ def _attach_reactions(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> N
 
 def list_messages(thread_id: str, limit: int = 50, before_id: Optional[int] = None) -> list[dict[str, Any]]:
     with _conn() as conn:
+        uid = _active_uid(conn)
+        if not uid:
+            return []
         lim = max(1, min(limit, 200))
         anchor = None
         if before_id:
             anchor = conn.execute(
-                "SELECT created_at, id FROM zalo_messages WHERE id = ? AND thread_id = ?;", (before_id, thread_id)
+                "SELECT created_at, id FROM zalo_messages WHERE id = ? AND account_uid = ? AND thread_id = ?;",
+                (before_id, uid, thread_id),
             ).fetchone()
         if anchor:
             # Page by the same (created_at, id) order the chat shows: phone-synced history is inserted after
@@ -783,16 +981,17 @@ def list_messages(thread_id: str, limit: int = 50, before_id: Optional[int] = No
                 conn,
                 """
                 SELECT * FROM zalo_messages
-                WHERE thread_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
+                WHERE account_uid = ? AND thread_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
                 ORDER BY created_at DESC, id DESC LIMIT ?;
                 """,
-                (thread_id, anchor[0], anchor[0], anchor[1], lim),
+                (uid, thread_id, anchor[0], anchor[0], anchor[1], lim),
             )
         else:
             rows = _rows(
                 conn,
-                "SELECT * FROM zalo_messages WHERE thread_id = ? ORDER BY created_at DESC, id DESC LIMIT ?;",
-                (thread_id, lim),
+                "SELECT * FROM zalo_messages WHERE account_uid = ? AND thread_id = ? "
+                "ORDER BY created_at DESC, id DESC LIMIT ?;",
+                (uid, thread_id, lim),
             )
         rows.reverse()
         _attach_reactions(conn, rows)
@@ -808,20 +1007,26 @@ def list_link_candidates() -> list[dict[str, Any]]:
             SELECT
                 d.id, d.name, d.phone, d.status,
                 v.plate AS vehicle_plate,
-                (SELECT c.thread_id FROM zalo_conversations c WHERE c.driver_id = d.id LIMIT 1) AS linked_thread_id,
-                (SELECT c.display_name FROM zalo_conversations c WHERE c.driver_id = d.id LIMIT 1) AS linked_name
+                (SELECT c.thread_id FROM zalo_conversations c
+                 WHERE c.account_uid = :uid AND c.driver_id = d.id LIMIT 1) AS linked_thread_id,
+                (SELECT c.display_name FROM zalo_conversations c
+                 WHERE c.account_uid = :uid AND c.driver_id = d.id LIMIT 1) AS linked_name
             FROM fleet_drivers d
             LEFT JOIN fleet_assignments a ON a.driver_id = d.id AND a.ended_at IS NULL
             LEFT JOIN fleet_vehicles v ON v.id = a.vehicle_id AND v.deleted_at IS NULL
             WHERE d.deleted_at IS NULL AND d.status != 'left'
             ORDER BY d.name COLLATE NOCASE ASC;
             """,
+            {"uid": _active_uid(conn)},
         )
         return rows
 
 
 def list_unlinked_drivers() -> list[dict[str, Any]]:
     with _conn() as conn:
+        uid = _active_uid(conn)
+        if not uid:
+            return []
         return _rows(
             conn,
             """
@@ -829,7 +1034,7 @@ def list_unlinked_drivers() -> list[dict[str, Any]]:
                 d.id, d.name, d.phone, d.status,
                 v.plate AS vehicle_plate
             FROM fleet_drivers d
-            LEFT JOIN zalo_conversations c ON c.driver_id = d.id
+            LEFT JOIN zalo_conversations c ON c.driver_id = d.id AND c.account_uid = :uid
             LEFT JOIN fleet_assignments a ON a.driver_id = d.id AND a.ended_at IS NULL
             LEFT JOIN fleet_vehicles v ON v.id = a.vehicle_id AND v.deleted_at IS NULL
             WHERE d.deleted_at IS NULL
@@ -837,6 +1042,7 @@ def list_unlinked_drivers() -> list[dict[str, Any]]:
               AND c.thread_id IS NULL
             ORDER BY d.name ASC;
             """,
+            {"uid": uid},
         )
 
 

@@ -104,7 +104,8 @@ def update_session(body: SessionUpdateIn):
 
 @router.post("/logout")
 def clear_on_logout():
-    return zalo_core.clear_zalo_data()
+    """Logging out keeps every account's data on this computer; it is only hidden until that account logs in again."""
+    return zalo_core.logout_session()
 
 
 @router.get("/conversations")
@@ -363,8 +364,15 @@ def message_local_copy(body: LocalCopyIn):
     return {"scan": zalo_booking.attach_local_copy(body.msg_id, body.file_name, data)}
 
 
+def _own_message(message_id: int) -> None:
+    """Only a message of the Zalo account logged in now can be opened or changed."""
+    if not zalo_core.message_in_active_account(message_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tin nhắn")
+
+
 @router.post("/messages/{message_id}/scan")
 def scan_message(message_id: int):
+    _own_message(message_id)
     try:
         return zalo_booking.scan_now(message_id)
     except LookupError as e:
@@ -387,6 +395,7 @@ def booking_scans_summary():
 
 @router.get("/booking-scans/{message_id}/file")
 def booking_scan_file(message_id: int):
+    _own_message(message_id)
     path = zalo_booking.file_path(message_id)
     if not path:
         raise HTTPException(status_code=404, detail="Không còn tệp trên máy")
@@ -396,6 +405,7 @@ def booking_scan_file(message_id: int):
 
 @router.post("/booking-scans/{message_id}/saved")
 def booking_scan_saved(message_id: int, body: ScanSavedIn):
+    _own_message(message_id)
     res = zalo_booking.mark_saved(message_id, body.booking_id, body.collection_id)
     if not res:
         raise HTTPException(status_code=404, detail="Không tìm thấy lượt quét")
@@ -404,6 +414,7 @@ def booking_scan_saved(message_id: int, body: ScanSavedIn):
 
 @router.post("/booking-scans/{message_id}/dismiss")
 def booking_scan_dismiss(message_id: int):
+    _own_message(message_id)
     res = zalo_booking.dismiss(message_id)
     if not res:
         raise HTTPException(status_code=404, detail="Không tìm thấy lượt quét")

@@ -6,13 +6,19 @@ from backend.app.core import fleet
 from backend.app.main import app
 
 
+ACCOUNT = {"uid": "acc-test", "display_name": "Điều vận", "status": "connected"}
+
+
 @pytest.fixture()
 def client():
+    """Logged in to a test Zalo account: its chats are the ones every read returns."""
     with TestClient(app) as c:
+        c.post("/api/v1/zalo/session", json=ACCOUNT)
         yield c
 
 
 def test_zalo_session_and_templates_seeded(client):
+    client.post("/api/v1/zalo/logout")
     res = client.get("/api/v1/zalo/session")
     assert res.status_code == 200
     assert res.json()["status"] == "disconnected"
@@ -109,13 +115,27 @@ def test_zalo_outgoing_and_template_crud(client):
     deleted = client.delete(f"/api/v1/zalo/templates/{tid}")
     assert deleted.status_code == 200
 
-    # Logout clears conversations & messages but preserves templates
+    # Logged out: nothing of the account is shown (templates stay)...
+    before = client.get("/api/v1/zalo/conversations").json()["counts"]["all"]
+    msgs_before = client.get("/api/v1/zalo/conversations/uid_customer_1/messages").json()
+    assert before > 0 and msgs_before
     logout_res = client.post("/api/v1/zalo/logout")
     assert logout_res.status_code == 200
     assert logout_res.json()["status"] == "disconnected"
     assert client.get("/api/v1/zalo/conversations").json()["counts"]["all"] == 0
-    assert client.get(f"/api/v1/zalo/conversations/uid_customer_1/messages").json() == []
+    assert client.get("/api/v1/zalo/conversations/uid_customer_1/messages").json() == []
+    assert client.get("/api/v1/zalo/booking-scans/summary").json()["pending_review"] == 0
     assert len(client.get("/api/v1/zalo/templates").json()) >= 4
+
+    # ...and logging in again to the same account brings everything back
+    client.post("/api/v1/zalo/session", json=ACCOUNT)
+    assert client.get("/api/v1/zalo/conversations").json()["counts"]["all"] == before
+    assert client.get("/api/v1/zalo/conversations/uid_customer_1/messages").json() == msgs_before
+
+    # Another account sees none of it
+    client.post("/api/v1/zalo/session", json={**ACCOUNT, "uid": "acc-other"})
+    assert client.get("/api/v1/zalo/conversations").json()["counts"]["all"] == 0
+    client.post("/api/v1/zalo/session", json=ACCOUNT)
 
 
 def test_zalo_messages_page_by_time_even_when_history_is_inserted_later(client):

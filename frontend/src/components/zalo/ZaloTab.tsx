@@ -367,6 +367,9 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     [conversations, selectedThreadId, selectedConvSnapshot]
   );
   const isConnected = bridgeState.status === 'connected' && !!electronAPI?.zaloSendMessage;
+  // Logged in = an account is attached, even while its connection drops for a moment. Logged out shows nothing:
+  // the account's chats stay on this computer and come back when it logs in again.
+  const loggedIn = !!bridgeState.uid;
   const composerPlaceholders = useMemo(() => findPlaceholders(composerText), [composerText]);
   const composerNeedsBooking = composerPlaceholders.some((p) => BOOKING_FIELD_KEYS.has(p.slice(1, -1)));
 
@@ -672,7 +675,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
     onUnreadCountChange?.(0);
     autoQrTriggeredRef.current = false;
     await Promise.all([loadConversations(), loadTemplatesAndDrivers()]);
-    addToast('Đã đăng xuất và xóa dữ liệu Zalo cũ', 'info');
+    addToast('Đã đăng xuất. Tin nhắn vẫn được giữ trên máy, đăng nhập lại tài khoản này để xem.', 'info');
   };
 
   const handleSyncContacts = async () => {
@@ -1329,6 +1332,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {loggedIn && (<>
           <button
             onClick={openAllPendingReviews}
             disabled={loadingReview}
@@ -1372,6 +1376,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
             <UserPlus className="w-3.5 h-3.5" />
             Tìm tài xế ({unlinkedDrivers.length})
           </button>
+          </>)}
 
           {bridgeState.status === 'connected' ? (
             <>
@@ -1432,7 +1437,41 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
         </div>
       )}
 
-      {/* 3-Column Body */}
+      {/* 3-Column Body (only for a logged-in account) */}
+      {!loggedIn ? (
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-sm text-center space-y-3">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center">
+              <QrCode className="w-7 h-7 text-blue-600 dark:text-blue-400" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Chưa đăng nhập Zalo</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              Đăng nhập để xem tin nhắn, ảnh và file. Dữ liệu của mỗi tài khoản vẫn được giữ trên máy và hiện lại khi
+              đăng nhập đúng tài khoản đó.
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              {bridgeState.hasSavedSession && electronAPI?.zaloReconnect && (
+                <button
+                  onClick={handleReconnect}
+                  disabled={reconnecting}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${reconnecting ? 'animate-spin' : ''}`} />
+                  {reconnecting ? 'Đang kết nối...' : 'Kết nối lại'}
+                </button>
+              )}
+              <button
+                onClick={handleStartQRLogin}
+                disabled={!hasZaloBridge}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white cursor-pointer"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                Đăng nhập QR Zalo
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Conversation list & filters */}
         <div className="w-80 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0">
@@ -2099,6 +2138,7 @@ export const ZaloTab: React.FC<ZaloTabProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Scan older files when a chat starts being watched */}
       {historyPrompt && (

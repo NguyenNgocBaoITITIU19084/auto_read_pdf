@@ -21,6 +21,8 @@ def client(fresh_db, monkeypatch):
         "https://f.dlfl.vn/notbooking.pdf": b"%PDF-1.4 invoice",
         "https://p.zdn.vn/photo.jpg": JPG_BYTES,
     }
+    from backend.app.core import zalo as zalo_core
+    zalo_core.save_session(uid="acc-test", display_name="Điều vận", status="connected")
     monkeypatch.setattr(zb, "_ensure_worker", lambda: None)
     monkeypatch.setattr(zb, "GEMINI_GAP_SECONDS", 0)
 
