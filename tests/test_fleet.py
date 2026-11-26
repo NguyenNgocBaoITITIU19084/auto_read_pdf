@@ -430,10 +430,15 @@ def test_deleted_truck_goes_to_trash_and_comes_back():
 
 def test_deleted_driver_frees_their_truck_and_is_left_out_of_reminders():
     t = _truck("51C-1")
-    a = _driver("An", home_vehicle_id=t, license_expiry="2026-11-20")
+    from datetime import timedelta
+    today = datetime.now(VN_TZ).date()
+    # The licence runs out soon (a reminder is due) but is still valid, so the driver can be given a truck.
+    a = _driver("An", license_expiry=(today + timedelta(days=5)).isoformat())
+    assert [d["entity_id"] for d in fleet.expiring_documents(today)] == [a]
+    fleet.assign_vehicle(a, t)                         # "Giao xe": there is no own truck any more
     fleet.delete_driver(a)
     assert _trucks()["51C-1"]["current_driver"] is None
-    assert fleet.expiring_documents(date(2026, 11, 15)) == []
+    assert fleet.expiring_documents(today) == []
     b = _driver("Bình")
     fleet.assign_vehicle(b, t)                         # the truck is free for someone else
     fleet.restore_from_trash("driver", [a])
