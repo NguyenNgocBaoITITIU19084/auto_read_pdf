@@ -1,3 +1,3 @@
 """Single source of truth for the app version string, kept in sync with package.json."""
 
-APP_VERSION = "2.14.0"
+APP_VERSION = "2.15.0"
