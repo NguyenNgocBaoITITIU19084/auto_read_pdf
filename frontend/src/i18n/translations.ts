@@ -118,6 +118,20 @@ export const translations = {
         status: "Trạng thái",
         action: "Chuyển tới"
       },
+      messaging: {
+        title: "Tin nhắn cần xử lý",
+        zaloOff: "Chưa đăng nhập Zalo",
+        unreadMessages: "tin chưa đọc",
+        unreadConversations: "{n} hội thoại chưa đọc",
+        pendingConversations: "Chờ trả lời",
+        bookingsToReview: "Booking chờ duyệt",
+        gmailNone: "Chưa kết nối tài khoản Gmail",
+        gmailUnread: "thư chưa đọc",
+        gmailRelogin: "Cần đăng nhập lại",
+        unavailable: "Không đọc được dữ liệu",
+        openZalo: "Mở Zalo",
+        openGmail: "Mở Gmail",
+      },
       distributions: {
         title: "Phân Tích & Biểu Đồ Trực Quan",
         carriers: "Top Hãng tàu (Sản lượng)",
@@ -1958,6 +1972,20 @@ export const translations = {
         berthTime: "Berth Time",
         status: "Status",
         action: "Jump to"
+      },
+      messaging: {
+        title: "Messages to handle",
+        zaloOff: "Not signed in to Zalo",
+        unreadMessages: "unread messages",
+        unreadConversations: "{n} unread chats",
+        pendingConversations: "Awaiting reply",
+        bookingsToReview: "Bookings to review",
+        gmailNone: "No Gmail account connected",
+        gmailUnread: "unread emails",
+        gmailRelogin: "Sign in again",
+        unavailable: "Could not be read",
+        openZalo: "Open Zalo",
+        openGmail: "Open Gmail",
       },
       distributions: {
         title: "Analytics & Visual Breakdown",

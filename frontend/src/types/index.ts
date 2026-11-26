@@ -306,6 +306,29 @@ export interface DashboardFleet {
   window_days: number;
 }
 
+export interface DashboardZalo {
+  connected: boolean;
+  account_name: string;
+  unread_messages: number;
+  unread_conversations: number;
+  /** Chats flagged as waiting for an answer */
+  pending_conversations: number;
+  /** Bookings read from Zalo photos / PDFs, waiting to be checked and saved */
+  bookings_to_review: number;
+}
+
+export interface DashboardGmail {
+  accounts: { id: number; email: string; status: string; unread_count: number }[];
+  unread_total: number;
+  accounts_with_error: number;
+}
+
+/** Each side is null when it could not be read */
+export interface DashboardMessaging {
+  zalo: DashboardZalo | null;
+  gmail: DashboardGmail | null;
+}
+
 export interface DashboardSummary {
   updated_at: string;
   scope: {
@@ -317,6 +340,8 @@ export interface DashboardSummary {
   distributions: DashboardDistributions;
   /** Company-wide (not per collection); missing on older backends, null when it could not be read */
   fleet?: DashboardFleet | null;
+  /** Zalo / Gmail, account-wide; missing on older backends */
+  messaging?: DashboardMessaging | null;
 }
 
 export interface AISettings {

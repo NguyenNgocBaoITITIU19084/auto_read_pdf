@@ -230,6 +230,29 @@ class DashboardFleet(BaseModel):
     expired_total: int
     window_days: int
 
+class DashboardZalo(BaseModel):
+    connected: bool
+    account_name: str = ""
+    unread_messages: int
+    unread_conversations: int
+    pending_conversations: int
+    bookings_to_review: int
+
+class DashboardGmailAccount(BaseModel):
+    id: int
+    email: str
+    status: str
+    unread_count: int
+
+class DashboardGmail(BaseModel):
+    accounts: List[DashboardGmailAccount]
+    unread_total: int
+    accounts_with_error: int
+
+class DashboardMessaging(BaseModel):
+    zalo: Optional[DashboardZalo] = None
+    gmail: Optional[DashboardGmail] = None
+
 class DashboardSummaryResponse(BaseModel):
     updated_at: str
     scope: dict
@@ -238,6 +261,8 @@ class DashboardSummaryResponse(BaseModel):
     distributions: DashboardDistributions
     # company-wide, whatever the collection scope; None when it could not be read
     fleet: Optional[DashboardFleet] = None
+    # Zalo / Gmail, account-wide whatever the collection scope
+    messaging: Optional[DashboardMessaging] = None
 
 
 class SystemUsage(BaseModel):

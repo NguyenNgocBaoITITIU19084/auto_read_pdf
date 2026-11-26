@@ -8,6 +8,7 @@ import { KPICards } from './KPICards';
 import { AlertsSection } from './AlertsSection';
 import { BreakdownCharts } from './BreakdownCharts';
 import { ResourceMonitor } from './ResourceMonitor';
+import { MessagingCard } from './MessagingCard';
 
 interface DashboardTabProps {
   onNavigateTab: (tabId: TabId, searchKeyword?: string) => void;
@@ -139,8 +140,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
         <div className="lg:col-span-2 xl:col-span-3 min-w-0">
           <AlertsSection alerts={summary?.alerts || EMPTY_ALERTS} fleet={summary?.fleet} onNavigateTab={onNavigateTab} loading={firstLoad} />
         </div>
-        {/* Polls on its own, independent of the scope above */}
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-4">
+          {summary?.messaging && <MessagingCard messaging={summary.messaging} onNavigateTab={onNavigateTab} />}
+          {/* Polls on its own, independent of the scope above */}
           <ResourceMonitor onBackendRestarted={fetchSummary} />
         </div>
       </div>
