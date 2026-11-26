@@ -1,26 +1,33 @@
 import React from 'react';
 import { 
   FileText, ShieldCheck, ShieldAlert,
-  Warehouse, Eye, Box, Ship, ArrowUpRight
+  Warehouse, Eye, Box, Ship, Truck, Users
 } from 'lucide-react';
-import { DashboardKPIs } from '../../types';
+import { DashboardFleet, DashboardKPIs } from '../../types';
 import { useApp } from '../../context/AppContext';
 
 interface KPICardsProps {
   kpis: DashboardKPIs;
+  /** Company-wide fleet block; its card is left out when it is missing */
+  fleet?: DashboardFleet | null;
   loading?: boolean;
 }
 
-export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = false }) => {
+export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, fleet, loading = false }) => {
   const { t } = useApp();
 
   const totalConts = kpis.total_containers || 1;
   const clearanceRate = Math.round((kpis.customs_cleared / (kpis.customs_cleared + kpis.customs_uncleared || 1)) * 100);
   const yardRate = Math.round((kpis.containers_in_yard / totalConts) * 100);
 
+  const grid = fleet
+    ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4'
+    : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4';
+  const f = fleet?.kpis;
+
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[...Array(4)].map((_, i) => (
           <div key={i} className="h-32 rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse border border-slate-300/40 dark:border-slate-700/50" />
         ))}
@@ -29,7 +36,7 @@ export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = f
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className={grid}>
       {/* 1. Bookings & TEUs */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
         <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110" />
@@ -141,6 +148,44 @@ export const KPICards: React.FC<KPICardsProps> = React.memo(({ kpis, loading = f
           </div>
         </div>
       </div>
+
+      {/* 5. Fleet & drivers (company-wide) */}
+      {f && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm hover:shadow transition-shadow flex flex-col justify-between relative overflow-hidden group">
+          <div className={`absolute top-0 right-0 w-24 h-24 ${f.vehicles_down > 0 ? 'bg-orange-500/10' : 'bg-indigo-500/10'} rounded-bl-full pointer-events-none -mr-4 -mt-4 transition-transform group-hover:scale-110`} />
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400" title={t.dashboard.kpis.fleetCompanyWide}>
+              {t.dashboard.kpis.fleetTitle}
+            </span>
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+              <Truck className="w-4 h-4" />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight tabular-nums">
+                {f.vehicles_active}/{f.vehicles_total}
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{t.dashboard.kpis.vehiclesRunning}</span>
+            </div>
+            <div className="mt-1 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+              <span>{t.dashboard.kpis.vehiclesReady}: <strong className="text-emerald-600 dark:text-emerald-400">{f.vehicles_ready}</strong></span>
+              <span>
+                {t.dashboard.kpis.vehiclesDown}:{' '}
+                <strong className={f.vehicles_down > 0 ? 'text-orange-600 dark:text-orange-400' : 'text-slate-700 dark:text-slate-300'}>{f.vehicles_down}</strong>
+              </span>
+            </div>
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
+              <Users className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <span>{t.dashboard.kpis.driversOnVehicle}: <strong className="text-slate-700 dark:text-slate-300">{f.drivers_on_vehicle}</strong></span>
+              <span>·</span>
+              <span>{t.dashboard.kpis.driversFree}: <strong className={f.drivers_free > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-700 dark:text-slate-300'}>{f.drivers_free}</strong></span>
+              <span>·</span>
+              <span>{t.dashboard.kpis.driversOff}: <strong className="text-slate-700 dark:text-slate-300">{f.drivers_off}</strong></span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

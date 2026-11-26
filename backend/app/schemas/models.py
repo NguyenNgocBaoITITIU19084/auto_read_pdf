@@ -213,12 +213,31 @@ class DashboardDistributions(BaseModel):
     equipment_types: List[DistributionItem]
     container_events: List[DistributionItem]
 
+class DashboardFleetKPIs(BaseModel):
+    vehicles_total: int
+    vehicles_active: int
+    vehicles_ready: int
+    vehicles_down: int
+    drivers_total: int
+    drivers_on_vehicle: int
+    drivers_free: int
+    drivers_off: int
+
+class DashboardFleet(BaseModel):
+    kpis: DashboardFleetKPIs
+    expiring: List[dict]
+    expiring_total: int
+    expired_total: int
+    window_days: int
+
 class DashboardSummaryResponse(BaseModel):
     updated_at: str
     scope: dict
     kpis: DashboardKPIs
     alerts: DashboardAlerts
     distributions: DashboardDistributions
+    # company-wide, whatever the collection scope; None when it could not be read
+    fleet: Optional[DashboardFleet] = None
 
 
 class SystemUsage(BaseModel):

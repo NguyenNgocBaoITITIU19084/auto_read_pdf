@@ -1,6 +1,6 @@
 """Fleet: trucks, drivers, home trucks, temporary moves when a truck breaks down, and document expiry reminders."""
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -631,3 +631,45 @@ def test_revoke_route():
     res = TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""})
     assert res.status_code == 200 and res.json()["current_vehicle"] is None
     assert TestClient(app).post(f"/api/v1/fleet/drivers/{a}/revoke", json={"reason": ""}).status_code == 400
+
+
+# --- dashboard ------------------------------------------------------------
+def test_dashboard_summary_counts_trucks_drivers_and_expiring_papers():
+    today = datetime.now(VN_TZ).date()
+    soon = (today + timedelta(days=5)).isoformat()
+    later = (today + timedelta(days=60)).isoformat()
+    past = (today - timedelta(days=3)).isoformat()
+    t1 = _truck("51C-1", insurance_expiry=soon)
+    t2 = _truck("51C-2")
+    t3 = _truck("51C-3")
+    _truck("51C-4", registration_expiry=later)
+    t5 = _truck("51C-5")
+    fleet.set_vehicle_status(t5, "inactive")
+    with db.get_connection() as conn:  # out of service: its lapsed paper is not shown
+        conn.execute("UPDATE fleet_vehicles SET registration_expiry = ? WHERE id = ?;", (past, t5))
+    _driver("An", t1)
+    _driver("Bình", t2)
+    fleet.set_vehicle_status(t2, "broken", "Hư hộp số", move_to_vehicle_id=t3)
+    _driver("Cường")
+    _driver("Dũng", status="leave")
+    _driver("Em", status="left")
+    _driver("Phúc", license_expiry=past)
+
+    s = fleet.dashboard_summary(today)
+    # 51C-1 / 51C-3 driven, 51C-4 free, 51C-2 broken, 51C-5 out of service; Em quit, Dũng on leave, Phúc's licence lapsed
+    assert s["kpis"] == {
+        "vehicles_total": 4, "vehicles_active": 2, "vehicles_ready": 1, "vehicles_down": 1,
+        "drivers_total": 5, "drivers_on_vehicle": 2, "drivers_free": 1, "drivers_off": 2,
+    }
+    assert [(d["subject"], d["kind"], d["days_left"]) for d in s["expiring"]] == [
+        ("Phúc", "license", -3), ("51C-1", "insurance", 5)]
+    assert s["expiring_total"] == 2 and s["expired_total"] == 1 and s["window_days"] == 30
+    assert s["expiring"][0]["tab"] == "drivers"
+
+
+def test_dashboard_api_includes_the_fleet_whatever_the_scope():
+    _truck("51C-1")
+    for url in ("/api/v1/dashboard/summary", "/api/v1/dashboard/summary?collection_id=999"):
+        data = client.get(url).json()
+        assert data["fleet"]["kpis"]["vehicles_total"] == 1
+        assert data["fleet"]["expiring"] == []

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Globe, Layers, Radio, RefreshCw, Sparkles } from 'lucide-react';
-import { DashboardSummary, TabId } from '../../types';
+import { DashboardSummary } from '../../types';
+import { TabId } from '../common/Tabs';
 import { getDashboardSummaryApi } from '../../services/api';
 import { useApp } from '../../context/AppContext';
 import { KPICards } from './KPICards';
@@ -130,13 +131,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
 
       {/* KPIs */}
       <div>
-        <KPICards kpis={summary?.kpis || EMPTY_KPIS} loading={firstLoad} />
+        <KPICards kpis={summary?.kpis || EMPTY_KPIS} fleet={summary?.fleet} loading={firstLoad} />
       </div>
 
       {/* Alerts (main) + system resources (side) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
         <div className="lg:col-span-2 xl:col-span-3 min-w-0">
-          <AlertsSection alerts={summary?.alerts || EMPTY_ALERTS} onNavigateTab={onNavigateTab} loading={firstLoad} />
+          <AlertsSection alerts={summary?.alerts || EMPTY_ALERTS} fleet={summary?.fleet} onNavigateTab={onNavigateTab} loading={firstLoad} />
         </div>
         {/* Polls on its own, independent of the scope above */}
         <div className="min-w-0">

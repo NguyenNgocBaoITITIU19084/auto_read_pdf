@@ -1291,6 +1291,42 @@ def expiring_documents(today: date, within_days: int = EXPIRY_REMINDER_DAYS[0]) 
     return out
 
 
+DASHBOARD_EXPIRY_LIMIT = 10
+VEHICLE_DOWN_STATUSES = ("not_ready", "broken", "maintenance")
+
+
+def dashboard_summary(today: date) -> dict:
+    """The fleet block of the dashboard (company-wide, never scoped to a collection):
+    {"kpis": {...}, "expiring": soonest DASHBOARD_EXPIRY_LIMIT documents, "expiring_total", "expired_total",
+    "window_days"}. Trucks out of service (inactive) and drivers who quit are left out of every count."""
+    with _conn() as conn:
+        vehicles = dict(conn.execute(
+            "SELECT status, COUNT(*) FROM fleet_vehicles WHERE deleted_at IS NULL GROUP BY status;").fetchall())
+        drivers = dict(conn.execute(
+            "SELECT status, COUNT(*) FROM fleet_drivers WHERE deleted_at IS NULL GROUP BY status;").fetchall())
+        on_vehicle = conn.execute(
+            "SELECT COUNT(DISTINCT a.driver_id) FROM fleet_assignments a JOIN fleet_drivers d ON d.id = a.driver_id "
+            "WHERE a.ended_at IS NULL AND d.deleted_at IS NULL AND d.status = 'active';").fetchone()[0]
+    docs = expiring_documents(today)
+    drivers_active = drivers.get("active", 0)
+    return {
+        "kpis": {
+            "vehicles_total": sum(n for s, n in vehicles.items() if s != "inactive"),
+            "vehicles_active": vehicles.get("active", 0),
+            "vehicles_ready": vehicles.get("ready", 0),
+            "vehicles_down": sum(vehicles.get(s, 0) for s in VEHICLE_DOWN_STATUSES),
+            "drivers_total": sum(n for s, n in drivers.items() if s != "left"),
+            "drivers_on_vehicle": on_vehicle,
+            "drivers_free": max(0, drivers_active - on_vehicle),
+            "drivers_off": sum(drivers.get(s, 0) for s in ("leave", "not_ready")),
+        },
+        "expiring": docs[:DASHBOARD_EXPIRY_LIMIT],
+        "expiring_total": len(docs),
+        "expired_total": sum(1 for d in docs if d["days_left"] < 0),
+        "window_days": EXPIRY_REMINDER_DAYS[0],
+    }
+
+
 def _doc_tab(doc: dict) -> str:
     """The app tab listing the document's truck / driver / trailer."""
     return doc.get("tab") or next(tab for entity, _, _, tab in EXPIRY_ENTITIES.values() if entity == doc["entity"])

@@ -271,6 +271,41 @@ export interface DashboardDistributions {
   container_events: DistributionItem[];
 }
 
+export interface DashboardFleetKPIs {
+  vehicles_total: number;
+  vehicles_active: number;
+  vehicles_ready: number;
+  /** not_ready + broken + maintenance */
+  vehicles_down: number;
+  drivers_total: number;
+  drivers_on_vehicle: number;
+  drivers_free: number;
+  /** on leave + not ready */
+  drivers_off: number;
+}
+
+/** A truck / trailer paper or driving licence expiring within the window (or already expired) */
+export interface ExpiringDocument {
+  kind: string;
+  label: string;
+  entity: 'vehicle' | 'driver' | 'trailer';
+  entity_id: number;
+  subject: string;
+  /** YYYY-MM-DD */
+  expiry: string;
+  days_left: number;
+  /** App tab listing it: fleet | trucks | drivers | trailers */
+  tab: string;
+}
+
+export interface DashboardFleet {
+  kpis: DashboardFleetKPIs;
+  expiring: ExpiringDocument[];
+  expiring_total: number;
+  expired_total: number;
+  window_days: number;
+}
+
 export interface DashboardSummary {
   updated_at: string;
   scope: {
@@ -280,6 +315,8 @@ export interface DashboardSummary {
   kpis: DashboardKPIs;
   alerts: DashboardAlerts;
   distributions: DashboardDistributions;
+  /** Company-wide (not per collection); missing on older backends, null when it could not be read */
+  fleet?: DashboardFleet | null;
 }
 
 export interface AISettings {

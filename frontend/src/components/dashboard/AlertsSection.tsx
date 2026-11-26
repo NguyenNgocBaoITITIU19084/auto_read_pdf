@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, ArrowRight, CheckCircle2, Clock, MapPin, ShieldAlert, Ship } from 'lucide-react';
-import { DashboardAlerts, TabId } from '../../types';
+import { AlertTriangle, ArrowRight, CheckCircle2, Clock, FileWarning, MapPin, ShieldAlert, Ship } from 'lucide-react';
+import { DashboardAlerts, DashboardFleet, ExpiringDocument } from '../../types';
+import { TabId } from '../common/Tabs';
 import { useApp } from '../../context/AppContext';
 import { ValueBadge } from '../common/ValueBadge';
 import { CustomsStatusBadge } from '../container/customs';
@@ -9,11 +10,15 @@ import { parseVnDateTime } from '../../utils/vnTime';
 
 interface AlertsSectionProps {
   alerts: DashboardAlerts;
+  /** Company-wide fleet block; the papers tab is left out when it is missing */
+  fleet?: DashboardFleet | null;
   onNavigateTab: (tabId: TabId, searchKeyword?: string) => void;
   loading?: boolean;
 }
 
-type AlertTab = 'cutoffs' | 'containers' | 'vessels';
+type AlertTab = 'cutoffs' | 'containers' | 'vessels' | 'papers';
+
+const FLEET_TABS: readonly string[] = ['fleet', 'trucks', 'drivers', 'trailers'];
 
 const DEFAULT_WINDOW_DAYS = 7;
 
@@ -27,7 +32,7 @@ export function timeLeft(alertAt: string | undefined, now: number = Date.now()):
 const rowClass =
   'w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors cursor-pointer group';
 
-export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts, onNavigateTab, loading = false }) => {
+export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts, fleet, onNavigateTab, loading = false }) => {
   const { t } = useApp();
   const a = t.dashboard.alerts;
   const days = alerts.window_days ?? DEFAULT_WINDOW_DAYS;
@@ -36,16 +41,20 @@ export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts,
     cutoffs: alerts.critical_cutoffs || [],
     containers: alerts.uncleared_containers || [],
     vessels: alerts.upcoming_vessels || [],
+    papers: fleet?.expiring || [],
   };
   const totals = {
     cutoffs: alerts.totals?.critical_cutoffs ?? lists.cutoffs.length,
     containers: alerts.totals?.uncleared_containers ?? lists.containers.length,
     vessels: alerts.totals?.upcoming_vessels ?? lists.vessels.length,
+    papers: fleet?.expiring_total ?? lists.papers.length,
   };
-  const grandTotal = totals.cutoffs + totals.containers + totals.vessels;
+  const grandTotal = totals.cutoffs + totals.containers + totals.vessels + totals.papers;
+  const paperDays = fleet?.window_days ?? 30;
 
   // Open the most urgent non-empty list; keep the user's choice afterwards.
-  const firstNonEmpty: AlertTab = totals.cutoffs ? 'cutoffs' : totals.containers ? 'containers' : totals.vessels ? 'vessels' : 'cutoffs';
+  const firstNonEmpty: AlertTab = totals.cutoffs ? 'cutoffs' : totals.containers ? 'containers' : totals.vessels ? 'vessels'
+    : totals.papers ? 'papers' : 'cutoffs';
   const [tab, setTab] = useState<AlertTab | null>(null);
   const active = tab ?? firstNonEmpty;
   useEffect(() => {
@@ -61,12 +70,26 @@ export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts,
     { id: 'cutoffs', label: a.tabCutoffs, icon: <Clock className="w-3.5 h-3.5" />, tone: 'text-amber-600 dark:text-amber-400' },
     { id: 'containers', label: a.tabContainers, icon: <ShieldAlert className="w-3.5 h-3.5" />, tone: 'text-rose-600 dark:text-rose-400' },
     { id: 'vessels', label: a.tabVessels, icon: <Ship className="w-3.5 h-3.5" />, tone: 'text-sky-600 dark:text-sky-400' },
+    ...(fleet ? [{ id: 'papers' as const, label: a.tabPapers, icon: <FileWarning className="w-3.5 h-3.5" />, tone: 'text-orange-600 dark:text-orange-400' }] : []),
   ];
   const jump: Record<AlertTab, { tab: TabId; label: string }> = {
     cutoffs: { tab: 'booking', label: a.jumpToBooking },
     containers: { tab: 'container', label: a.jumpToContainer },
     vessels: { tab: 'vessel', label: a.jumpToVessel },
+    papers: { tab: 'fleet', label: a.jumpToFleet },
   };
+
+  const paperTab = (d: ExpiringDocument): TabId => (FLEET_TABS.includes(d.tab) ? d.tab : 'fleet') as TabId;
+  const paperBadge = (daysLeft: number) => {
+    const text = daysLeft < 0 ? tf(a.paperExpired, { n: -daysLeft })
+      : daysLeft === 0 ? a.paperToday
+      : tf(a.paperDaysLeft, { n: daysLeft });
+    const tone = daysLeft <= 0 ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+      : daysLeft <= 7 ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300';
+    return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${tone}`}>{text}</span>;
+  };
+  const isoToVn = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split('-').reverse().join('/') : iso);
 
   const renderTimeLeft = (alertAt?: string) => {
     const left = timeLeft(alertAt);
@@ -157,6 +180,28 @@ export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts,
         </button>
       ));
     }
+    if (active === 'papers') {
+      if (!lists.papers.length) return empty(tf(a.emptyPapers, { days: paperDays }));
+      return lists.papers.map((d) => (
+        <button key={`p-${d.entity}-${d.entity_id}-${d.kind}`} type="button" className={rowClass} onClick={() => onNavigateTab(paperTab(d), d.subject)}>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-primary-600 dark:group-hover:text-primary-400 truncate">
+                {d.subject}
+              </span>
+              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400 shrink-0">
+                {a.paperEntity[d.entity] ?? d.entity}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{d.label}</div>
+          </div>
+          <div className="text-right shrink-0 space-y-0.5">
+            <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 tabular-nums">{a.paperExpiry}: {isoToVn(d.expiry)}</div>
+            {paperBadge(d.days_left)}
+          </div>
+        </button>
+      ));
+    }
     if (!lists.vessels.length) return empty(tf(a.emptyVessels, { days }));
     return lists.vessels.map((v) => (
       <button key={`v-${v.id}`} type="button" className={rowClass} onClick={() => onNavigateTab('vessel', v.vessel_name)}>
@@ -192,7 +237,7 @@ export const AlertsSection: React.FC<AlertsSectionProps> = React.memo(({ alerts,
             {grandTotal ? tf(a.needAttention, { count: grandTotal }) : a.allDone}
           </span>
         </div>
-        <span className="text-[11px] text-slate-400">{tf(a.windowHint, { days })}</span>
+        <span className="text-[11px] text-slate-400">{active === 'papers' ? tf(a.papersHint, { days: paperDays }) : tf(a.windowHint, { days })}</span>
       </div>
 
       <div role="tablist" className="px-4 flex items-center gap-1 border-b border-slate-100 dark:border-slate-800">

@@ -68,4 +68,35 @@ describe('AlertsSection', () => {
     expect(screen.getByText('20/09/2026 03:00')).toBeInTheDocument(); // original shown struck through
     expect(screen.getByText('25/09/2026 10:00')).toBeInTheDocument();
   });
+
+  it('lists expiring truck papers company-wide and drills down to the right fleet tab', () => {
+    const onNavigateTab = vi.fn();
+    const empty = { critical_cutoffs: [], uncleared_containers: [], upcoming_vessels: [] };
+    render(
+      <AlertsSection
+        onNavigateTab={onNavigateTab}
+        alerts={empty}
+        fleet={{
+          kpis: { vehicles_total: 0, vehicles_active: 0, vehicles_ready: 0, vehicles_down: 0, drivers_total: 0, drivers_on_vehicle: 0, drivers_free: 0, drivers_off: 0 },
+          expiring: [
+            { kind: 'license', label: 'Bằng lái', entity: 'driver', entity_id: 6, subject: 'Đặng Văn Em', expiry: '2026-11-08', days_left: -18, tab: 'drivers' },
+            { kind: 'insurance', label: 'Bảo hiểm', entity: 'vehicle', entity_id: 1, subject: '51C-123.45', expiry: '2026-12-01', days_left: 5, tab: 'trucks' },
+          ],
+          expiring_total: 4, expired_total: 1, window_days: 30,
+        }}
+      />,
+    );
+    expect(screen.getByRole('tab', { name: new RegExp(a.tabPapers) })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('4 mục cần lưu ý')).toBeInTheDocument();
+    expect(screen.getByText('quá hạn 18 ngày')).toBeInTheDocument();
+    expect(screen.getByText('còn 5 ngày')).toBeInTheDocument();
+    expect(screen.getByText('Hết hạn: 08/11/2026')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('51C-123.45'));
+    expect(onNavigateTab).toHaveBeenCalledWith('trucks', '51C-123.45');
+  });
+
+  it('has no papers tab when the backend sends no fleet block', () => {
+    render(<AlertsSection onNavigateTab={vi.fn()} alerts={{ critical_cutoffs: [], uncleared_containers: [], upcoming_vessels: [] }} />);
+    expect(screen.queryByRole('tab', { name: new RegExp(a.tabPapers) })).toBeNull();
+  });
 });
