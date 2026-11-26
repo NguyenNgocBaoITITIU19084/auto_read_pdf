@@ -15,6 +15,7 @@ export const translations = {
       trailers: "Rơ moóc",
       zalo: "Zalo",
       gmail: "Gmail",
+      outlook: "Outlook",
       logs: "Nhật ký"
     },
     settingsCenter: {
@@ -1838,6 +1839,7 @@ export const translations = {
       trailers: "Trailers",
       zalo: "Zalo",
       gmail: "Gmail",
+      outlook: "Outlook",
       logs: "Logs"
     },
     settingsCenter: {

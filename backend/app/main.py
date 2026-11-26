@@ -42,6 +42,7 @@ from backend.app.api.auto_import import router as auto_import_router
 from backend.app.api.fleet import router as fleet_router
 from backend.app.api.zalo import router as zalo_router
 from backend.app.api.gmail import router as gmail_router
+from backend.app.api.outlook import router as outlook_router
 from backend.app.services.mobile_bridge import bridge
 from backend.app.services.lan_server import lan_server
 
@@ -107,6 +108,7 @@ app.include_router(auto_import_router, prefix="/api/v1")
 app.include_router(fleet_router, prefix="/api/v1")
 app.include_router(zalo_router, prefix="/api/v1")
 app.include_router(gmail_router, prefix="/api/v1")
+app.include_router(outlook_router, prefix="/api/v1")
 
 # Docker: serve the built React app from the same origin. Mounted last so API routes win.
 FRONTEND_DIST = os.environ.get("FRONTEND_DIST", "")

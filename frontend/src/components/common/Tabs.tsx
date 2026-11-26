@@ -1,8 +1,8 @@
 import React from 'react';
-import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Container, Package, Truck, Users, MessageCircle, Mail } from 'lucide-react';
+import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Container, Package, Truck, Users, MessageCircle, Mail, Inbox } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
-export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | 'zalo' | 'gmail' | 'logs';
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | 'zalo' | 'gmail' | 'outlook' | 'logs';
 
 interface TabsProps {
   activeTab: TabId;
@@ -10,9 +10,10 @@ interface TabsProps {
   onHoverTab?: (tab: TabId) => void;
   zaloUnreadCount?: number;
   gmailUnreadCount?: number;
+  outlookUnreadCount?: number;
 }
 
-export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zaloUnreadCount = 0, gmailUnreadCount = 0 }) => {
+export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zaloUnreadCount = 0, gmailUnreadCount = 0, outlookUnreadCount = 0 }) => {
   const { t } = useApp();
 
   const tabItems: { id: TabId; label: string; icon: React.ReactNode; badge?: number }[] = [
@@ -72,6 +73,12 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zal
       label: t.tabs.gmail,
       icon: <Mail className="w-4 h-4" />,
       badge: gmailUnreadCount > 0 ? gmailUnreadCount : undefined,
+    },
+    {
+      id: 'outlook',
+      label: t.tabs.outlook,
+      icon: <Inbox className="w-4 h-4" />,
+      badge: outlookUnreadCount > 0 ? outlookUnreadCount : undefined,
     },
     {
       id: 'logs',

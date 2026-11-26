@@ -10,6 +10,7 @@ import { useMobileBridge } from './context/MobileBridgeContext';
 import { useNotifications } from './context/NotificationsContext';
 import { getZaloConversations } from './services/zaloApi';
 import { getGmailUnreadCount } from './services/gmailApi';
+import { getOutlookUnreadCount } from './services/outlookApi';
 import type { ZaloDraftRequest } from './components/zalo/ZaloTab';
 
 const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').then((m) => ({ default: m.DashboardTab })));
@@ -21,6 +22,7 @@ const FleetTab = lazy(() => import('./components/fleet/FleetTab').then((m) => ({
 const TrailerTab = lazy(() => import('./components/fleet/TrailerTab').then((m) => ({ default: m.TrailerTab })));
 const ZaloTab = lazy(() => import('./components/zalo/ZaloTab').then((m) => ({ default: m.ZaloTab })));
 const GmailTab = lazy(() => import('./components/gmail/GmailTab').then((m) => ({ default: m.GmailTab })));
+const OutlookTab = lazy(() => import('./components/outlook/OutlookTab').then((m) => ({ default: m.OutlookTab })));
 const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ default: m.LogsTab })));
 
 export const App: React.FC = () => {
@@ -40,6 +42,7 @@ export const App: React.FC = () => {
   const pasteSeqRef = useRef(0);
   const [zaloUnreadCount, setZaloUnreadCount] = useState(0);
   const [gmailUnreadCount, setGmailUnreadCount] = useState(0);
+  const [outlookUnreadCount, setOutlookUnreadCount] = useState(0);
   const [zaloThreadId, setZaloThreadId] = useState<string | undefined>(undefined);
   const [zaloDraft, setZaloDraft] = useState<ZaloDraftRequest | null>(null);
 
@@ -57,6 +60,7 @@ export const App: React.FC = () => {
     if (tab === 'trailers') void import('./components/fleet/TrailerTab');
     if (tab === 'zalo') void import('./components/zalo/ZaloTab');
     if (tab === 'gmail') void import('./components/gmail/GmailTab');
+    if (tab === 'outlook') void import('./components/outlook/OutlookTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -95,6 +99,7 @@ export const App: React.FC = () => {
     };
     refreshZaloUnread();
     getGmailUnreadCount().then(setGmailUnreadCount).catch(() => {});
+    getOutlookUnreadCount().then(setOutlookUnreadCount).catch(() => {});
     const unsubMsg = window.electronAPI?.onZaloMessageReceived?.(() => refreshZaloUnread());
     const unsubOpen = window.electronAPI?.onZaloOpenThread?.((data) => {
       if (data?.threadId) setZaloThreadId(data.threadId);
@@ -162,7 +167,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
       <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
       <NotificationDetailModal onNavigateTab={handleNavigateTab} />
-      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} zaloUnreadCount={zaloUnreadCount} gmailUnreadCount={gmailUnreadCount} />
+      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} zaloUnreadCount={zaloUnreadCount} gmailUnreadCount={gmailUnreadCount} outlookUnreadCount={outlookUnreadCount} />
       <main className="flex-1 overflow-hidden flex flex-col">
         <Suspense
           fallback={
@@ -206,6 +211,7 @@ export const App: React.FC = () => {
             />
           )}
           {activeTab === 'gmail' && <GmailTab onUnreadCountChange={setGmailUnreadCount} />}
+          {activeTab === 'outlook' && <OutlookTab onUnreadCountChange={setOutlookUnreadCount} />}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

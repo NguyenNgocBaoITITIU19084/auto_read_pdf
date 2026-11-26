@@ -613,6 +613,10 @@ def init_db():
         from backend.app.core.gmail import create_gmail_tables
         create_gmail_tables(conn)
 
+        # Outlook / Microsoft 365 tables (accounts + tokens, pinned folders, PDF imports)
+        from backend.app.core.outlook import create_outlook_tables
+        create_outlook_tables(conn)
+
         # Create system_settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
