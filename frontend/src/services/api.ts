@@ -667,6 +667,13 @@ export const getSystemResourcesApi = async (): Promise<import('../types').System
 export const freeBackendMemoryApi = async (): Promise<{ rss_before: number; rss_after: number }> =>
   (await apiClient.post<{ rss_before: number; rss_after: number }>('/system/free-memory')).data;
 
+// Disk used by the app's data, and the safe clean-ups (dashboard storage card)
+export const getStorageUsageApi = async (): Promise<import('../types').StorageUsage> =>
+  (await apiClient.get<import('../types').StorageUsage>('/system/storage', { timeout: 20000 })).data;
+
+export const cleanStorageApi = async (target: 'zalo_media_cache' | 'backups' | 'database'): Promise<{ target: string; freed_bytes: number }> =>
+  (await apiClient.post<{ target: string; freed_bytes: number }>(`/system/storage/clean/${target}`, null, { timeout: LONG_TIMEOUT })).data;
+
 // Gate-open hours before the cut-off, per port and cargo type: {"ITC": {"dry": 144, "reefer": 72, "haz": 48}}
 export type PortGateHours = Record<string, { dry: number; reefer: number; haz: number }>;
 

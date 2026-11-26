@@ -9,6 +9,7 @@ import { AlertsSection } from './AlertsSection';
 import { BreakdownCharts } from './BreakdownCharts';
 import { ResourceMonitor } from './ResourceMonitor';
 import { MessagingCard } from './MessagingCard';
+import { StorageCard } from './StorageCard';
 
 interface DashboardTabProps {
   onNavigateTab: (tabId: TabId, searchKeyword?: string) => void;
@@ -135,21 +136,31 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({ onNavigateTab }) => 
         <KPICards kpis={summary?.kpis || EMPTY_KPIS} fleet={summary?.fleet} loading={firstLoad} />
       </div>
 
-      {/* Alerts (main) + system resources (side) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
+      {/* What needs handling: operational alerts (main) + messages waiting in Zalo / Gmail (side), same height */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
         <div className="lg:col-span-2 xl:col-span-3 min-w-0">
           <AlertsSection alerts={summary?.alerts || EMPTY_ALERTS} fleet={summary?.fleet} onNavigateTab={onNavigateTab} loading={firstLoad} />
         </div>
-        <div className="min-w-0 space-y-4">
-          {summary?.messaging && <MessagingCard messaging={summary.messaging} onNavigateTab={onNavigateTab} />}
-          {/* Polls on its own, independent of the scope above */}
-          <ResourceMonitor onBackendRestarted={fetchSummary} />
+        <div className="min-w-0">
+          {summary?.messaging
+            ? <MessagingCard messaging={summary.messaging} onNavigateTab={onNavigateTab} />
+            : <div className="h-full min-h-[200px] rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />}
         </div>
       </div>
 
       {/* Distributions */}
       <div>
         <BreakdownCharts distributions={summary?.distributions || EMPTY_DISTRIBUTIONS} loading={firstLoad} />
+      </div>
+
+      {/* The app itself: disk used by its data, and CPU / RAM. Both read on their own, independent of the scope */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <div className="min-w-0">
+          <StorageCard />
+        </div>
+        <div className="min-w-0">
+          <ResourceMonitor onBackendRestarted={fetchSummary} />
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, HTTPException
-from backend.app.services import resource_monitor
+from backend.app.services import resource_monitor, storage
 from backend.app.schemas.models import SystemResourcesResponse, FreeMemoryResponse
 
 logger = logging.getLogger("backend.api.system")
@@ -18,3 +18,24 @@ def get_resources():
 @router.post("/free-memory", response_model=FreeMemoryResponse)
 def free_memory():
     return resource_monitor.free_backend_memory()
+
+
+@router.get("/storage")
+def get_storage():
+    """Disk used by the app's data (database, Zalo files and image cache, fleet photos, migration backups)."""
+    try:
+        return storage.usage()
+    except Exception as e:
+        logger.error(f"Error reading storage usage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/storage/clean/{target}")
+def clean_storage(target: str):
+    """One safe clean-up: zalo_media_cache | backups (keeps the newest few) | database (VACUUM)."""
+    try:
+        return storage.clean(target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Storage clean-up '{target}' failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

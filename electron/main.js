@@ -454,6 +454,14 @@ function registerIpc() {
     return collectAppMetrics();
   });
 
+  // Bytes the UI session keeps on disk: Chromium's HTTP cache + compiled-script cache (both safe to clear)
+  ipcMain.handle('get-renderer-cache-size', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    const httpCache = await mainWindow.webContents.session.getCacheSize().catch(() => 0);
+    const codeCache = await dirSize(path.join(app.getPath('userData'), 'Code Cache'));
+    return { httpCache, codeCache, total: httpCache + codeCache };
+  });
+
   ipcMain.handle('clear-renderer-cache', async (event) => {
     if (!isFromMainWindow(event)) throw new Error('Forbidden');
     const before = collectAppMetrics().totalWorkingSetBytes;
@@ -608,3 +616,21 @@ app.on('will-quit', (event) => {
 });
 
 process.on('exit', () => backend.stopSync());
+
+
+/** Total bytes of the files under `dir` (0 when it is missing). */
+async function dirSize(dir) {
+  let total = 0;
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) total += await dirSize(full);
+    else if (entry.isFile()) total += await fs.promises.stat(full).then((st) => st.size, () => 0);
+  }
+  return total;
+}

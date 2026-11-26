@@ -5,6 +5,7 @@ import { translations } from '../../i18n/translations';
 const app = { t: translations.vi, addToast: vi.fn(), autoSyncEnabled: false, activeCollection: { id: 1, name: 'BST 1' }, collections: [] };
 vi.mock('../../context/AppContext', () => ({ useApp: () => app }));
 vi.mock('./ResourceMonitor', () => ({ ResourceMonitor: () => <div data-testid="resources" /> }));
+vi.mock('./StorageCard', () => ({ StorageCard: () => <div data-testid="storage" /> }));
 
 const getDashboardSummaryApi = vi.fn();
 vi.mock('../../services/api', () => ({ getDashboardSummaryApi: (id?: number) => getDashboardSummaryApi(id) }));

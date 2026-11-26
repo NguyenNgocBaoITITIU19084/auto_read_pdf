@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppMetrics: () => ipcRenderer.invoke('get-app-metrics'),
   /** Clear the HTTP + code caches of the UI session → {before, after} working-set bytes. */
   clearRendererCache: () => ipcRenderer.invoke('clear-renderer-cache'),
+  /** Disk used by the UI session's caches → {httpCache, codeCache, total} bytes. */
+  getRendererCacheSize: () => ipcRenderer.invoke('get-renderer-cache-size'),
   /** Restart the backend we own → {ok, reason?: 'not_owned'|'busy'|'failed'}. */
   restartBackend: () => ipcRenderer.invoke('restart-backend'),
 

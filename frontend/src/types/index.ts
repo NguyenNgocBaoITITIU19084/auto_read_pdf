@@ -329,6 +329,27 @@ export interface DashboardMessaging {
   gmail: DashboardGmail | null;
 }
 
+export type StorageItemId = 'database' | 'zalo_files' | 'zalo_media_cache' | 'fleet_photos' | 'backups';
+
+export interface StorageItem {
+  id: StorageItemId;
+  bytes: number;
+  /** Files in the folder (null for the database) */
+  files: number | null;
+  /** Bytes a clean-up would free (0 = nothing to clean, or never cleaned) */
+  cleanable: number;
+  /** database only: bytes of the Zalo / Gmail / Outlook tables (empty when SQLite cannot tell) */
+  groups?: Partial<Record<'zalo' | 'gmail' | 'outlook', number>>;
+}
+
+export interface StorageUsage {
+  data_dir: string;
+  disk: { total: number; used: number; free: number };
+  total_bytes: number;
+  backups_kept: number;
+  items: StorageItem[];
+}
+
 export interface DashboardSummary {
   updated_at: string;
   scope: {
@@ -501,6 +522,7 @@ export interface ElectronAPI {
   getAppMetrics?: () => Promise<AppMetrics>;
   /** Clear the UI session caches → working-set bytes before/after. */
   clearRendererCache?: () => Promise<{ before: number; after: number }>;
+  getRendererCacheSize?: () => Promise<{ httpCache: number; codeCache: number; total: number }>;
   /** Desktop only: native folder picker → the chosen path, or null when cancelled. */
   selectFolder?: (defaultPath?: string) => Promise<string | null>;
   /** Restart the backend owned by Electron. */

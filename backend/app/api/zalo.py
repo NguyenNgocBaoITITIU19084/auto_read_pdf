@@ -1,7 +1,6 @@
 """Zalo messaging API: conversations, incoming/outgoing messages, driver linking, and message templates."""
 import hashlib
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -14,7 +13,7 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse
 
 from backend.app.core import zalo as zalo_core
-from backend.app.services import zalo_booking
+from backend.app.services import storage, zalo_booking
 
 router = APIRouter(prefix="/zalo", tags=["Zalo"])
 
@@ -264,7 +263,7 @@ def delete_template(template_id: int):
 
 
 _ALLOWED_MEDIA_SUFFIXES = (".zdn.vn", ".zadn.vn", ".dlfl.vn", ".zaloapp.com", ".zalo.me")
-_MEDIA_CACHE_DIR = Path(tempfile.gettempdir()) / "auto_read_pdf_zalo_media"
+_MEDIA_CACHE_DIR = storage.zalo_media_cache_dir()
 
 
 @router.get("/media")
