@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Copy, LogIn, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, LogIn, ShieldCheck, Trash2, X } from 'lucide-react';
 import {
+  clearOutlookConfig,
   deleteOutlookAccount,
   getOutlookAccounts,
   getOutlookConfig,
@@ -50,6 +51,24 @@ export async function connectOutlookAccount(
   return () => window.clearInterval(timer);
 }
 
+const CopyButton: React.FC<{ text: string; label?: string }> = ({ text, label }) => {
+  const { addToast } = useToast();
+  return (
+    <button
+      type="button"
+      title="Sao chép"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).catch(() => {});
+        addToast('Đã sao chép', 'success');
+      }}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer shrink-0"
+    >
+      <Copy className="w-3 h-3" />
+      {label || 'Chép'}
+    </button>
+  );
+};
+
 export const OutlookSettingsModal: React.FC<Props> = ({ open, accounts, onClose, onAccountsChanged }) => {
   const { addToast } = useToast();
   const [config, setConfig] = useState<OutlookConfig | null>(null);
@@ -57,15 +76,22 @@ export const OutlookSettingsModal: React.FC<Props> = ({ open, accounts, onClose,
   const [tenantId, setTenantId] = useState('');
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const stopPollRef = useRef<(() => void) | null>(null);
+
+  const applyConfig = (cfg: OutlookConfig) => {
+    setConfig(cfg);
+    setClientId(cfg.client_id);
+    setTenantId(cfg.tenant_id);
+  };
 
   useEffect(() => {
     if (!open) return;
     getOutlookConfig()
       .then((cfg) => {
-        setConfig(cfg);
-        setClientId(cfg.client_id);
-        setTenantId(cfg.tenant_id);
+        applyConfig(cfg);
+        // The app shipped in the build needs nothing entered: keep the technical part closed.
+        setShowAdvanced(!cfg.has_oauth_config);
       })
       .catch(() => {});
   }, [open]);
@@ -75,19 +101,30 @@ export const OutlookSettingsModal: React.FC<Props> = ({ open, accounts, onClose,
   if (!open) return null;
 
   const handleSave = async () => {
-    if (!clientId.trim() || !tenantId.trim()) {
-      addToast('Nhập đủ Application (client) ID và Directory (tenant) ID do IT cung cấp', 'error');
+    if (!clientId.trim()) {
+      addToast('Nhập Application (client) ID', 'error');
       return;
     }
     setSaving(true);
     try {
       await saveOutlookConfig(clientId.trim(), tenantId.trim());
-      setConfig(await getOutlookConfig());
-      addToast('Đã lưu cấu hình Microsoft 365', 'success');
+      applyConfig(await getOutlookConfig());
+      addToast('Đã lưu ứng dụng Microsoft riêng', 'success');
     } catch (err: any) {
       addToast(err?.response?.data?.detail || 'Không lưu được cấu hình', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUseBuiltin = async () => {
+    try {
+      await clearOutlookConfig();
+      const cfg = await getOutlookConfig();
+      applyConfig(cfg);
+      addToast(cfg.has_oauth_config ? 'Đã chuyển về ứng dụng có sẵn' : 'Đã xoá ứng dụng riêng', 'success');
+    } catch {
+      addToast('Không xoá được cấu hình', 'error');
     }
   };
 
@@ -124,12 +161,13 @@ export const OutlookSettingsModal: React.FC<Props> = ({ open, accounts, onClose,
   };
 
   const redirect = config ? `http://localhost${config.redirect_path}` : '';
+  const ownApp = Boolean(config?.has_oauth_config && !config.using_builtin);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Cài đặt Outlook (Microsoft 365)</h3>
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">Tài khoản Outlook (Microsoft 365)</h3>
           <button
             type="button"
             onClick={onClose}
@@ -140,11 +178,9 @@ export const OutlookSettingsModal: React.FC<Props> = ({ open, accounts, onClose,
         </div>
 
         <div className="p-5 overflow-y-auto space-y-5 text-xs">
-          <section className="space-y-2">
-            <h4 className="font-semibold text-slate-800 dark:text-slate-200">Tài khoản đã kết nối</h4>
-            {accounts.length === 0 ? (
-              <p className="text-slate-500">Chưa có tài khoản nào.</p>
-            ) : (
+          {/* 1. accounts + the one button */}
+          <section className="space-y-2.5">
+            {accounts.length > 0 && (
               <ul className="space-y-1.5">
                 {accounts.map((acc) => (
                   <li
@@ -174,64 +210,116 @@ export const OutlookSettingsModal: React.FC<Props> = ({ open, accounts, onClose,
               type="button"
               onClick={handleConnect}
               disabled={connecting || !config?.has_oauth_config}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white font-semibold cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white font-semibold cursor-pointer"
             >
-              <LogIn className="w-3.5 h-3.5" />
-              {connecting ? 'Đang chờ đăng nhập trên trình duyệt...' : 'Đăng nhập bằng tài khoản Microsoft'}
+              <LogIn className="w-4 h-4" />
+              {connecting
+                ? 'Đang chờ đăng nhập trên trình duyệt...'
+                : accounts.length > 0
+                  ? 'Thêm tài khoản Microsoft'
+                  : 'Đăng nhập bằng tài khoản Microsoft'}
             </button>
-            {!config?.has_oauth_config && (
+            {config && !config.has_oauth_config && (
               <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                Cần nhập Application (client) ID và Directory (tenant) ID bên dưới trước khi đăng nhập.
+                Bản cài này chưa có sẵn ứng dụng Microsoft. Nhập Application (client) ID ở mục Nâng cao bên dưới.
               </p>
             )}
           </section>
 
-          <section className="space-y-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-            <h4 className="font-semibold text-slate-800 dark:text-slate-200">Ứng dụng Microsoft Entra (do IT cấu hình)</h4>
-            <ol className="list-decimal pl-4 space-y-1 text-slate-600 dark:text-slate-400 leading-relaxed">
-              <li>Entra admin center → App registrations → New registration, chọn “Accounts in this organizational directory only”.</li>
-              <li>
-                Authentication → Add a platform → <b>Mobile and desktop applications</b> → Custom redirect URI:
-                <span className="inline-flex items-center gap-1 ml-1">
-                  <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[11px]">{redirect}</code>
-                  <button
-                    type="button"
-                    title="Sao chép"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(redirect).catch(() => {});
-                      addToast('Đã sao chép', 'success');
-                    }}
-                    className="p-0.5 text-slate-400 hover:text-primary-600 cursor-pointer"
-                  >
-                    <Copy className="w-3 h-3" />
-                  </button>
-                </span>
-              </li>
-              <li>
-                API permissions → Microsoft Graph → Delegated: <code>offline_access</code>, <code>User.Read</code>,{' '}
-                <code>Mail.ReadWrite</code>, <code>Mail.Send</code> → <b>Grant admin consent</b>.
-              </li>
-              <li>
-                Authentication → Advanced settings → <b>Allow public client flows: Yes</b>. Không cần tạo Client secret.
-              </li>
-              <li>Gửi lại Application (client) ID và Directory (tenant) ID.</li>
-            </ol>
-            <label className="block space-y-1">
-              <span className="text-slate-500">Application (client) ID</span>
-              <input value={clientId} onChange={(e) => setClientId(e.target.value)} className={inputCls} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-slate-500">Directory (tenant) ID</span>
-              <input value={tenantId} onChange={(e) => setTenantId(e.target.value)} className={inputCls} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-            </label>
+          {/* 2. when the company blocks self-consent: one link for IT */}
+          {config?.admin_consent_url && (
+            <section className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                Đăng nhập báo “Cần quản trị viên phê duyệt”?
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                Gửi link này cho IT công ty. IT mở bằng tài khoản quản trị Microsoft 365 và bấm <b>Chấp nhận</b> một lần là cả
+                công ty đăng nhập được. Sau khi chấp nhận, trang có thể để trắng — vẫn đã duyệt xong.
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 min-w-0 truncate px-2 py-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[10px]">
+                  {config.admin_consent_url}
+                </code>
+                <CopyButton text={config.admin_consent_url} label="Chép link" />
+              </div>
+            </section>
+          )}
+
+          {/* 3. technical: use another Microsoft app */}
+          <section className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
             <button
               type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 font-medium cursor-pointer"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="w-full flex items-center justify-between text-left cursor-pointer group"
             >
-              {saving ? 'Đang lưu...' : 'Lưu cấu hình'}
+              <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300 group-hover:text-primary-600">
+                {showAdvanced ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                Nâng cao — dùng ứng dụng Microsoft riêng
+              </span>
+              {config?.has_oauth_config && (
+                <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  {ownApp ? 'Đang dùng ứng dụng riêng' : 'Dùng ứng dụng có sẵn'}
+                </span>
+              )}
             </button>
+
+            {showAdvanced && (
+              <div className="space-y-3">
+                <ol className="list-decimal pl-4 space-y-1 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                  <li>Entra admin center → App registrations → New registration.</li>
+                  <li>
+                    Authentication → Mobile and desktop applications → redirect URI
+                    <span className="inline-flex items-center gap-1 ml-1 align-middle">
+                      <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-[10px]">{redirect}</code>
+                      <CopyButton text={redirect} />
+                    </span>
+                    , bật <b>Allow public client flows</b>.
+                  </li>
+                  <li>
+                    API permissions (Delegated): <code>offline_access</code>, <code>User.Read</code>, <code>Mail.ReadWrite</code>,{' '}
+                    <code>Mail.Send</code>.
+                  </li>
+                </ol>
+                <label className="block space-y-1">
+                  <span className="text-slate-500">Application (client) ID</span>
+                  <input
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    className={inputCls}
+                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-slate-500">Directory (tenant) ID — chỉ cần với ứng dụng một tổ chức</span>
+                  <input
+                    value={tenantId}
+                    onChange={(e) => setTenantId(e.target.value)}
+                    className={inputCls}
+                    placeholder="để trống nếu ứng dụng nhiều tổ chức"
+                  />
+                </label>
+                <div className="flex items-center justify-end gap-2">
+                  {ownApp && (
+                    <button
+                      type="button"
+                      onClick={handleUseBuiltin}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                    >
+                      Bỏ ứng dụng riêng
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-semibold hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                  >
+                    {saving ? 'Đang lưu...' : 'Lưu'}
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </div>
       </div>

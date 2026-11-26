@@ -72,10 +72,26 @@ def get_oauth_config() -> dict[str, str]:
             cfg = json.loads(raw)
         except ValueError:
             cfg = {}
-    client_id = str(cfg.get("client_id") or os.environ.get("OUTLOOK_CLIENT_ID") or "").strip()
-    # The company's own tenant: a single-tenant app cannot sign in through /common or /organizations.
-    tenant_id = str(cfg.get("tenant_id") or os.environ.get("OUTLOOK_TENANT_ID") or "").strip()
-    return {"client_id": client_id, "tenant_id": tenant_id}
+    from backend.app.core.oauth_defaults import builtin
+
+    # One place for both ids: the user's own app (settings), else the environment, else the app shipped in the build.
+    if str(cfg.get("client_id") or "").strip():
+        client_id, tenant_id, source = str(cfg["client_id"]).strip(), str(cfg.get("tenant_id") or "").strip(), "user"
+    elif os.environ.get("OUTLOOK_CLIENT_ID", "").strip():
+        client_id = os.environ["OUTLOOK_CLIENT_ID"].strip()
+        tenant_id, source = os.environ.get("OUTLOOK_TENANT_ID", "").strip(), "env"
+    else:
+        client_id, tenant_id = builtin("OUTLOOK_CLIENT_ID"), builtin("OUTLOOK_TENANT_ID")
+        source = "builtin" if client_id else ""
+    # No tenant = a multi-tenant app ("Accounts in any organizational directory"): any company's account signs in.
+    # A single-tenant app needs its tenant id, since it cannot sign in through /organizations.
+    return {"client_id": client_id, "tenant_id": tenant_id or "organizations", "source": source}
+
+
+def clear_oauth_config() -> None:
+    from backend.app.core import database as db
+
+    db.set_system_setting(KEY_OUTLOOK_OAUTH_CONFIG, "")
 
 
 def save_oauth_config(client_id: str, tenant_id: str) -> dict[str, str]:

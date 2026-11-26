@@ -23,6 +23,10 @@ SCOPES = "offline_access User.Read Mail.ReadWrite Mail.Send"
 # Path registered in Entra under "Mobile and desktop applications". Microsoft ignores the port of a localhost
 # redirect but matches the path, so the app registration does not depend on which port the backend runs on.
 REDIRECT_PATH = "/api/v1/outlook/oauth/callback"
+# Microsoft's own blank page for native apps: where IT lands after approving, on a machine that may not run the app.
+NATIVE_REDIRECT = "https://login.microsoftonline.com/common/oauth2/nativeclient"
+# Sign-in errors that mean "this company's IT must approve the app first".
+ADMIN_CONSENT_ERRORS = ("AADSTS65001", "AADSTS90094", "AADSTS90095", "AADSTS900941", "consent_required")
 
 _OAUTH_STATES: dict[str, dict[str, Any]] = {}
 _OAUTH_STATE_TTL = 600
@@ -50,9 +54,9 @@ def _token_url(tenant: str) -> str:
 
 def create_oauth_url() -> dict[str, str]:
     cfg = outlook_core.get_oauth_config()
-    if not cfg["client_id"] or not cfg["tenant_id"]:
+    if not cfg["client_id"]:
         raise OutlookClientError(
-            "Chưa cấu hình Microsoft 365. Vào Cài đặt Outlook để nhập Application (client) ID và Directory (tenant) ID.",
+            "Bản cài này chưa có ứng dụng Microsoft. Vào Cài đặt Outlook › Nâng cao để nhập Application (client) ID.",
             status_code=400,
         )
     now = time.time()
@@ -74,6 +78,23 @@ def create_oauth_url() -> dict[str, str]:
         "prompt": "select_account",
     }
     return {"auth_url": f"{LOGIN_BASE}/{cfg['tenant_id']}/oauth2/v2.0/authorize?{urlencode(params)}", "state": state}
+
+
+def admin_consent_url() -> str:
+    """Link an IT admin opens once to approve the app (its Mail / User permissions) for the whole company."""
+    cfg = outlook_core.get_oauth_config()
+    if not cfg["client_id"]:
+        return ""
+    params = {
+        "client_id": cfg["client_id"],
+        "scope": "https://graph.microsoft.com/.default",
+        "redirect_uri": NATIVE_REDIRECT,
+    }
+    return f"{LOGIN_BASE}/{cfg['tenant_id']}/v2.0/adminconsent?{urlencode(params)}"
+
+
+def needs_admin_consent(text: str) -> bool:
+    return any(code.lower() in (text or "").lower() for code in ADMIN_CONSENT_ERRORS)
 
 
 def _token_error(res: httpx.Response) -> str:

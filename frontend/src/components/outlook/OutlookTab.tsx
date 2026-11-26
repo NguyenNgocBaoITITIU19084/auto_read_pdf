@@ -13,6 +13,7 @@ import {
   FolderOpen,
   Forward,
   Inbox,
+  LogIn,
   Loader2,
   Mail,
   MailOpen,
@@ -30,6 +31,7 @@ import {
 import {
   getOutlookAccounts,
   getOutlookAttachmentUrl,
+  getOutlookConfig,
   getOutlookConversation,
   getOutlookFolders,
   getOutlookMessages,
@@ -50,7 +52,7 @@ import { GmailComposeDraft, GmailComposeModal, ComposeSendPayload } from '../gma
 import { GmailMessageCard, MailAttachmentView } from '../gmail/GmailMessageCard';
 import { decodeEntities, shortName, splitAddresses, visibleAttachments } from '../gmail/gmailFormat';
 import { buildFolderTree, filterFolderTree, flattenFolderTree, folderLabel, FolderNode, replyTarget } from './outlookFolders';
-import { OutlookSettingsModal } from './OutlookSettingsModal';
+import { connectOutlookAccount, OutlookSettingsModal } from './OutlookSettingsModal';
 
 interface OutlookTabProps {
   onUnreadCountChange?: (count: number) => void;
@@ -257,6 +259,9 @@ export const OutlookTab: React.FC<OutlookTabProps> = ({ onUnreadCountChange }) =
   const [importingKey, setImportingKey] = useState('');
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [canSignIn, setCanSignIn] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const stopSignInRef = useRef<(() => void) | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeDraft, setComposeDraft] = useState<GmailComposeDraft | null>(null);
 
@@ -284,6 +289,38 @@ export const OutlookTab: React.FC<OutlookTabProps> = ({ onUnreadCountChange }) =
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts]);
+
+  // With the Microsoft app shipped in the build, the empty tab is just one "Đăng nhập" button.
+  useEffect(() => {
+    if (accountsLoaded && accounts.length === 0) {
+      getOutlookConfig()
+        .then((cfg) => setCanSignIn(cfg.has_oauth_config))
+        .catch(() => {});
+    }
+  }, [accountsLoaded, accounts.length, settingsOpen]);
+  useEffect(() => () => stopSignInRef.current?.(), []);
+
+  const signIn = async () => {
+    setSigningIn(true);
+    try {
+      stopSignInRef.current?.();
+      stopSignInRef.current = await connectOutlookAccount(
+        accounts.length,
+        () => {
+          setSigningIn(false);
+          addToast('Đã kết nối tài khoản Outlook', 'success');
+          loadAccounts();
+        },
+        (msg) => {
+          setSigningIn(false);
+          addToast(msg, 'error');
+        }
+      );
+    } catch (err: any) {
+      setSigningIn(false);
+      addToast(err?.response?.data?.detail || 'Không mở được trang đăng nhập Microsoft', 'error');
+    }
+  };
 
   const loadFolders = useCallback(
     async (silent = false) => {
@@ -584,14 +621,35 @@ export const OutlookTab: React.FC<OutlookTabProps> = ({ onUnreadCountChange }) =
               trả lời bằng mẫu và đọc PDF đính kèm vào Booking.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold cursor-pointer"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            Cấu hình & kết nối Outlook
-          </button>
+          {canSignIn ? (
+            <div className="flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={signIn}
+                disabled={signingIn}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white text-xs font-semibold shadow-sm cursor-pointer"
+              >
+                <LogIn className="w-4 h-4" />
+                {signingIn ? 'Đang chờ đăng nhập trên trình duyệt...' : 'Đăng nhập bằng tài khoản Microsoft'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:underline cursor-pointer"
+              >
+                Cần IT duyệt? / Cài đặt nâng cao
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              Cấu hình & kết nối Outlook
+            </button>
+          )}
         </div>
         <OutlookSettingsModal
           open={settingsOpen}

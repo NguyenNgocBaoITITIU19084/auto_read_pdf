@@ -223,3 +223,24 @@ def test_gmail_parse_keeps_content_id_of_inline_images(client):
 def test_gmail_snippet_entities_are_decoded():
     parsed = gmail_client.parse_message_payload({"id": "m", "snippet": "Here&#39;s it", "payload": {}})
     assert parsed["snippet"] == "Here's it"
+
+
+def test_gmail_uses_the_app_shipped_in_the_build_until_the_user_sets_their_own(client, monkeypatch):
+    from backend.app.core import oauth_defaults
+
+    monkeypatch.delenv("GMAIL_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GMAIL_CLIENT_SECRET", raising=False)
+    shipped = {"GMAIL_CLIENT_ID": "shipped.apps.googleusercontent.com", "GMAIL_CLIENT_SECRET": "shipped-secret"}
+    monkeypatch.setattr(oauth_defaults, "builtin", lambda key: shipped.get(key, ""))
+
+    cfg = client.get("/api/v1/gmail/config").json()
+    assert cfg["has_oauth_config"] is True and cfg["using_embedded_oauth"] is True and cfg["client_id"] == ""
+    assert "client_id=shipped.apps.googleusercontent.com" in client.post("/api/v1/gmail/oauth/start").json()["auth_url"]
+
+    client.put("/api/v1/gmail/config/oauth", json={"client_id": "own.apps.googleusercontent.com", "client_secret": ""})
+    own = gmail_core.get_oauth_config()
+    # the pair comes from one place: the user's id never borrows the shipped secret
+    assert own["client_id"] == "own.apps.googleusercontent.com" and own["client_secret"] == ""
+    client.delete("/api/v1/gmail/config/oauth")
+    assert gmail_core.get_oauth_config()["client_id"] == "shipped.apps.googleusercontent.com"
+

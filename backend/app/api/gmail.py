@@ -70,8 +70,17 @@ def update_oauth_config(body: OAuthConfigIn):
     if not body.client_id.strip():
         raise HTTPException(status_code=400, detail="Client ID không được để trống.")
     existing = gmail_core.get_oauth_config()
-    secret = body.client_secret.strip() or existing["client_secret"]
+    # A blank secret keeps the user's own saved one for the same client id, never the secret shipped in the build.
+    same_own = not existing["using_embedded"] and existing["client_id"] == body.client_id.strip()
+    secret = body.client_secret.strip() or (existing["client_secret"] if same_own else "")
     gmail_core.save_oauth_config(body.client_id.strip(), secret)
+    return {"ok": True}
+
+
+@router.delete("/config/oauth")
+def clear_oauth_config():
+    """Go back to the Google sign-in app shipped in the build."""
+    gmail_core.clear_oauth_config()
     return {"ok": True}
 
 

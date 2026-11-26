@@ -46,8 +46,6 @@ def test_outlook_config_and_sign_in_url(client):
     assert client.get("/api/v1/outlook/config").json()["has_oauth_config"] is False
     assert client.post("/api/v1/outlook/oauth/start").status_code == 400
 
-    # A single-tenant app cannot sign in without its tenant id.
-    assert client.put("/api/v1/outlook/config/oauth", json={"client_id": "app-123", "tenant_id": " "}).status_code == 400
     assert client.put("/api/v1/outlook/config/oauth", json={"client_id": "app-123", "tenant_id": "tenant-9"}).status_code == 200
     cfg = client.get("/api/v1/outlook/config").json()
     assert cfg["redirect_uri"].startswith("http://localhost:") and cfg["redirect_uri"].endswith("/api/v1/outlook/oauth/callback")
@@ -253,3 +251,37 @@ def test_actions_move_one_message_at_a_time(client, monkeypatch):
     assert client.post(
         f"/api/v1/outlook/accounts/{acc['id']}/actions", json={"message_ids": ["m1"], "action": "explode"}
     ).status_code == 400
+
+
+def test_builtin_app_means_one_click_and_an_it_approval_link(client, monkeypatch):
+    from backend.app.core import oauth_defaults
+
+    monkeypatch.setattr(oauth_defaults, "builtin", lambda key: {"OUTLOOK_CLIENT_ID": "shipped-app"}.get(key, ""))
+    cfg = client.get("/api/v1/outlook/config").json()
+    assert cfg["has_oauth_config"] is True and cfg["using_builtin"] is True
+    assert cfg["client_id"] == "" and cfg["tenant_id"] == ""  # the shipped ids are not shown
+    url = httpx.URL(cfg["admin_consent_url"])
+    assert url.path == "/organizations/v2.0/adminconsent"
+    assert url.params["client_id"] == "shipped-app"
+    assert url.params["redirect_uri"] == "https://login.microsoftonline.com/common/oauth2/nativeclient"
+
+    # multi-tenant: any company's account signs in through /organizations
+    auth = client.post("/api/v1/outlook/oauth/start").json()["auth_url"]
+    assert auth.startswith("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?")
+
+    # the user's own app wins until they clear it
+    client.put("/api/v1/outlook/config/oauth", json={"client_id": "own-app", "tenant_id": "own-tenant"})
+    own = client.get("/api/v1/outlook/config").json()
+    assert own["using_builtin"] is False and own["client_id"] == "own-app" and own["tenant_id"] == "own-tenant"
+    assert client.delete("/api/v1/outlook/config/oauth").status_code == 200
+    assert client.get("/api/v1/outlook/config").json()["using_builtin"] is True
+
+
+def test_sign_in_that_needs_it_approval_shows_the_link(client, monkeypatch):
+    client.put("/api/v1/outlook/config/oauth", json={"client_id": "app-123"})
+    res = client.get(
+        "/api/v1/outlook/oauth/callback",
+        params={"error": "consent_required", "error_description": "AADSTS65001: The user or administrator has not consented"},
+    )
+    assert res.status_code == 403
+    assert "duyệt ứng dụng" in res.text and "adminconsent" in res.text

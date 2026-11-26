@@ -95,3 +95,9 @@ yarn.lock
 
 # Fleet truck / driver photos (kept next to the database)
 fleet_photos/
+
+# Sign-in app ids written at build time from CI secrets (scripts/write_oauth_builtin.py)
+backend/app/core/oauth_builtin.py
+
+# Database copies made before a data migration (booking_data.db.bak-<tag>-<time>): local data, never commit
+*.db.bak-*

@@ -25,6 +25,7 @@ a = Analysis(
     datas=extra_datas,
     hiddenimports=[
         'zxingcpp',
+        'backend.app.core.oauth_builtin',  # sign-in app ids written by CI (may be absent)
         'uvicorn.logging',
         'uvicorn.loops',
         'uvicorn.loops.auto',

@@ -167,7 +167,9 @@ def create_gmail_tables(conn: sqlite3.Connection) -> None:
 
 
 def get_oauth_config() -> dict[str, Any]:
-    """Return Google OAuth Client ID and Secret from system_settings, else from the environment."""
+    """Google OAuth Client ID + Secret, as a pair from one place: the user's own (settings), else the environment,
+    else the ids shipped in the build (oauth_defaults). `using_embedded` = not the user's own, so it is not shown."""
+    from backend.app.core.oauth_defaults import builtin
     import os
     from backend.app.core import database as db
 
@@ -183,15 +185,25 @@ def get_oauth_config() -> dict[str, Any]:
     env_id = str(os.environ.get("GMAIL_CLIENT_ID") or "").strip()
     env_secret = str(os.environ.get("GMAIL_CLIENT_SECRET") or "").strip()
 
-    client_id = saved_id or env_id
-    client_secret = saved_secret or env_secret
-    # "embedded" = the ID comes from the environment, so the settings screen does not show it.
-    using_embedded = bool(not saved_id and env_id)
+    if saved_id:
+        client_id, client_secret = saved_id, saved_secret
+    elif env_id:
+        client_id, client_secret = env_id, env_secret
+    else:
+        client_id, client_secret = builtin("GMAIL_CLIENT_ID"), builtin("GMAIL_CLIENT_SECRET")
+    using_embedded = bool(not saved_id and client_id)
     return {
         "client_id": client_id,
         "client_secret": client_secret,
         "using_embedded": using_embedded,
     }
+
+
+def clear_oauth_config() -> None:
+    """Forget the user's own Client ID; the ids shipped in the build (if any) are used again."""
+    from backend.app.core import database as db
+
+    db.set_system_setting(KEY_GMAIL_OAUTH_CONFIG, "")
 
 
 def save_oauth_config(client_id: str, client_secret: str) -> dict[str, str]:

@@ -55,6 +55,14 @@ jobs:
       - name: 🏗️ Build Frontend Web Bundle
         run: npm run build:frontend
 
+      - name: 🔑 Write built-in sign-in app ids (Gmail / Outlook, from repository secrets)
+        run: python scripts/write_oauth_builtin.py
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          OUTLOOK_CLIENT_ID: ${{ secrets.OUTLOOK_CLIENT_ID }}
+          OUTLOOK_TENANT_ID: ${{ secrets.OUTLOOK_TENANT_ID }}
+
       - name: 🐍 Build Standalone Python Backend Executable
         run: |
           export PYINSTALLER_CONFIG_DIR="$(pwd)/.pyinstaller_cache"
@@ -111,6 +119,14 @@ jobs:
 
       - name: 🏗️ Build Frontend Web Bundle
         run: npm run build:frontend
+
+      - name: 🔑 Write built-in sign-in app ids (Gmail / Outlook, from repository secrets)
+        run: python scripts/write_oauth_builtin.py
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          OUTLOOK_CLIENT_ID: ${{ secrets.OUTLOOK_CLIENT_ID }}
+          OUTLOOK_TENANT_ID: ${{ secrets.OUTLOOK_TENANT_ID }}
 
       - name: 🐍 Build Standalone Python Backend Executable
         run: |

@@ -10,6 +10,10 @@ export interface OutlookAccount {
 
 export interface OutlookConfig {
   has_oauth_config: boolean;
+  /** Signs in with the Microsoft app shipped in this build (no ids to enter) */
+  using_builtin: boolean;
+  /** Link an IT admin opens once to approve the app for the whole company */
+  admin_consent_url: string;
   client_id: string;
   tenant_id: string;
   redirect_uri: string;
@@ -81,6 +85,10 @@ export const getOutlookConfig = async (): Promise<OutlookConfig> =>
 
 export const saveOutlookConfig = async (clientId: string, tenantId: string): Promise<void> => {
   await apiClient.put('/outlook/config/oauth', { client_id: clientId, tenant_id: tenantId });
+};
+
+export const clearOutlookConfig = async (): Promise<void> => {
+  await apiClient.delete('/outlook/config/oauth');
 };
 
 export const startOutlookOAuth = async (): Promise<{ auth_url: string }> =>

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, KeyRound, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import {
   deleteGmailAccount,
+  clearGmailOAuthConfig,
   getGmailConfig,
   GmailAccount,
   GmailConfig,
@@ -77,6 +78,21 @@ export const GmailSettingsModal: React.FC<GmailSettingsModalProps> = ({
       showToast(err?.response?.data?.detail || 'Không lưu được cấu hình', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUseBuiltin = async () => {
+    try {
+      await clearGmailOAuthConfig();
+      const updated = await getGmailConfig();
+      setConfig(updated);
+      setClientId(updated.client_id || '');
+      showToast(
+        updated.has_oauth_config ? 'Đã chuyển về ứng dụng Google có sẵn' : 'Đã xoá Client ID riêng',
+        'success'
+      );
+    } catch {
+      showToast('Không xoá được cấu hình', 'error');
     }
   };
 
@@ -246,7 +262,7 @@ export const GmailSettingsModal: React.FC<GmailSettingsModalProps> = ({
               </span>
               {config?.has_oauth_config && (
                 <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                  Đã cấu hình sẵn
+                  {config.using_embedded_oauth ? 'Dùng ứng dụng có sẵn' : 'Dùng Client ID riêng'}
                 </span>
               )}
             </button>
@@ -316,7 +332,16 @@ export const GmailSettingsModal: React.FC<GmailSettingsModalProps> = ({
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500"
                     />
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-end gap-2">
+                    {config?.has_oauth_config && !config.using_embedded_oauth && (
+                      <button
+                        type="button"
+                        onClick={handleUseBuiltin}
+                        className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                      >
+                        Bỏ Client ID riêng
+                      </button>
+                    )}
                     <button
                       type="submit"
                       disabled={saving}

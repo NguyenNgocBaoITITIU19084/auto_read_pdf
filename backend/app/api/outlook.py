@@ -58,15 +58,31 @@ def _page(title: str, body: str, ok: bool, status: int = 200) -> HTMLResponse:
     )
 
 
+def _admin_consent_page() -> HTMLResponse:
+    link = html.escape(outlook_client.admin_consent_url())
+    return _page(
+        "Cần IT công ty duyệt ứng dụng một lần",
+        "Công ty bạn không cho nhân viên tự cấp quyền đọc mail cho ứng dụng. Gửi link dưới đây cho IT "
+        "(tài khoản quản trị Microsoft 365) để duyệt một lần cho cả công ty, rồi đăng nhập lại:"
+        f'<br><br><a href="{link}" style="word-break:break-all">{link}</a>',
+        False,
+        403,
+    )
+
+
 # ---------- config & sign-in ----------
 
 @router.get("/config")
 def get_config():
     cfg = outlook_core.get_oauth_config()
+    own = cfg["source"] == "user"
     return {
-        "has_oauth_config": bool(cfg["client_id"] and cfg["tenant_id"]),
-        "client_id": cfg["client_id"],
-        "tenant_id": cfg["tenant_id"],
+        "has_oauth_config": bool(cfg["client_id"]),
+        # The app shipped in the build (or env): the settings screen hides its ids and offers no form by default.
+        "using_builtin": bool(cfg["client_id"]) and not own,
+        "client_id": cfg["client_id"] if own else "",
+        "tenant_id": cfg["tenant_id"] if own and cfg["tenant_id"] != "organizations" else "",
+        "admin_consent_url": outlook_client.admin_consent_url(),
         "redirect_uri": outlook_client.redirect_uri(),
         "redirect_path": outlook_client.REDIRECT_PATH,
     }
@@ -76,9 +92,14 @@ def get_config():
 def update_config(body: OAuthConfigIn):
     if not body.client_id.strip():
         raise HTTPException(status_code=400, detail="Application (client) ID không được để trống.")
-    if not body.tenant_id.strip():
-        raise HTTPException(status_code=400, detail="Directory (tenant) ID không được để trống.")
     outlook_core.save_oauth_config(body.client_id, body.tenant_id)
+    return {"ok": True}
+
+
+@router.delete("/config/oauth")
+def clear_config():
+    """Go back to the app shipped in the build."""
+    outlook_core.clear_oauth_config()
     return {"ok": True}
 
 
@@ -98,12 +119,17 @@ async def oauth_callback(
     error_description: Optional[str] = None,
 ):
     if error:
-        return _page("Đăng nhập Microsoft bị huỷ hoặc lỗi", html.escape(error_description or error), False, 400)
+        detail = error_description or error
+        if outlook_client.needs_admin_consent(f"{error} {detail}"):
+            return _admin_consent_page()
+        return _page("Đăng nhập Microsoft bị huỷ hoặc lỗi", html.escape(detail), False, 400)
     if not code or not state:
         return _page("Thiếu thông tin đăng nhập", "Thiếu tham số code hoặc state.", False, 400)
     try:
         account = await outlook_client.exchange_oauth_code(code, state)
     except OutlookClientError as exc:
+        if outlook_client.needs_admin_consent(str(exc)):
+            return _admin_consent_page()
         return _page("Không kết nối được Outlook", html.escape(str(exc)), False, exc.status_code)
     return _page(
         "Kết nối Outlook thành công!",

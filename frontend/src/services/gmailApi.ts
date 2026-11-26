@@ -89,6 +89,10 @@ export interface GmailConfig {
   };
 }
 
+export const clearGmailOAuthConfig = async (): Promise<void> => {
+  await apiClient.delete('/gmail/config/oauth');
+};
+
 export const getGmailConfig = async (): Promise<GmailConfig> =>
   (await apiClient.get<GmailConfig>('/gmail/config')).data;
 

@@ -35,3 +35,11 @@ def _fresh_gemini_fallback_state(monkeypatch):
     ie._busy_until.clear()
     ie._live_models_cache.update(at=0.0, key="", models=[])
     monkeypatch.setattr(ie.requests, "get", lambda *a, **k: MagicMock(status_code=503, json=lambda: {}))
+
+
+@pytest.fixture(autouse=True)
+def _no_shipped_sign_in_ids(monkeypatch):
+    """Behave like a checkout without the build-time backend/app/core/oauth_builtin.py, even on a machine that has one
+    (it holds real Gmail / Outlook app ids). Tests about the shipped ids patch `builtin` again themselves."""
+    from backend.app.core import oauth_defaults
+    monkeypatch.setattr(oauth_defaults, "builtin", lambda key: "")
