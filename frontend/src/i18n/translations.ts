@@ -5,9 +5,9 @@ export const translations = {
     appTitle: "Auto Read PDF Pro",
     tabs: {
       dashboard: "Tổng quan",
-      booking: "Danh sách Booking (PDF)",
-      vessel: "ePort SNP (Lịch tàu)",
-      container: "ePort SNP (Tra cứu Cont)",
+      booking: "Booking",
+      vessel: "Lịch tàu",
+      container: "Tra cứu Cont",
       tasks: "Việc hôm nay",
       fleet: "Đầu kéo",
       trucks: "Xe tải",
@@ -17,6 +17,12 @@ export const translations = {
       gmail: "Gmail",
       outlook: "Outlook",
       logs: "Nhật ký"
+    },
+    /** Tooltips of the tabs whose short label leaves something out */
+    tabTitles: {
+      booking: "Danh sách Booking (đọc từ PDF)",
+      vessel: "Lịch tàu – ePort SNP",
+      container: "Tra cứu container – ePort SNP",
     },
     settingsCenter: {
       title: "Cấu hình",
@@ -1885,9 +1891,9 @@ export const translations = {
     appTitle: "Auto Read PDF Pro",
     tabs: {
       dashboard: "Overview",
-      booking: "Booking List (PDF)",
-      vessel: "ePort SNP (Vessel Schedule)",
-      container: "ePort SNP (Container Tracking)",
+      booking: "Bookings",
+      vessel: "Vessels",
+      container: "Containers",
       tasks: "Today's work",
       fleet: "Tractors",
       trucks: "Trucks",
@@ -1897,6 +1903,11 @@ export const translations = {
       gmail: "Gmail",
       outlook: "Outlook",
       logs: "Logs"
+    },
+    tabTitles: {
+      booking: "Booking list (read from PDF)",
+      vessel: "Vessel schedule – ePort SNP",
+      container: "Container tracking – ePort SNP",
     },
     settingsCenter: {
       title: "Settings",
