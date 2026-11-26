@@ -1,17 +1,18 @@
 import React from 'react';
-import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Container, Package, Truck, Users, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, FileText, Ship, Box, ScrollText, CalendarClock, Container, Package, Truck, Users, MessageCircle, Mail } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
-export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | 'zalo' | 'logs';
+export type TabId = 'dashboard' | 'booking' | 'vessel' | 'container' | 'tasks' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | 'zalo' | 'gmail' | 'logs';
 
 interface TabsProps {
   activeTab: TabId;
   onChange: (tab: TabId) => void;
   onHoverTab?: (tab: TabId) => void;
   zaloUnreadCount?: number;
+  gmailUnreadCount?: number;
 }
 
-export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zaloUnreadCount = 0 }) => {
+export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zaloUnreadCount = 0, gmailUnreadCount = 0 }) => {
   const { t } = useApp();
 
   const tabItems: { id: TabId; label: string; icon: React.ReactNode; badge?: number }[] = [
@@ -65,6 +66,12 @@ export const Tabs: React.FC<TabsProps> = ({ activeTab, onChange, onHoverTab, zal
       label: t.tabs.zalo,
       icon: <MessageCircle className="w-4 h-4" />,
       badge: zaloUnreadCount > 0 ? zaloUnreadCount : undefined,
+    },
+    {
+      id: 'gmail',
+      label: t.tabs.gmail,
+      icon: <Mail className="w-4 h-4" />,
+      badge: gmailUnreadCount > 0 ? gmailUnreadCount : undefined,
     },
     {
       id: 'logs',

@@ -9,6 +9,7 @@ import { NotificationDetailModal } from './components/common/NotificationDetailM
 import { useMobileBridge } from './context/MobileBridgeContext';
 import { useNotifications } from './context/NotificationsContext';
 import { getZaloConversations } from './services/zaloApi';
+import { getGmailUnreadCount } from './services/gmailApi';
 import type { ZaloDraftRequest } from './components/zalo/ZaloTab';
 
 const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').then((m) => ({ default: m.DashboardTab })));
@@ -19,6 +20,7 @@ const TasksTab = lazy(() => import('./components/tasks/TasksTab').then((m) => ({
 const FleetTab = lazy(() => import('./components/fleet/FleetTab').then((m) => ({ default: m.FleetTab })));
 const TrailerTab = lazy(() => import('./components/fleet/TrailerTab').then((m) => ({ default: m.TrailerTab })));
 const ZaloTab = lazy(() => import('./components/zalo/ZaloTab').then((m) => ({ default: m.ZaloTab })));
+const GmailTab = lazy(() => import('./components/gmail/GmailTab').then((m) => ({ default: m.GmailTab })));
 const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ default: m.LogsTab })));
 
 export const App: React.FC = () => {
@@ -37,6 +39,7 @@ export const App: React.FC = () => {
   const [pasteRequest, setPasteRequest] = useState<BookingPasteRequest | null>(null);
   const pasteSeqRef = useRef(0);
   const [zaloUnreadCount, setZaloUnreadCount] = useState(0);
+  const [gmailUnreadCount, setGmailUnreadCount] = useState(0);
   const [zaloThreadId, setZaloThreadId] = useState<string | undefined>(undefined);
   const [zaloDraft, setZaloDraft] = useState<ZaloDraftRequest | null>(null);
 
@@ -53,6 +56,7 @@ export const App: React.FC = () => {
     if (tab === 'fleet' || tab === 'trucks' || tab === 'drivers') void import('./components/fleet/FleetTab');
     if (tab === 'trailers') void import('./components/fleet/TrailerTab');
     if (tab === 'zalo') void import('./components/zalo/ZaloTab');
+    if (tab === 'gmail') void import('./components/gmail/GmailTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -90,6 +94,7 @@ export const App: React.FC = () => {
         .catch(() => {});
     };
     refreshZaloUnread();
+    getGmailUnreadCount().then(setGmailUnreadCount).catch(() => {});
     const unsubMsg = window.electronAPI?.onZaloMessageReceived?.(() => refreshZaloUnread());
     const unsubOpen = window.electronAPI?.onZaloOpenThread?.((data) => {
       if (data?.threadId) setZaloThreadId(data.threadId);
@@ -157,7 +162,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
       <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
       <NotificationDetailModal onNavigateTab={handleNavigateTab} />
-      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} zaloUnreadCount={zaloUnreadCount} />
+      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} zaloUnreadCount={zaloUnreadCount} gmailUnreadCount={gmailUnreadCount} />
       <main className="flex-1 overflow-hidden flex flex-col">
         <Suspense
           fallback={
@@ -200,6 +205,7 @@ export const App: React.FC = () => {
               onUnreadCountChange={setZaloUnreadCount}
             />
           )}
+          {activeTab === 'gmail' && <GmailTab onUnreadCountChange={setGmailUnreadCount} />}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

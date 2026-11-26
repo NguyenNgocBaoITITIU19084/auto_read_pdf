@@ -609,6 +609,10 @@ def init_db():
         from backend.app.core.zalo import create_zalo_tables
         create_zalo_tables(conn)
 
+        # Gmail tables (accounts, cached threads/messages, attachments, templates)
+        from backend.app.core.gmail import create_gmail_tables
+        create_gmail_tables(conn)
+
         # Create system_settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (

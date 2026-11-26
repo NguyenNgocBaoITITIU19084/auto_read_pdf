@@ -14,6 +14,7 @@ export const translations = {
       drivers: "Tài xế",
       trailers: "Rơ moóc",
       zalo: "Zalo",
+      gmail: "Gmail",
       logs: "Nhật ký"
     },
     settingsCenter: {
@@ -1836,6 +1837,7 @@ export const translations = {
       drivers: "Drivers",
       trailers: "Trailers",
       zalo: "Zalo",
+      gmail: "Gmail",
       logs: "Logs"
     },
     settingsCenter: {

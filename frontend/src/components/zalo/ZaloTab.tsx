@@ -34,7 +34,14 @@ import { ImageBookingModal } from '../booking/ImageBookingModal';
 import { getBookingTasksApi } from '../../services/api';
 import { ZaloTemplateManager, type TemplateSelection } from './ZaloTemplateManager';
 import { BookingFillSearch } from './BookingFillSearch';
-import { TEMPLATE_FIELDS, categoryOf, shortcutMatches } from './zaloTemplates';
+import {
+  BOOKING_FIELD_KEYS,
+  categoryOf,
+  fillPlaceholders,
+  findPlaceholders,
+  shortcutMatches,
+  taskPlaceholderValues,
+} from './zaloTemplates';
 import {
   dismissZaloScan,
   getZaloBookingFile,
@@ -108,31 +115,6 @@ const IMAGE_MODE_OPTIONS: { id: ZaloImageScanMode; label: string; desc: string }
 const isBookingCandidate = (m: ZaloMessage) =>
   !!m.media_url && (m.msg_type === 'image' || (m.msg_type === 'file' && /\.pdf$/i.test(m.content || '')));
 
-// Template fields a booking fills in. {driver_name}/{vehicle_plate} come from the conversation instead.
-const PLACEHOLDER_RE = /\{([a-z_]+)\}/g;
-const BOOKING_FIELD_KEYS = new Set(TEMPLATE_FIELDS.filter((f) => f.source === 'booking').map((f) => f.key));
-
-function findPlaceholders(text: string): string[] {
-  return [...new Set([...text.matchAll(PLACEHOLDER_RE)].map((m) => m[0]))];
-}
-
-function taskPlaceholderValues(task: BookingTask): Record<string, string> {
-  const qty = task["Q'ty"];
-  const eq = task['Equipment Type'] || '';
-  return {
-    booking_no: task['Booking No'] || '',
-    qty_type: qty && eq ? `${qty}x${eq}` : eq,
-    empty_pickup_cy: task['Empty Pick Up CY'] || '',
-    full_return_cy: task['Full return CY'] || '',
-    cutoff_time: task['Hạn cut-off'] || '',
-    vessel: task.Vessel || '',
-  };
-}
-
-/** Fill the placeholders that have a value; ones without stay as {name} so the send check still catches them. */
-function fillPlaceholders(text: string, values: Record<string, string>): string {
-  return text.replace(PLACEHOLDER_RE, (whole, key: string) => (values[key] ? values[key] : whole));
-}
 
 const MESSAGE_PAGE = 50;
 const MAX_ATTACHMENTS = 10;

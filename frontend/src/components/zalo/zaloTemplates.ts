@@ -1,4 +1,4 @@
-import type { ZaloTemplate } from '../../types';
+import type { BookingTask, ZaloTemplate } from '../../types';
 
 /** Fields a template may use. `source` says who fills it when the template is applied. */
 export const TEMPLATE_FIELDS: { key: string; label: string; source: 'chat' | 'booking'; sample: string }[] = [
@@ -59,4 +59,30 @@ export function shortcutMatches(list: ZaloTemplate[], composerText: string): Zal
   const typed = composerText.trim().toLowerCase();
   if (!/^\/[a-z0-9-]*$/.test(typed) || composerText.includes('\n')) return [];
   return list.filter((t) => t.shortcut && t.shortcut.toLowerCase().startsWith(typed));
+}
+
+// Template fields a booking fills in. {driver_name}/{vehicle_plate} come from the conversation instead.
+export const PLACEHOLDER_RE = /\{([a-z_]+)\}/g;
+export const BOOKING_FIELD_KEYS = new Set(TEMPLATE_FIELDS.filter((f) => f.source === 'booking').map((f) => f.key));
+
+export function findPlaceholders(text: string): string[] {
+  return [...new Set([...text.matchAll(PLACEHOLDER_RE)].map((m) => m[0]))];
+}
+
+export function taskPlaceholderValues(task: BookingTask): Record<string, string> {
+  const qty = task["Q'ty"];
+  const eq = task['Equipment Type'] || '';
+  return {
+    booking_no: task['Booking No'] || '',
+    qty_type: qty && eq ? `${qty}x${eq}` : eq,
+    empty_pickup_cy: task['Empty Pick Up CY'] || '',
+    full_return_cy: task['Full return CY'] || '',
+    cutoff_time: task['Hạn cut-off'] || '',
+    vessel: task.Vessel || '',
+  };
+}
+
+/** Fill the placeholders that have a value; ones without stay as {name} so the send check still catches them. */
+export function fillPlaceholders(text: string, values: Record<string, string>): string {
+  return text.replace(PLACEHOLDER_RE, (whole, key: string) => (values[key] ? values[key] : whole));
 }

@@ -6,10 +6,12 @@ import type { BookingTask } from '../../types';
 interface Props {
   /** Fill the composer's open fields from this booking */
   onPick: (task: BookingTask) => void;
+  /** Open the result list below the box instead of above it */
+  dropDown?: boolean;
 }
 
 /** Search every collection's bookings by booking no / vessel / carrier and fill the message with the one picked. */
-export const BookingFillSearch: React.FC<Props> = ({ onPick }) => {
+export const BookingFillSearch: React.FC<Props> = ({ onPick, dropDown = false }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<BookingTask[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,6 +79,8 @@ export const BookingFillSearch: React.FC<Props> = ({ onPick }) => {
           onKeyDown={(e) => {
             if (!showList || results.length === 0) {
               if (e.key === 'Escape') setOpen(false);
+              // Inside a form (Gmail compose) Enter here must not send the email.
+              if (e.key === 'Enter') e.preventDefault();
               return;
             }
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -97,7 +101,7 @@ export const BookingFillSearch: React.FC<Props> = ({ onPick }) => {
         {loading && <Loader2 className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 animate-spin text-amber-500" />}
       </div>
       {showList && !loading && (
-        <ul className="absolute bottom-full left-0 mb-1 w-full max-h-72 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg p-1 z-30">
+        <ul className={`absolute ${dropDown ? 'top-full mt-1' : 'bottom-full mb-1'} left-0 w-full max-h-72 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg p-1 z-30`}>
           {results.length === 0 ? (
             <li className={`px-2 py-3 text-center text-[11px] ${failed ? 'text-rose-500' : 'text-slate-400'}`}>
               {failed ? 'Không tìm được — kiểm tra kết nối backend rồi thử lại.' : 'Không tìm thấy booking nào.'}
