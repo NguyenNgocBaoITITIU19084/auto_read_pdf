@@ -20,6 +20,7 @@ const { createTrayIcon, createAppIcon } = require('./tray_icon');
 const updater = require('./updater');
 const { createNotifier } = require('./notifier');
 const { setupWindowsToasts } = require('./win_toast');
+const { createZaloBridge } = require('./zalo_bridge');
 
 const APP_NAME = 'Auto Read PDF Pro';
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -50,6 +51,16 @@ const notifier = createNotifier({
   sendToRenderer: (channel, payload) => sendToRenderer(channel, payload),
   isAppFocused: () => !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()),
   log: (msg) => backend.info(`[Notifier] ${msg}`),
+});
+
+const zaloBridge = createZaloBridge({
+  userDataDir: app.getPath('userData'),
+  backendRequest,
+  sendToRenderer: (channel, payload) => sendToRenderer(channel, payload),
+  showMainWindow: () => showMainWindow(),
+  isAppFocused: () => !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()),
+  Notification,
+  log: (msg) => backend.info(`[Zalo] ${msg}`),
 });
 
 // ---------------------------------------------------------------------------
@@ -469,6 +480,52 @@ function registerIpc() {
     fs.mkdirSync(dir, { recursive: true });
     shell.openPath(dir);
   });
+
+  // --- Zalo bridge ---
+  ipcMain.handle('zalo-get-state', (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.getState();
+  });
+  ipcMain.handle('zalo-login-qr', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.loginQR();
+  });
+  ipcMain.handle('zalo-reconnect', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.restoreSession();
+  });
+  ipcMain.handle('zalo-logout', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.logout();
+  });
+  ipcMain.handle('zalo-send-message', async (event, payload) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.sendMessage(payload || {});
+  });
+  ipcMain.handle('zalo-send-files', async (event, payload) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.sendFiles(payload || {});
+  });
+  ipcMain.handle('zalo-send-batch', async (event, payload) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.sendBatch(payload || {});
+  });
+  ipcMain.handle('zalo-find-user', async (event, payload) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.findUserByPhone(payload || {});
+  });
+  ipcMain.handle('zalo-sync-contacts', async (event) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.syncContacts();
+  });
+  ipcMain.handle('zalo-sync-messages', async (event, opts) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.syncMessagesFromPhone(opts || {});
+  });
+  ipcMain.handle('zalo-fetch-group-history', async (event, groupId) => {
+    if (!isFromMainWindow(event)) throw new Error('Forbidden');
+    return zaloBridge.fetchGroupHistory(groupId);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +553,7 @@ function onReady() {
       if (page !== 'ui') loadUI();
       initAutoSyncFlag();
       notifier.start();
+      zaloBridge.restoreSession().catch(() => {});
       if (tray && !tray.isDestroyed()) tray.setToolTip(APP_NAME);
     } else if (status.state === 'failed') {
       if (tray && !tray.isDestroyed()) tray.setToolTip(`${APP_NAME} — lỗi dịch vụ nền`);
@@ -539,6 +597,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   notifier.stop();
+  zaloBridge.stop();
   isQuitting = true;
 });
 

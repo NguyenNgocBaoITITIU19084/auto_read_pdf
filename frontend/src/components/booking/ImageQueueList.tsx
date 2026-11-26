@@ -224,7 +224,7 @@ export const ImageQueueList: React.FC<ListProps> = ({ queue, selectedId, onSelec
             duplicate={item.dbDuplicate ? 'db' : batchDuplicates.has(item.id) ? 'batch' : null}
             onSelect={onSelect}
             onRetry={queue.retry}
-            onRemove={queue.remove}
+            onRemove={queue.discard}
           />
         ))}
       </div>

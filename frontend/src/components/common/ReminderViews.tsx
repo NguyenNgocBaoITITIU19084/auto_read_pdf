@@ -1,8 +1,9 @@
 import React from 'react';
-import { AlarmClock, AlertTriangle, CalendarClock, CalendarDays, Ship } from 'lucide-react';
+import { AlarmClock, AlertTriangle, CalendarClock, CalendarDays, Container, Ship, Truck, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import type { AppNotification } from '../../types';
+import type { AppNotification, FleetDocument } from '../../types';
 import { tf } from '../../services/i18nFormat';
+import { liveDaysLeft } from '../fleet/fleetUtils';
 
 type Translations = ReturnType<typeof useApp>['t'];
 
@@ -59,6 +60,57 @@ const TONE = {
   amber: 'bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300',
   rose: 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300',
   sky: 'bg-sky-50 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300',
+};
+
+/** 'Còn 5 ngày' / 'Hết hạn hôm nay' / 'Quá hạn 3 ngày' */
+export const daysLeftText = (days: number, t: Translations): string =>
+  days < 0 ? tf(t.fleet.expired, { days: -days }) : days === 0 ? t.fleet.expiresToday : tf(t.fleet.daysLeft, { days });
+
+/** Body of a fleet expiry reminder in the bell list: how many expired / expiring, and the first few documents. */
+export const FleetExpirySummary: React.FC<{ item: AppNotification }> = ({ item }) => {
+  const { t } = useApp();
+  const r = t.notifications.reminder;
+  const docs = item.detail?.documents || [];
+  const expired = item.detail?.expired || 0;
+  const expiring = (item.detail?.count || docs.length) - expired;
+  return (
+    <span className="mt-1 block space-y-1">
+      <span className="flex flex-wrap gap-1">
+        {expired > 0 && <Chip tone={TONE.rose}>{tf(r.chipExpired, { count: expired })}</Chip>}
+        {expiring > 0 && <Chip tone={TONE.amber}>{tf(r.chipExpiring, { count: expiring })}</Chip>}
+      </span>
+      <span className="block text-[11px] text-slate-500 dark:text-slate-400 truncate">
+        {docs.slice(0, 3).map((d) => `${r.fleetDocs[d.kind] || d.label} ${d.subject}`).join(', ')}
+      </span>
+    </span>
+  );
+};
+
+/** Detail of a fleet expiry reminder: every document with its date and the days left. */
+export const FleetExpiryDetail: React.FC<{ item: AppNotification }> = ({ item }) => {
+  const { t } = useApp();
+  const r = t.notifications.reminder;
+  const docs: FleetDocument[] = item.detail?.documents || [];
+  const more = (item.detail?.count || docs.length) - docs.length;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-slate-500 dark:text-slate-400">{r.fleetIntro}</p>
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+        {docs.map((d) => (
+          <li key={`${d.entity}-${d.entity_id}-${d.kind}`} className="flex items-center gap-2.5 px-3 py-2 text-xs">
+            <span className="text-slate-400">{d.entity === 'vehicle' ? <Truck className="w-3.5 h-3.5" />
+              : d.entity === 'trailer' ? <Container className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}</span>
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold text-slate-800 dark:text-slate-100">{d.subject}</span>
+              <span className="text-slate-500 dark:text-slate-400"> · {r.fleetDocs[d.kind] || d.label} · {d.expiry}</span>
+            </span>
+            <Chip tone={liveDaysLeft(d) < 0 ? TONE.rose : TONE.amber}>{daysLeftText(liveDaysLeft(d), t)}</Chip>
+          </li>
+        ))}
+      </ul>
+      {more > 0 && <p className="text-[11px] text-slate-400">+{more}</p>}
+    </div>
+  );
 };
 
 /** Body of a reminder in the bell list: chips instead of the stored sentence. */

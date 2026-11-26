@@ -39,12 +39,15 @@ REMINDER_KINDS = (BOOKING_CUTOFF, MORNING_BRIEF)
 # PDFs picked up from the watched folder: what was imported, and the files that need a hand
 BOOKING_AUTO_IMPORT = "booking_auto_import"
 
+# Fleet: truck registration / insurance and driving licences about to expire
+FLEET_EXPIRY = "fleet_expiry"
+
 # The kinds that existed before the reminders: a saved setting that does not list a newer kind leaves it on
 LEGACY_KINDS = (
     CONTAINER_CUSTOMS, CONTAINER_INGATE, CONTAINER_OUTGATE,
     VESSEL_CLOSING, VESSEL_CLOSING_ICD, VESSEL_OPEN_GATE, VESSEL_ETA, VESSEL_ETD,
 )
-ALL_KINDS = (*LEGACY_KINDS, *REMINDER_KINDS, BOOKING_AUTO_IMPORT)
+ALL_KINDS = (*LEGACY_KINDS, *REMINDER_KINDS, BOOKING_AUTO_IMPORT, FLEET_EXPIRY)
 
 # vessel_schedules column -> kind and its short label, in the order the changes are listed
 VESSEL_FIELDS = (

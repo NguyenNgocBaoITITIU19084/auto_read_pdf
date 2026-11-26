@@ -1,6 +1,7 @@
 import type { AppNotification, VesselTimeChange } from '../types';
 import type { AppContextType } from '../context/AppContext';
 import { tf } from '../services/i18nFormat';
+import { liveDaysLeft } from '../components/fleet/fleetUtils';
 
 type Translations = AppContextType['t'];
 
@@ -25,6 +26,19 @@ export function notificationTitle(n: AppNotification, t: Translations): string {
     const vars = { count: d.count || 0, skipped: d.skipped_count || 0 };
     if (!vars.count) return tf(titles.booking_auto_import_only_skipped, vars);
     return tf(vars.skipped ? titles.booking_auto_import_skipped : titles.booking_auto_import, vars);
+  }
+  if (n.kind === 'fleet_expiry') {
+    const docs = d.documents || [];
+    const count = d.count || docs.length;
+    if (count === 1 && docs[0]) {
+      const doc = docs[0];
+      const days = liveDaysLeft(doc);
+      const left = days < 0 ? tf(t.fleet.expired, { days: -days }) : days === 0 ? t.fleet.expiresToday : tf(t.fleet.daysLeft, { days });
+      return tf(t.notifications.titles.fleet_expiry_one, {
+        doc: t.notifications.reminder.fleetDocs[doc.kind] || doc.label, subject: doc.subject, left,
+      });
+    }
+    return tf(t.notifications.titles.fleet_expiry_many, { count });
   }
   const template = (t.notifications.titles as Record<string, string>)[n.kind];
   const subject = notificationSubject(n);

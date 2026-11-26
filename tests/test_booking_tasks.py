@@ -89,3 +89,18 @@ def test_the_today_route(col_id):
     assert set(body) >= {"date", "tomorrow_date", "generated_at", "late", "today", "tomorrow"}
     assert all(b["collection_id"] == col_id for g in ("late", "today", "tomorrow") for b in body[g])
     assert TestClient(app).get("/api/v1/bookings/today").status_code == 200
+
+
+def test_lookup_finds_bookings_of_every_collection_open_first(col_id):
+    other = db.create_collection(f"tasks-other-{time.time_ns()}")
+    tag = f"LKP{time.time_ns() % 10**8}"
+    done = _booking(col_id, f"{tag}-DONE", "05/12/2027 10:00", "gated_in")
+    open_ = _booking(other, f"{tag}-OPEN", "06/12/2027 08:30", **{"Full return CY": "TCIT"})
+    found = db.search_booking_tasks(tag.lower())
+    assert [b["id"] for b in found] == [open_, done]
+    assert found[0]["Hạn cut-off"] == "06/12/2027 08:30"
+    assert found[0]["Full return CY"] == "TCIT"
+    assert found[0]["collection_id"] == other
+    assert db.search_booking_tasks("   ") == []
+    res = TestClient(app).get("/api/v1/bookings/lookup", params={"q": tag})
+    assert res.status_code == 200 and len(res.json()) == 2

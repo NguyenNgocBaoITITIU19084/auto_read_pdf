@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlarmClock, Sunrise, Bell, FolderInput, BellOff, Box, CheckCheck, Clock, LogIn, LogOut, Ship, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlarmClock, Sunrise, Bell, FolderInput, BellOff, Box, CheckCheck, Clock, LogIn, LogOut, Ship, ShieldCheck, Trash2, Truck } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../context/NotificationsContext';
 import { AppNotification, NotificationKind } from '../../types';
 import { formatTimeAgo } from '../../utils/formatters';
 import { autoImportSummary, notificationChange, notificationTitle } from '../../utils/notifications';
 import { VesselChangeList } from './VesselChangeList';
-import { ReminderSummary } from './ReminderViews';
+import { FleetExpirySummary, ReminderSummary } from './ReminderViews';
 import { tf } from '../../services/i18nFormat';
 import { Tooltip } from './Tooltip';
 
@@ -23,10 +23,12 @@ const KIND_ICON: Record<NotificationKind, React.ReactNode> = {
   booking_cutoff: <AlarmClock className="w-4 h-4" />,
   morning_brief: <Sunrise className="w-4 h-4" />,
   booking_auto_import: <FolderInput className="w-4 h-4" />,
+  fleet_expiry: <Truck className="w-4 h-4" />,
   test: <Bell className="w-4 h-4" />,
 };
 
-const isReminder = (item: AppNotification) => item.kind === 'booking_cutoff' || item.kind === 'morning_brief';
+const isReminder = (item: AppNotification) =>
+  item.kind === 'booking_cutoff' || item.kind === 'morning_brief' || item.kind === 'fleet_expiry';
 
 /** Icon tile colour: containers teal, reminders amber, vessels (and the rest) sky. */
 const kindTone = (kind: string) =>
@@ -162,7 +164,9 @@ export const NotificationBell: React.FC = () => {
                             </span>
                             {!item.read && <span aria-label="unread" className="mt-1 w-2 h-2 rounded-full bg-primary-500 shrink-0" />}
                           </span>
-                          {isReminder(item) ? (
+                          {item.kind === 'fleet_expiry' ? (
+                            <FleetExpirySummary item={item} />
+                          ) : isReminder(item) ? (
                             <ReminderSummary item={item} />
                           ) : item.kind === 'booking_auto_import' ? (
                             <span className="block text-[11px] font-mono text-slate-600 dark:text-slate-300 mt-0.5 truncate">{autoImportSummary(item)}</span>

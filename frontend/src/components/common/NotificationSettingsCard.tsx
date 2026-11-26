@@ -14,7 +14,7 @@ type SettingKind = Exclude<NotificationKind, 'test' | 'vessel_schedule'>;
 
 const CONTAINER_KINDS: SettingKind[] = ['container_customs', 'container_ingate', 'container_outgate'];
 const VESSEL_KINDS: SettingKind[] = ['vessel_closing', 'vessel_closing_icd', 'vessel_open_gate', 'vessel_eta', 'vessel_etd'];
-const REMINDER_KINDS: SettingKind[] = ['booking_cutoff', 'morning_brief'];
+const REMINDER_KINDS: SettingKind[] = ['booking_cutoff', 'morning_brief', 'fleet_expiry'];
 const IMPORT_KINDS: SettingKind[] = ['booking_auto_import'];
 
 /** Which changes raise a notification (and whether the OS may pop them up). Saved as soon as it is changed. */

@@ -8,12 +8,21 @@ import { extractClipboardFiles, isEditableTarget, isImageFile, isPdfFile } from 
 import { NotificationDetailModal } from './components/common/NotificationDetailModal';
 import { useMobileBridge } from './context/MobileBridgeContext';
 import { useNotifications } from './context/NotificationsContext';
+import { getZaloConversations } from './services/zaloApi';
+import { getGmailUnreadCount } from './services/gmailApi';
+import { getOutlookUnreadCount } from './services/outlookApi';
+import type { ZaloDraftRequest } from './components/zalo/ZaloTab';
 
 const DashboardTab = lazy(() => import('./components/dashboard/DashboardTab').then((m) => ({ default: m.DashboardTab })));
 const BookingTab = lazy(() => import('./components/booking/BookingTab').then((m) => ({ default: m.BookingTab })));
 const VesselTab = lazy(() => import('./components/vessel/VesselTab').then((m) => ({ default: m.VesselTab })));
 const ContainerTab = lazy(() => import('./components/container/ContainerTab').then((m) => ({ default: m.ContainerTab })));
 const TasksTab = lazy(() => import('./components/tasks/TasksTab').then((m) => ({ default: m.TasksTab })));
+const FleetTab = lazy(() => import('./components/fleet/FleetTab').then((m) => ({ default: m.FleetTab })));
+const TrailerTab = lazy(() => import('./components/fleet/TrailerTab').then((m) => ({ default: m.TrailerTab })));
+const ZaloTab = lazy(() => import('./components/zalo/ZaloTab').then((m) => ({ default: m.ZaloTab })));
+const GmailTab = lazy(() => import('./components/gmail/GmailTab').then((m) => ({ default: m.GmailTab })));
+const OutlookTab = lazy(() => import('./components/outlook/OutlookTab').then((m) => ({ default: m.OutlookTab })));
 const LogsTab = lazy(() => import('./components/logs/LogsTab').then((m) => ({ default: m.LogsTab })));
 
 export const App: React.FC = () => {
@@ -24,9 +33,18 @@ export const App: React.FC = () => {
     booking?: string;
     vessel?: string;
     container?: string;
+    fleet?: string;
+    trucks?: string;
+    drivers?: string;
+    trailers?: string;
   }>({});
   const [pasteRequest, setPasteRequest] = useState<BookingPasteRequest | null>(null);
   const pasteSeqRef = useRef(0);
+  const [zaloUnreadCount, setZaloUnreadCount] = useState(0);
+  const [gmailUnreadCount, setGmailUnreadCount] = useState(0);
+  const [outlookUnreadCount, setOutlookUnreadCount] = useState(0);
+  const [zaloThreadId, setZaloThreadId] = useState<string | undefined>(undefined);
+  const [zaloDraft, setZaloDraft] = useState<ZaloDraftRequest | null>(null);
 
   // A photo arriving from a paired phone should surface on the Booking tab, the same way a
   // pasted/dropped image does — the user is actively capturing a booking, so jump there for them.
@@ -38,6 +56,11 @@ export const App: React.FC = () => {
     if (tab === 'vessel') void import('./components/vessel/VesselTab');
     if (tab === 'container') void import('./components/container/ContainerTab');
     if (tab === 'tasks') void import('./components/tasks/TasksTab');
+    if (tab === 'fleet' || tab === 'trucks' || tab === 'drivers') void import('./components/fleet/FleetTab');
+    if (tab === 'trailers') void import('./components/fleet/TrailerTab');
+    if (tab === 'zalo') void import('./components/zalo/ZaloTab');
+    if (tab === 'gmail') void import('./components/gmail/GmailTab');
+    if (tab === 'outlook') void import('./components/outlook/OutlookTab');
     if (tab === 'logs') void import('./components/logs/LogsTab');
   }, []);
 
@@ -66,6 +89,27 @@ export const App: React.FC = () => {
       }
     });
   }, [handleNavigateTab, openDetail]);
+
+  // Keep Zalo unread badge updated on startup and incoming messages
+  useEffect(() => {
+    const refreshZaloUnread = () => {
+      getZaloConversations('unread')
+        .then((res) => setZaloUnreadCount(res.counts.unread_messages || 0))
+        .catch(() => {});
+    };
+    refreshZaloUnread();
+    getGmailUnreadCount().then(setGmailUnreadCount).catch(() => {});
+    getOutlookUnreadCount().then(setOutlookUnreadCount).catch(() => {});
+    const unsubMsg = window.electronAPI?.onZaloMessageReceived?.(() => refreshZaloUnread());
+    const unsubOpen = window.electronAPI?.onZaloOpenThread?.((data) => {
+      if (data?.threadId) setZaloThreadId(data.threadId);
+      setActiveTab('zalo');
+    });
+    return () => {
+      unsubMsg?.();
+      unsubOpen?.();
+    };
+  }, []);
 
   // A drill-down keyword is a one-shot hint for the tab it targets: drop it once the user leaves that
   // tab, otherwise every later visit re-applies the stale search (e.g. Vessel tab stuck on one vessel).
@@ -100,6 +144,8 @@ export const App: React.FC = () => {
       if (images.length === 0 && pdfs.length === 0) return;
       // On the Container tab a pasted photo is read as a container photo (handled by ContainerTab)
       if (activeTabRef.current === 'container' && pdfs.length === 0) return;
+      // The Zalo tab attaches pasted files to the open chat itself.
+      if (activeTabRef.current === 'zalo') return;
 
       // Pasting into a text field: when the clipboard also carries text (e.g. cells copied from
       // Excel/Word include a bitmap rendition) keep the normal text paste — unless PDFs are present.
@@ -121,7 +167,7 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans">
       <Header activeTab={activeTab} onNavigateTab={handleNavigateTab} />
       <NotificationDetailModal onNavigateTab={handleNavigateTab} />
-      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} />
+      <Tabs activeTab={activeTab} onChange={setActiveTab} onHoverTab={preloadTab} zaloUnreadCount={zaloUnreadCount} gmailUnreadCount={gmailUnreadCount} outlookUnreadCount={outlookUnreadCount} />
       <main className="flex-1 overflow-hidden flex flex-col">
         <Suspense
           fallback={
@@ -152,6 +198,20 @@ export const App: React.FC = () => {
             <ContainerTab initialSearchQuery={drilldownKeywords.container} />
           )}
           {activeTab === 'tasks' && <TasksTab onNavigateTab={handleNavigateTab} />}
+          {activeTab === 'fleet' && <FleetTab screen="vehicles" initialSearchQuery={drilldownKeywords.fleet} />}
+          {activeTab === 'trucks' && <FleetTab screen="trucks" initialSearchQuery={drilldownKeywords.trucks} />}
+          {activeTab === 'drivers' && <FleetTab screen="drivers" initialSearchQuery={drilldownKeywords.drivers} />}
+          {activeTab === 'trailers' && <TrailerTab initialSearchQuery={drilldownKeywords.trailers} />}
+          {activeTab === 'zalo' && (
+            <ZaloTab
+              initialThreadId={zaloThreadId}
+              draftRequest={zaloDraft}
+              onDraftHandled={(id) => setZaloDraft((prev) => (prev && prev.id === id ? null : prev))}
+              onUnreadCountChange={setZaloUnreadCount}
+            />
+          )}
+          {activeTab === 'gmail' && <GmailTab onUnreadCountChange={setGmailUnreadCount} />}
+          {activeTab === 'outlook' && <OutlookTab onUnreadCountChange={setOutlookUnreadCount} />}
           {activeTab === 'logs' && <LogsTab />}
         </Suspense>
       </main>

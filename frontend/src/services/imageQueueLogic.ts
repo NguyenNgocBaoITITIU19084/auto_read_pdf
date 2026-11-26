@@ -6,7 +6,7 @@ import type { Booking, ImageExtractEngine, ImageExtractResult } from '../types';
  */
 
 export type QueueStatus = 'queued' | 'reading' | 'success' | 'review' | 'failed' | 'saved';
-export type QueueSource = 'upload' | 'paste' | 'drop' | 'phone';
+export type QueueSource = 'upload' | 'paste' | 'drop' | 'phone' | 'zalo';
 export type Outcome = 'success' | 'review' | 'failed';
 
 export interface QueueItem {
@@ -35,6 +35,8 @@ export interface QueueItem {
   readMs?: number;
   /** Booking No already exists in the target collection */
   dbDuplicate?: boolean;
+  /** Read already by the Zalo booking watch: saving it marks that Zalo message as saved */
+  zaloMessageId?: number;
   saving?: boolean;
   savedId?: number;
   /** Fields the last save refused, with the server's reason; each clears once that field changes */
@@ -138,6 +140,11 @@ export function fieldErrorsFromSaveError(detail: string, knownKeys: readonly str
 export const fileKey = (f: File): string => `${f.name}|${f.size}|${f.lastModified}`;
 
 /** Files not already in the queue (and not repeated among themselves). */
+/** The queue item holding this same file, if any. Name and size only: a copy fetched again (from Zalo) has a new date. */
+export function findSameFile(existing: QueueItem[], file: File): QueueItem | undefined {
+  return existing.find((i) => i.file.name === file.name && i.file.size === file.size);
+}
+
 export function dedupeIncoming(existing: QueueItem[], files: File[]): { fresh: File[]; duplicates: number } {
   const seen = new Set(existing.map((i) => fileKey(i.file)));
   const fresh: File[] = [];
@@ -190,7 +197,9 @@ export type QueueAction =
   /** a refused save: the fields it named stay marked until edited */
   | { type: 'saveFailed'; id: string; fieldErrors: Record<string, string> }
   /** saved to the collection: leaves the queue (nothing left to do with it) */
-  | { type: 'saved'; id: string; bookingId: number };
+  | { type: 'saved'; id: string; bookingId: number }
+  /** the same file already in the queue turned out to come from a Zalo message: saving it marks that message */
+  | { type: 'linkZalo'; id: string; zaloMessageId: number };
 
 const patch = (items: QueueItem[], id: string, fn: (it: QueueItem) => QueueItem): QueueItem[] =>
   items.map((it) => (it.id === id ? fn(it) : it));
@@ -249,6 +258,8 @@ export function queueReducer(items: QueueItem[], action: QueueAction): QueueItem
         const left = Object.fromEntries(Object.entries(it.fieldErrors).filter(([k]) => fields[k as keyof Booking] === it.fields[k as keyof Booking]));
         return { ...it, fields, fieldErrors: Object.keys(left).length ? left : undefined };
       });
+    case 'linkZalo':
+      return patch(items, action.id, (it) => ({ ...it, zaloMessageId: it.zaloMessageId ?? action.zaloMessageId }));
     case 'setDbDuplicate':
       return patch(items, action.id, (it) => ({ ...it, dbDuplicate: action.value }));
     case 'saving':

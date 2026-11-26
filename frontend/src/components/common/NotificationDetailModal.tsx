@@ -9,7 +9,7 @@ import { isVesselChangeNotification, vesselChangeMessage } from '../../utils/ves
 import type { Booking } from '../../types';
 import { notificationChange, notificationChanges, notificationTitle } from '../../utils/notifications';
 import { Modal } from './Modal';
-import { CutoffReminderDetail, MorningBriefDetail, formatStamp } from './ReminderViews';
+import { CutoffReminderDetail, FleetExpiryDetail, MorningBriefDetail, formatStamp } from './ReminderViews';
 import { AutoImportDetail } from './AutoImportDetail';
 import { VesselChangeList } from './VesselChangeList';
 import type { TabId } from './Tabs';
@@ -34,14 +34,15 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
   const isBrief = item.kind === 'morning_brief';
   const isCutoff = item.kind === 'booking_cutoff';
   const isAutoImport = item.kind === 'booking_auto_import';
-  const isReminder = isBrief || isCutoff || isAutoImport;
+  const isFleet = item.kind === 'fleet_expiry';
+  const isReminder = isBrief || isCutoff || isAutoImport || isFleet;
   const rows: [string, string | undefined][] = [
     [d.vessel, isReminder ? undefined : info.vessel],
     [d.voyage, info.voyage],
     [d.container, info.container],
     [d.event, info.event_type],
     [d.bookings, !isReminder && info.bookings && info.bookings.length > 0 ? info.bookings.join(', ') : undefined],
-    [d.source, isAutoImport ? undefined : item.source === 'auto_sync' ? t.notifications.sourceAuto : t.notifications.sourceManual],
+    [d.source, isAutoImport || isFleet ? undefined : item.source === 'auto_sync' ? t.notifications.sourceAuto : t.notifications.sourceManual],
     [d.time, formatStamp(item.created_at)],
   ];
 
@@ -82,6 +83,8 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           <CutoffReminderDetail item={item} />
         ) : isAutoImport ? (
           <AutoImportDetail item={item} />
+        ) : isFleet ? (
+          <FleetExpiryDetail item={item} />
         ) : changes.length > 0 ? (
           <VesselChangeList item={item} variant="full" />
         ) : item.old_value ? (
@@ -142,7 +145,9 @@ export const NotificationDetailModal: React.FC<Props> = ({ onNavigateTab }) => {
           </button>
           {item.nav_tab && (
             <button type="button" onClick={goToTab} className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary-600 hover:bg-primary-700 text-white">
-              {item.nav_tab === 'vessel' ? d.openVessel : item.nav_tab === 'booking' ? d.openBooking : d.openContainer}
+              {item.nav_tab === 'vessel' ? d.openVessel : item.nav_tab === 'booking' ? d.openBooking
+                : item.nav_tab === 'fleet' ? d.openFleet : item.nav_tab === 'trucks' ? d.openTrucks : item.nav_tab === 'drivers' ? d.openDrivers
+                  : item.nav_tab === 'trailers' ? d.openTrailers : d.openContainer}
             </button>
           )}
         </div>

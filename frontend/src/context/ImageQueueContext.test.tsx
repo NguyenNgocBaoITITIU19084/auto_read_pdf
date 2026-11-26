@@ -20,6 +20,12 @@ vi.mock('../services/api', () => ({
   saveManualBookingApi: (...a: unknown[]) => saveManual(...a),
 }));
 
+const dismissZalo = vi.fn();
+vi.mock('../services/zaloApi', () => ({
+  dismissZaloScan: (...a: unknown[]) => dismissZalo(...a),
+  markZaloScanSaved: () => Promise.resolve(),
+}));
+
 import { ImageQueueProvider, MAX_QUEUE_ITEMS, RETRY_DELAYS, useImageQueue } from './ImageQueueContext';
 
 const wrapper = ({ children }: { children: React.ReactNode }) => <ImageQueueProvider>{children}</ImageQueueProvider>;
@@ -282,6 +288,38 @@ describe('ImageQueueProvider', () => {
     expect(statuses(result)).toEqual(['success', 'queued']);
     expect(extract.mock.calls.map((c) => (c[0] as File).name)).toEqual(['a.png', 'a.png', 'b.png', 'b.png']);
     expect(result.current.items[0]).toMatchObject({ engine: 'gemini' });
+  });
+
+  it('removing a booking read from Zalo dismisses it there; closing the window (remove) does not', async () => {
+    dismissZalo.mockReset().mockResolvedValue({});
+    const { result } = renderHook(() => useImageQueue(), { wrapper });
+    const reviewed = (name: string, zaloMessageId: number) => ({
+      file: png(name), fields: { 'Booking No': name }, engine: 'pdf' as const, warnings: [],
+      collection: { id: 1, name: 'Test' }, zaloMessageId,
+    });
+    let a = '';
+    let b = '';
+    act(() => { a = result.current.enqueueReviewed(reviewed('A1', 41)) as string; });
+    act(() => { b = result.current.enqueueReviewed(reviewed('B2', 42)) as string; });
+    act(() => { result.current.discard(a); });
+    act(() => { result.current.remove(b); });
+    expect(result.current.items).toHaveLength(0);
+    expect(dismissZalo).toHaveBeenCalledTimes(1);
+    expect(dismissZalo).toHaveBeenCalledWith(41);
+  });
+
+  it('warns when Zalo could not be told about a removed booking', async () => {
+    dismissZalo.mockReset().mockRejectedValue(new Error('offline'));
+    const { result } = renderHook(() => useImageQueue(), { wrapper });
+    let id = '';
+    act(() => {
+      id = result.current.enqueueReviewed({
+        file: png('C3'), fields: { 'Booking No': 'C3' }, engine: 'pdf', warnings: [],
+        collection: { id: 1, name: 'Test' }, zaloMessageId: 43,
+      }) as string;
+    });
+    act(() => { result.current.discard(id); });
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(q.zaloDismissFailed, 'error'));
   });
 
   it('exposes how many more images fit', () => {

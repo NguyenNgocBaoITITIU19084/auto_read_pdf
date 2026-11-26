@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from backend.app.core.database import (
     insert_booking, get_bookings, delete_booking, clear_bookings, delete_bookings_batch,
     get_bookings_page, get_booking_ids, get_bookings_by_ids, get_booking_carriers, get_booking_return_cys, get_booking_tasks,
+    search_booking_tasks,
     update_booking, find_duplicate_booking_ids, get_booking_collection_id,
     get_booking_trash, get_booking_trash_ids, count_booking_trash, restore_bookings, delete_trashed_bookings,
     BOOKING_TRASH_KEEP_DAYS, BOOKING_STATUSES, set_booking_status, get_booking_status_counts,
@@ -126,6 +127,11 @@ def list_booking_return_cys(collection_id: int = Query(...)):
 def list_booking_tasks(collection_id: Optional[int] = Query(None, description="One collection; omitted = all")):
     """Open bookings (not gated in yet) by cut-off: passed, later today, tomorrow."""
     return get_booking_tasks(collection_id)
+
+@router.get("/lookup")
+def lookup_bookings(q: str = Query("", description="Booking no, vessel or carrier"), limit: int = Query(12)):
+    """Bookings of every collection matching `q`, open ones first, to fill a message template."""
+    return search_booking_tasks(q, limit)
 
 @router.get("/calendar")
 def list_bookings_calendar(

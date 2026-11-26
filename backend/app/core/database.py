@@ -601,6 +601,22 @@ def init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auto_import_processed ON auto_import_files(processed_at);")
 
+        # Trucks, drivers and who drives which truck (see backend/app/core/fleet.py)
+        from backend.app.core.fleet import create_fleet_tables
+        create_fleet_tables(conn)
+
+        # Zalo messaging tables (conversations, messages, templates, session)
+        from backend.app.core.zalo import create_zalo_tables
+        create_zalo_tables(conn)
+
+        # Gmail tables (accounts, cached threads/messages, attachments, templates)
+        from backend.app.core.gmail import create_gmail_tables
+        create_gmail_tables(conn)
+
+        # Outlook / Microsoft 365 tables (accounts + tokens, pinned folders, PDF imports)
+        from backend.app.core.outlook import create_outlook_tables
+        create_outlook_tables(conn)
+
         # Create system_settings table
         conn.execute("""
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -1254,7 +1270,8 @@ def _purge_trash(conn: sqlite3.Connection, k: _TrashKind) -> int:
 
 
 def purge_expired_trash() -> int:
-    """Permanently delete bookings, vessel schedules and containers in the trash longer than TRASH_KEEP_DAYS."""
+    """Permanently delete bookings, vessel schedules, containers, trucks and drivers in the trash longer than
+    TRASH_KEEP_DAYS."""
     total = 0
     with get_connection() as conn:
         for k in _TRASH_KINDS.values():
@@ -1262,6 +1279,11 @@ def purge_expired_trash() -> int:
             if removed:
                 logger.info(f"Purged {removed} {k.label}(s) from the trash after {TRASH_KEEP_DAYS} days")
             total += removed
+    try:
+        from backend.app.core.fleet import purge_expired_trash as purge_fleet_trash
+        total += purge_fleet_trash()
+    except Exception:
+        logger.exception("Could not purge the fleet trash")
     return total
 
 
@@ -2492,7 +2514,9 @@ def _trim_notifications(conn: sqlite3.Connection, now: datetime) -> None:
 # ---------------------------------------------------------------------------
 # Excel export templates
 # ---------------------------------------------------------------------------
-EXPORT_TABS = ("booking", "vessel", "container")
+# Each table keeps its own saved export templates (the fleet tabs have six tables)
+EXPORT_TABS = ("booking", "vessel", "container", "fleet_vehicle", "fleet_truck", "fleet_driver", "fleet_history", "fleet_trailer",
+               "fleet_hitch")
 EXPORT_NAME_MAX = 80
 
 
@@ -2764,9 +2788,56 @@ def get_booking_tasks(col_id: int | None = None, now: datetime | None = None) ->
             "generated_at": now.strftime("%d/%m/%Y %H:%M"), **groups}
 
 
+def search_booking_tasks(query: str, limit: int = 12) -> list[dict]:
+    """Bookings of every collection whose booking no, vessel or carrier contains `query`, shaped like the items of
+    get_booking_tasks (with "Hạn cut-off", "Bộ sưu tập", "collection_id"), for filling a Zalo message template.
+    Open bookings come first, then the newest. "Hạn cut-off" is '' when the booking has no readable cut-off."""
+    q = " ".join(str(query or "").split()).upper()
+    if not q:
+        return []
+    like = f"%{q}%"
+    open_list = ",".join(f"'{s}'" for s in _BOOKING_OPEN_STATUSES)
+    with get_connection() as conn:
+        rows = _select_dicts(
+            conn,
+            f"""SELECT * FROM bookings
+                WHERE UPPER(COALESCE(booking_no, '')) LIKE ? OR UPPER(COALESCE(vessel, '')) LIKE ?
+                   OR UPPER(COALESCE(carrier, '')) LIKE ?
+                ORDER BY CASE WHEN {_STATUS_EXPR} IN ({open_list}) THEN 0 ELSE 1 END,
+                         CASE WHEN UPPER(COALESCE(booking_no, '')) LIKE ? THEN 0 ELSE 1 END, id DESC
+                LIMIT ?;""",
+            (like, like, like, f"{q}%", max(1, min(int(limit), 50))),
+        )
+        names = {c_id: name for c_id, name in conn.execute("SELECT id, name FROM collections;").fetchall()}
+    out = []
+    for r in rows:
+        deadline = _cutoff_deadline(r.get("eport_cutoff") or r.get("cutoff_time"))
+        item = _booking_row_to_api(r)
+        item["Hạn cut-off"] = deadline.strftime("%d/%m/%Y %H:%M") if deadline else ""
+        item["Cut-off cả ngày"] = bool(deadline) and not _SORT_TIME.search(
+            str(r.get("eport_cutoff") or r.get("cutoff_time") or ""))
+        item["Bộ sưu tập"] = names.get(r["collection_id"], "")
+        item["collection_id"] = r["collection_id"]
+        out.append(item)
+    return out
+
+
 def run_reminders(now: datetime | None = None) -> dict:
-    """The periodic reminder pass: cut-off reminders, then the morning brief when it is due."""
-    return {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
+    """The periodic reminder pass: cut-off reminders, the morning brief when it is due, the fleet's paper lock (expired
+    papers make a truck / trailer "Không sẵn sàng"), then fleet document expiry."""
+    from backend.app.core.fleet import enforce_papers, scan_expiry_reminders
+    result = {"cutoff": scan_cutoff_reminders(now), "brief": maybe_send_morning_brief(now)}
+    try:
+        result["paper_lock"] = enforce_papers(now.astimezone(VN_TZ).date() if now else None)
+    except Exception:
+        logger.exception("Fleet paper lock failed")
+        result["paper_lock"] = 0
+    try:
+        result["fleet"] = scan_expiry_reminders(now)
+    except Exception:
+        logger.exception("Fleet expiry reminders failed")
+        result["fleet"] = 0
+    return result
 
 
 def record_test_notification() -> dict:

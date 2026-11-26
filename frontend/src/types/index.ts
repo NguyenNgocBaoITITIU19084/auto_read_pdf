@@ -443,6 +443,129 @@ export interface ElectronAPI {
   selectFolder?: (defaultPath?: string) => Promise<string | null>;
   /** Restart the backend owned by Electron. */
   restartBackend?: () => Promise<{ ok: boolean; reason?: 'not_owned' | 'busy' | 'failed' }>;
+  /** Zalo bridge (Electron only). */
+  zaloGetState?: () => Promise<ZaloBridgeState>;
+  zaloLoginQR?: () => Promise<ZaloBridgeState>;
+  zaloReconnect?: () => Promise<ZaloBridgeState>;
+  zaloLogout?: () => Promise<ZaloBridgeState>;
+  zaloSendMessage?: (payload: { threadId: string; threadType?: 'user' | 'group'; text: string; bookingNo?: string; displayName?: string; phone?: string }) => Promise<any>;
+  zaloSendFiles?: (payload: {
+    threadId: string;
+    threadType?: 'user' | 'group';
+    caption?: string;
+    files: { name: string; data: Uint8Array; size: number; width?: number; height?: number }[];
+    displayName?: string;
+    phone?: string;
+  }) => Promise<{ sent: number }>;
+  zaloSendBatch?: (payload: { recipients: { threadId: string; threadType?: 'user' | 'group'; displayName?: string; phone?: string }[]; text: string; bookingNo?: string }) => Promise<{ threadId: string; ok: boolean; error?: string }[]>;
+  zaloFindUser?: (payload: { phone: string; driverId?: number | null; driverName?: string }) => Promise<ZaloConversation>;
+  zaloSyncContacts?: () => Promise<{ synced: number }>;
+  zaloSyncMessages?: (opts?: { days?: number }) => Promise<{ conversations: number; inserted: number }>;
+  zaloFetchGroupHistory?: (groupId: string) => Promise<{ inserted: number }>;
+  onZaloSyncProgress?: (cb: (data: { stage: string; message: string }) => void) => () => void;
+  onZaloStatus?: (cb: (status: ZaloBridgeState) => void) => () => void;
+  onZaloQR?: (cb: (data: { stage: 'generated' | 'scanned' | 'expired' | 'declined'; image?: string; displayName?: string; avatar?: string }) => void) => () => void;
+  onZaloMessageReceived?: (cb: (data: any) => void) => () => void;
+  onZaloOpenThread?: (cb: (data: { threadId: string }) => void) => () => void;
+}
+
+export interface ZaloBridgeState {
+  status: 'disconnected' | 'qr_pending' | 'connected' | 'error';
+  uid: string;
+  displayName: string;
+  phone: string;
+  avatar: string;
+  lastError: string;
+  /** Saved credentials exist, so "Kết nối lại" can restore without a new QR scan. */
+  hasSavedSession?: boolean;
+}
+
+export interface ZaloConversation {
+  thread_id: string;
+  thread_type: 'user' | 'group';
+  display_name: string;
+  avatar: string;
+  phone: string;
+  driver_id: number | null;
+  driver_name?: string | null;
+  driver_phone?: string | null;
+  driver_status?: string | null;
+  vehicle_plate?: string | null;
+  unread_count: number;
+  needs_attention: number;
+  /** 1 = set aside (personal chat, ads): not listed or counted outside "Đã ẩn". */
+  hidden?: number;
+  /** 1 = booking files sent here are read into the review queue. */
+  watch_booking?: number;
+  last_message_preview: string;
+  last_message_at: string;
+  last_direction: string;
+  updated_at: string;
+}
+
+export interface ZaloMessage {
+  id: number;
+  msg_id: string | null;
+  thread_id: string;
+  direction: 'in' | 'out';
+  sender_id: string;
+  sender_name: string;
+  msg_type: 'text' | 'image' | 'file' | 'sticker' | 'other';
+  content: string;
+  media_url: string;
+  booking_no: string;
+  status: string;
+  created_at: string;
+  /** Reactions grouped by icon, most used first (Zalo codes like "/-strong"). */
+  reactions?: { icon: string; count: number; mine: boolean; names: string[] }[];
+  /** The booking read from this message's file, when it was scanned. */
+  booking_scan?: ZaloBookingScan | null;
+}
+
+export type ZaloBookingScanStatus =
+  | 'downloading' | 'scanning' | 'manual' | 'pending_review' | 'saved' | 'duplicate'
+  | 'no_data' | 'not_booking' | 'expired' | 'error' | 'dismissed';
+
+export interface ZaloBookingScan {
+  message_id: number;
+  thread_id: string;
+  file_name: string;
+  kind: 'pdf' | 'image' | '';
+  status: ZaloBookingScanStatus;
+  data: Partial<Booking> & { __warnings?: string[] };
+  engine_used: string;
+  booking_no: string;
+  db_duplicate: number;
+  booking_id: number | null;
+  collection_id: number | null;
+  message: string;
+  has_file: boolean;
+  created_at: string;
+  updated_at: string;
+  /** Queue listing only */
+  sent_at?: string;
+  sender_name?: string;
+  direction?: 'in' | 'out';
+  conversation_name?: string;
+  thread_type?: 'user' | 'group';
+}
+
+export interface ZaloTemplate {
+  id: number;
+  name: string;
+  shortcut: string;
+  category: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ZaloUnlinkedDriver {
+  id: number;
+  name: string;
+  phone: string;
+  status: string;
+  vehicle_plate?: string | null;
 }
 
 export interface AppMetricsProcess {
@@ -566,6 +689,8 @@ export type NotificationKind =
   | 'morning_brief'
   /** PDFs read from the watched folder (detail.imported / detail.skipped) */
   | 'booking_auto_import'
+  /** truck registration / insurance or driving licences about to expire (detail.documents) */
+  | 'fleet_expiry'
   /** the sample sent by the "send a test" button */
   | 'test';
 
@@ -611,8 +736,10 @@ export interface AppNotification {
     collections?: { name: string; today: number; late: number; tomorrow: number }[];
     // booking_auto_import (count = bookings added)
     skipped_count?: number; imported?: AutoImportNoticeItem[]; skipped?: AutoImportNoticeItem[];
+    // fleet_expiry (count = documents; expired = how many of them already expired)
+    expired?: number; documents?: FleetDocument[];
   };
-  nav_tab: 'vessel' | 'container' | 'booking' | null;
+  nav_tab: 'vessel' | 'container' | 'booking' | 'fleet' | 'trucks' | 'drivers' | 'trailers' | null;
   nav_query: string | null;
   source: 'auto_sync' | 'manual';
   created_at: string;
@@ -670,7 +797,9 @@ export interface AutoImportRunResult {
 // ---------------------------------------------------------------------------
 // Excel export templates
 // ---------------------------------------------------------------------------
-export type ExportTab = 'booking' | 'vessel' | 'container';
+/** Whose saved export templates: a tab, or one of the fleet tab's three tables */
+export type ExportTab = 'booking' | 'vessel' | 'container' | 'fleet_vehicle' | 'fleet_truck' | 'fleet_driver' | 'fleet_history' | 'fleet_trailer'
+  | 'fleet_hitch';
 export type ExportFill = 'header' | 'column';
 export type PaletteColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink' | 'gray';
 /** A palette colour, or a custom one as '#RRGGBB' */
@@ -701,4 +830,208 @@ export interface NotificationSettings {
   all_kinds: NotificationKind[];
   /** 'HH:MM' of the morning brief */
   brief_time: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleet (trucks, drivers, who drives which truck)
+// ---------------------------------------------------------------------------
+/** ready / active run (a driver can be on it, a trailer hitched); the rest stop it. not_ready is also what expired
+ *  papers (đăng ký, đăng kiểm, bảo hiểm) force: see `status_forced`. */
+export const VEHICLE_STATUSES = ['ready', 'active', 'not_ready', 'broken', 'maintenance', 'inactive'] as const;
+export type VehicleStatus = typeof VEHICLE_STATUSES[number];
+/** not_ready is also what an expired licence forces (see `status_forced`) */
+export const DRIVER_STATUSES = ['active', 'not_ready', 'leave', 'left'] as const;
+export type DriverStatus = typeof DRIVER_STATUSES[number];
+/** primary: the driver on their home truck; temporary: on another truck while theirs cannot run */
+/** tractor: đầu kéo (pulls a trailer); truck: xe tải (carries its own load, never a trailer). Set when made. */
+export const VEHICLE_CATEGORIES = ['tractor', 'truck'] as const;
+export type VehicleCategory = typeof VEHICLE_CATEGORIES[number];
+
+export interface FleetVehicle {
+  id: number;
+  plate: string;
+  category: VehicleCategory;
+  /** tractors only ('' on a truck) */
+  trailer_plate: string;
+  vehicle_type: string;
+  /** trucks: loại thùng (e.g. "Thùng kín") and tải trọng (free text, e.g. "8 tấn") */
+  body_type: string;
+  payload: string;
+  /** trucks: khối lượng toàn bộ in kg from the đăng kiểm (0 = not entered); decides which licence classes may drive it */
+  gross_weight: number;
+  /** 'YYYY-MM-DD' or '' (đăng ký, đăng kiểm, bảo hiểm) */
+  ownership_expiry: string;
+  registration_expiry: string;
+  insurance_expiry: string;
+  status: VehicleStatus;
+  /** 1: the paper lock put it in not_ready (it goes back to ready once renewed) */
+  status_forced: number;
+  note: string;
+  /** stored photo name ('' = none); see fleetPhotoUrl */
+  photo: string;
+  /** scans of its papers (stored image names, '' = none) */
+  registration_front: string;
+  registration_back: string;
+  insurance_front: string;
+  insurance_back: string;
+  ownership_front: string;
+  ownership_back: string;
+  created_at: string;
+  updated_at: string;
+  /** tractors: the trailer it pulls now (null = none) */
+  trailer: { id: number; plate: string; status: TrailerStatus; since: string } | null;
+  /** its own status while a hitched trailer that cannot run holds it in not_ready ('' = not held); it gets it back
+   *  when the trailer comes off or runs again */
+  trailer_hold_status: VehicleStatus | '';
+  /** who drives it now (a driver drives at most one truck, a truck has at most one driver) */
+  current_driver: { id: number; name: string; phone: string; photo: string; since: string; reason: string;
+    /** their bằng lái (hạng, số, hạn 'YYYY-MM-DD'), to flag a driver whose licence may not drive this truck */
+    license_class: string; license_no?: string; license_expiry?: string } | null;
+}
+
+export interface FleetDriver {
+  id: number;
+  name: string;
+  phone: string;
+  id_number: string;
+  license_no: string;
+  license_class: string;
+  license_expiry: string;
+  status: DriverStatus;
+  /** 1: an expired licence put them in not_ready (back to active once renewed) */
+  status_forced: number;
+  note: string;
+  /** stored photo name ('' = none); see fleetPhotoUrl */
+  photo: string;
+  created_at: string;
+  updated_at: string;
+  /** scans of the driver's papers (stored image names, '' = none); see fleetPhotoUrl */
+  license_front: string;
+  license_back: string;
+  id_front: string;
+  id_back: string;
+  current_vehicle: {
+    id: number; plate: string; trailer_plate: string; photo: string; category: VehicleCategory; since: string; reason: string;
+    /** trucks: what the licence rules look at */
+    payload?: string; gross_weight?: number;
+  } | null;
+}
+
+export interface FleetAssignment {
+  id: number;
+  driver_id: number | null;
+  vehicle_id: number | null;
+  driver_name: string;
+  vehicle_plate: string;
+  reason: string;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string;
+}
+
+export const DRIVER_DOCUMENTS = ['license_front', 'license_back', 'id_front', 'id_back'] as const;
+export type DriverDocument = typeof DRIVER_DOCUMENTS[number];
+/** A truck's papers: đăng kiểm (registration), bảo hiểm (insurance), giấy đăng ký xe (ownership, if any) */
+export const VEHICLE_DOCUMENTS = ['registration_front', 'registration_back', 'insurance_front', 'insurance_back',
+  'ownership_front', 'ownership_back'] as const;
+export type VehicleDocument = typeof VEHICLE_DOCUMENTS[number];
+export type FleetDocumentImage = DriverDocument | VehicleDocument;
+export type FleetDocumentKind = 'ownership' | 'registration' | 'insurance' | 'license' | 'trailer_ownership' | 'trailer_registration'
+  | 'trailer_insurance';
+export interface FleetDocument {
+  kind: FleetDocumentKind;
+  label: string;
+  entity: 'vehicle' | 'driver' | 'trailer';
+  entity_id: number;
+  subject: string;
+  /** 'YYYY-MM-DD' from /fleet/expiring, 'dd/mm/YYYY' inside a notification */
+  expiry: string;
+  days_left: number;
+  /** the app tab listing it (a truck's papers: 'trucks') */
+  tab?: 'fleet' | 'trucks' | 'drivers' | 'trailers';
+}
+
+export interface VehicleStatusResult {
+  vehicle_id: number;
+  status: VehicleStatus;
+  moved_driver: { id: number; name: string; to_vehicle_id: number | null; to_plate: string } | null;
+}
+
+export interface FleetHistoryPage {
+  items: FleetAssignment[];
+  total: number;
+}
+
+/** A truck / driver in the trash: its stored row plus when it goes for good. */
+export interface FleetTrashFields { id: number; deleted_at: string; purge_at: string; days_left: number }
+export interface FleetTrashedVehicle extends FleetTrashFields {
+  plate: string; category: VehicleCategory; trailer_plate: string; vehicle_type: string; body_type: string; payload: string;
+  status: VehicleStatus; photo: string; note: string;
+}
+export interface FleetTrashedDriver extends FleetTrashFields {
+  name: string; phone: string; license_no: string; license_class: string; status: DriverStatus; photo: string; note: string;
+}
+export interface FleetTrashedTrailer extends FleetTrashFields {
+  plate: string; trailer_type: string; chassis_no: string; status: TrailerStatus; photo: string; note: string;
+}
+
+// Trailers (rơ moóc) and which tractor pulls which
+export type TrailerStatus = VehicleStatus;
+export interface FleetTrailer {
+  id: number;
+  plate: string;
+  /** e.g. "Sàn 40'", "Xương 20'" */
+  trailer_type: string;
+  chassis_no: string;
+  /** free text, e.g. "32 tấn" */
+  payload: string;
+  /** 'YYYY' or '' */
+  year: string;
+  /** 'YYYY-MM-DD' or '' (đăng ký, đăng kiểm, bảo hiểm) */
+  ownership_expiry: string;
+  registration_expiry: string;
+  insurance_expiry: string;
+  status: TrailerStatus;
+  /** 1: the paper lock put it in not_ready */
+  status_forced: number;
+  note: string;
+  /** stored photo name ('' = none); see fleetPhotoUrl */
+  photo: string;
+  /** scans of its papers, like a truck's: đăng kiểm, bảo hiểm, giấy đăng ký (stored image names, '' = none) */
+  registration_front: string;
+  registration_back: string;
+  insurance_front: string;
+  insurance_back: string;
+  ownership_front: string;
+  ownership_back: string;
+  created_at: string;
+  updated_at: string;
+  /** the tractor pulling it now, with that tractor's current driver */
+  vehicle: { id: number; plate: string; status: VehicleStatus; photo: string; driver_name: string; since: string; reason: string } | null;
+}
+export interface FleetHitch {
+  id: number;
+  trailer_id: number | null;
+  vehicle_id: number | null;
+  trailer_plate: string;
+  vehicle_plate: string;
+  reason: string;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string;
+}
+export interface FleetHitchPage { items: FleetHitch[]; total: number }
+/** A tractor after "Ghép rơ moóc" / "Tháo rơ moóc". */
+export interface VehicleTrailerResult extends FleetVehicle {
+  /** the trailer taken off the tractor ('' = none) */
+  replaced: string;
+  /** the tractor the trailer came off ('' = none) */
+  from_plate: string;
+}
+
+export interface HitchResult extends FleetTrailer {
+  /** the trailer taken off the tractor ('' = none) */
+  replaced: string;
+  /** the tractor the trailer came off ('' = none) */
+  from_plate: string;
 }

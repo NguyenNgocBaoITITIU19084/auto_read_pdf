@@ -19,7 +19,7 @@ export interface ColumnFilterLabels {
 interface ColumnValueFilterProps {
   /** Column label, for the button title */
   column: string;
-  /** Distinct values of the column with their row counts; reloaded on every open */
+  /** Distinct values of the column with their row counts (a negative count is not shown); reloaded on every open */
   loadOptions: () => Promise<ColumnValueCount[]>;
   /** Selected values ('' = blank cells); empty = no filter */
   value: string[];
@@ -167,7 +167,7 @@ export const ColumnValueFilter: React.FC<ColumnValueFilterProps> = ({ column, lo
                       className="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 text-primary-600 focus:ring-primary-500"
                     />
                     <span className={`flex-1 truncate ${o.carrier ? '' : 'italic text-slate-400'}`}>{text(o.carrier)}</span>
-                    <span className="text-[10px] text-slate-400 tabular-nums">{o.count}</span>
+                    {o.count >= 0 && <span className="text-[10px] text-slate-400 tabular-nums">{o.count}</span>}
                   </label>
                 ))
               )}

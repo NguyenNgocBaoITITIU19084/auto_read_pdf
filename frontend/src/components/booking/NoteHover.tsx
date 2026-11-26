@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Loader2, StickyNote } from 'lucide-react';
+import { Loader2, Pencil, StickyNote } from 'lucide-react';
 import { NOTE_MAX_LENGTH as NOTE_MAX_LEN } from './bookingForm';
 
 export const NOTE_KEY = 'Ghi chú';
@@ -18,6 +18,9 @@ export interface NoteQuickAddLabels {
   save: string;
   saving: string;
   hint: string;
+  /** with `allowEdit`: the button opening an existing note for editing, and the form's title then */
+  edit?: string;
+  editTitle?: string;
 }
 
 interface NoteHoverProps {
@@ -29,6 +32,11 @@ interface NoteHoverProps {
   /** When set and there is no note, hovering opens a small form to add one. Rejects with an error message on failure. */
   onSave?: (note: string) => Promise<void>;
   addLabels?: NoteQuickAddLabels;
+  /** longest note the quick-add form takes (the booking's by default) */
+  maxLength?: number;
+  /** An existing note can be edited from its card too (a "Sửa" button turns it into the form, filled in; saving it
+   *  empty clears the note). */
+  allowEdit?: boolean;
 }
 
 const CARD_W = 300;
@@ -41,7 +49,7 @@ const HIDE_DELAY = 200;
  * Rendered in a portal with fixed positioning so the table's overflow never clips it.
  */
 export const NoteHover: React.FC<NoteHoverProps> = ({
-  note, title, children, className = '', delay = 250, onSave, addLabels,
+  note, title, children, className = '', delay = 250, onSave, addLabels, maxLength = NOTE_MAX_LEN, allowEdit = false,
 }) => {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -52,10 +60,15 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [editing, setEditing] = useState(false);
 
-  const editable = !note && !!onSave && !!addLabels;
-  // Once the user starts typing, the form stays open until saved, Esc or a click outside.
-  const pinned = editable && (draft.trim() !== '' || saving);
+  // the existing note can be opened for editing from its card (the card then takes the pointer)
+  const canEdit = !!note && allowEdit && !!onSave && !!addLabels;
+  // the card is the form: adding a note, or editing one
+  const editable = (!note || editing) && !!onSave && !!addLabels;
+  const interactive = editable || canEdit;
+  // Once the user starts typing (or opened a note to edit), the form stays open until saved, Esc or a click outside.
+  const pinned = editable && (editing || draft.trim() !== '' || saving);
 
   const clear = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -67,6 +80,7 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
     setPos(null);
     setDraft('');
     setError('');
+    setEditing(false);
   }, []);
   const show = useCallback(() => {
     if (!note && !editable) return;
@@ -76,10 +90,24 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
   const hide = useCallback(() => {
     if (pinned) return;
     clear();
-    if (!editable) return close();
-    // give the pointer time to travel from the anchor into the form
+    if (!interactive) return close();
+    // give the pointer time to travel from the anchor into the card
     timer.current = setTimeout(close, HIDE_DELAY);
-  }, [pinned, editable, close]);
+  }, [pinned, interactive, close]);
+  const startEdit = () => {
+    clear();
+    setDraft(note);
+    setError('');
+    setEditing(true);
+  };
+  // the textarea of a note opened for editing takes the focus, the caret at the end of the note
+  useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editing]);
 
   useEffect(() => clear, []);
 
@@ -93,7 +121,7 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
     const top = a.bottom + GAP + h > vh && a.top - GAP - h > 0 ? a.top - GAP - h : a.bottom + GAP;
     const left = Math.max(8, Math.min(a.left, vw - CARD_W - 8));
     setPos({ top, left });
-  }, [open, note, editable]);
+  }, [open, note, editable, editing]);
 
   useEffect(() => {
     if (!open) return;
@@ -116,8 +144,10 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
 
   const submit = async () => {
     const text = draft.trim();
-    if (!text || saving || !onSave) return;
-    if (text.length > NOTE_MAX_LEN) return;
+    // adding needs some text; editing may clear the note (saved empty)
+    if ((!text && !editing) || saving || !onSave) return;
+    if (text.length > maxLength) return;
+    if (editing && text === note.trim()) return close();
     setSaving(true);
     setError('');
     try {
@@ -152,30 +182,37 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
       className={className}
       onMouseEnter={show}
       onMouseLeave={hide}
-      onFocus={editable ? undefined : show}
-      onBlur={editable ? undefined : hide}
+      onFocus={interactive ? undefined : show}
+      onBlur={interactive ? undefined : hide}
     >
       {children}
       {open && (note || editable) && createPortal(
         <div
           ref={cardRef}
           role={editable ? 'dialog' : 'tooltip'}
-          aria-label={editable ? title : undefined}
+          aria-label={editable ? (editing ? addLabels?.editTitle || title : title) : undefined}
           style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: CARD_W, zIndex: 9999 }}
-          className={`${editable ? '' : 'pointer-events-none '}rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-slate-800 shadow-lg p-3 text-xs cursor-auto`}
-          onMouseEnter={editable ? () => {
+          className={`${interactive ? '' : 'pointer-events-none '}rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-slate-800 shadow-lg p-3 text-xs cursor-auto`}
+          onMouseEnter={interactive ? () => {
             clear();
             // focus only once the pointer is in the card, so hovering rows never steals focus from e.g. the search box
-            inputRef.current?.focus({ preventScroll: true });
+            if (editable) inputRef.current?.focus({ preventScroll: true });
           } : undefined}
-          onMouseLeave={editable ? hide : undefined}
+          onMouseLeave={interactive ? hide : undefined}
           onClick={stop}
           onDoubleClick={stop}
           onMouseDown={stop}
         >
           <div className="flex items-center gap-1.5 mb-1.5 font-semibold text-amber-700 dark:text-amber-400">
             <StickyNote className="w-3.5 h-3.5" />
-            {title}
+            <span className="flex-1">{editing ? addLabels?.editTitle || title : title}</span>
+            {canEdit && !editing && (
+              // mouse-down keeps the focus where it is: the button goes away on click, the textarea takes it
+              <button type="button" onClick={startEdit} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">
+                <Pencil className="w-3 h-3" />{addLabels?.edit}
+              </button>
+            )}
           </div>
           {editable && addLabels ? (
             <div onKeyDown={onFormKeyDown}>
@@ -192,14 +229,14 @@ export const NoteHover: React.FC<NoteHoverProps> = ({
               <div className="mt-1.5 flex items-center justify-between gap-2">
                 <span className="text-[10px] text-slate-400">
                   {addLabels.hint}
-                  <span className={`ml-1.5 tabular-nums ${len > NOTE_MAX_LEN ? 'text-rose-600 dark:text-rose-400' : ''}`}>
-                    {len}/{NOTE_MAX_LEN}
+                  <span className={`ml-1.5 tabular-nums ${len > maxLength ? 'text-rose-600 dark:text-rose-400' : ''}`}>
+                    {len}/{maxLength}
                   </span>
                 </span>
                 <button
                   type="button"
                   onClick={submit}
-                  disabled={saving || !len || len > NOTE_MAX_LEN}
+                  disabled={saving || (!len && !editing) || len > maxLength}
                   className="inline-flex items-center gap-1 rounded-md bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-2.5 py-1 text-[11px] transition-colors"
                 >
                   {saving && <Loader2 className="w-3 h-3 animate-spin" />}
